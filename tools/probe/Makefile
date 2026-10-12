@@ -8,8 +8,8 @@ OUT ?= ../../target/probe
 
 all: $(OUT)/probe.dll $(OUT)/launch.exe
 
-$(OUT)/probe.dll: probe.c | $(OUT)
-	$(CC) $(CFLAGS) -shared -o $@ $< -lws2_32 -luser32
+$(OUT)/probe.dll: probe.c hooks.c probe.h | $(OUT)
+	$(CC) $(CFLAGS) -shared -o $@ probe.c hooks.c -lws2_32 -luser32
 
 $(OUT)/launch.exe: launch.c | $(OUT)
 	$(CC) $(CFLAGS) -o $@ $<

@@ -1,7 +1,9 @@
 /*
  * The probe inside the original: loaded by launch.exe before the game runs,
  * it keeps a log and answers commands, one line each, on a TCP socket on
- * localhost — port $A3PROBE_PORT, 47300 by default. The commands:
+ * localhost — port $A3PROBE_PORT, 47300 by default. From the start,
+ * $A3PROBE_TRACE traces the random draws and $A3PROBE_SRAND fixes the seed of
+ * every srand() (the game seeds with the time). The commands:
  *
  *   ping                 ok probe 1
  *   peek ADDR LEN        ok HEX         reads memory of the game
@@ -9,6 +11,12 @@
  *   windows              ok HWND CLASS X Y W H client X Y W H style S "TITLE"; ...
  *                                       the game's visible top-level windows,
  *                                       topmost first, in screen coordinates
+ *   hooks                ok NAME:STATUS ...
+ *                                       the hooks (hooks.c): on, differs (the
+ *                                       routine starts unexpectedly), off
+ *   counts               ok SOURCE N ...  the random draws so far, by source
+ *   trace PATH|off       ok             writes every draw to PATH (hooks.c)
+ *   srand SEED|off       ok             every later srand() uses SEED
  *   quit                 ok             ends the game
  *
  * Numbers may be hex (0x...) or decimal. Errors answer "error WHAT".
@@ -20,6 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "probe.h"
+
 #define VERSION 1
 #define DEFAULT_PORT 47300
 #define MAX_PEEK 65536
@@ -27,7 +37,7 @@
 static FILE *log_file;
 static CRITICAL_SECTION log_lock;
 
-static void note(const char *format, ...)
+void note(const char *format, ...)
 {
 	if (!log_file)
 		return;
@@ -161,6 +171,26 @@ static BOOL answer(char *line, char *reply, size_t size)
 		}
 	} else if (!strcmp(word, "windows")) {
 		list_windows(reply, size);
+	} else if (!strcmp(word, "hooks")) {
+		report_hooks(reply, size);
+	} else if (!strcmp(word, "counts")) {
+		report_counts(reply, size);
+	} else if (!strcmp(word, "trace")) {
+		char *path = strtok(NULL, "");
+		if (!path)
+			snprintf(reply, size, "error trace PATH|off");
+		else if (trace_draws(strcmp(path, "off") ? path : NULL))
+			snprintf(reply, size, "error cannot write %s", path);
+		else
+			snprintf(reply, size, "ok");
+	} else if (!strcmp(word, "srand")) {
+		char *seed = strtok(NULL, " \t");
+		if (!seed)
+			snprintf(reply, size, "error srand SEED|off");
+		else {
+			fix_crt_seed(strcmp(seed, "off") != 0, (unsigned)strtoul(seed, NULL, 0));
+			snprintf(reply, size, "ok");
+		}
 	} else if (!strcmp(word, "quit")) {
 		snprintf(reply, size, "ok");
 		return TRUE;
@@ -246,6 +276,12 @@ BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID reserved)
 		strcpy(path, "probe.log");
 	log_file = fopen(path, "a");
 	note("probe %d in process %lu", VERSION, GetCurrentProcessId());
+	install_hooks();
+	char trace[MAX_PATH], seed[16];
+	if (GetEnvironmentVariableA("A3PROBE_TRACE", trace, sizeof trace) && trace_draws(trace))
+		note("cannot write the trace %s", trace);
+	if (GetEnvironmentVariableA("A3PROBE_SRAND", seed, sizeof seed))
+		fix_crt_seed(1, (unsigned)strtoul(seed, NULL, 0));
 	HANDLE thread = CreateThread(NULL, 0, serve, NULL, 0, NULL);
 	if (thread)
 		CloseHandle(thread);

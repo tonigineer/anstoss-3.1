@@ -8,7 +8,8 @@
 # probe injected, waits until the probe answers and runs COMMAND in the
 # current directory (by default: waits for the game to end). Then it ends the
 # game and passes COMMAND's exit code on. The probe's and Wine's logs go to
-# runs/ of the oracle; `tools/probe/client.py "shot FILE"` saves the screen.
+# runs/ of the oracle, with the trace of random draws (draws.bin);
+# `tools/probe/client.py "shot FILE"` saves the screen.
 #
 # Without a window manager the game's window stays where the game puts it, so
 # its picture is the same from run to run.
@@ -20,6 +21,12 @@ runs="$oracle/runs"
 export A3PROBE_PORT=${A3PROBE_PORT:-47300}
 export WINEPREFIX="$oracle/prefix" WINEDLLOVERRIDES="mscoree=;mshtml=" WINEDEBUG=${WINEDEBUG:--all}
 export A3PROBE_LOG="Z:${runs//\//\\}\\probe.log"
+# Every random draw, from the start (tools/probe/draws.py reads it); set it
+# empty for none.
+export A3PROBE_TRACE=${A3PROBE_TRACE-"Z:${runs//\//\\}\\draws.bin"}
+# The game seeds rand() with the time; the oracle with this, so that runs
+# repeat. Set it empty for the time.
+export A3PROBE_SRAND=${A3PROBE_SRAND-1}
 
 [ -f "$WINEPREFIX/system.reg" ] || { echo "run tools/oracle/setup.sh first" >&2; exit 1; }
 command -v Xvfb > /dev/null || { echo "Xvfb is missing (xorg-server-xvfb)" >&2; exit 1; }
