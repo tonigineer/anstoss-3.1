@@ -6,12 +6,9 @@
  *   ping                 ok probe 1
  *   peek ADDR LEN        ok HEX         reads memory of the game
  *   poke ADDR HEX        ok             writes it
- *   windows              ok HWND CLASS X Y W H "TITLE"; ...
+ *   windows              ok HWND CLASS X Y W H client X Y W H style S "TITLE"; ...
  *                                       the game's visible top-level windows,
- *                                       topmost first
- *   capture PATH         ok             saves the game's screen, 640×480 from
- *                                       the top left, as its windows draw it,
- *                                       as a 24-bit BMP
+ *                                       topmost first, in screen coordinates
  *   quit                 ok             ends the game
  *
  * Numbers may be hex (0x...) or decimal. Errors answer "error WHAT".
@@ -122,64 +119,6 @@ static void list_windows(char *reply, size_t size)
 	}
 }
 
-/* Draws the game's windows bottom up into a bitmap of the game's screen and
- * writes it to path. The menus blit to the top left of the screen, wherever
- * the main window is. */
-static void capture(const char *path, char *reply, size_t size)
-{
-	int width = 640, height = 480;
-	struct windows windows = {.count = 0};
-	EnumWindows(collect, (LPARAM)&windows);
-	BITMAPINFOHEADER header = {
-		.biSize = sizeof header,
-		.biWidth = width,
-		.biHeight = height,
-		.biPlanes = 1,
-		.biBitCount = 24,
-		.biCompression = BI_RGB,
-	};
-	void *pixels;
-	HDC screen = GetDC(NULL), canvas = CreateCompatibleDC(screen);
-	HBITMAP bitmap = CreateDIBSection(screen, (BITMAPINFO *)&header, DIB_RGB_COLORS, &pixels,
-					  NULL, 0);
-	if (!bitmap) {
-		snprintf(reply, size, "error cannot make a %dx%d bitmap", width, height);
-		DeleteDC(canvas);
-		ReleaseDC(NULL, screen);
-		return;
-	}
-	HGDIOBJ old = SelectObject(canvas, bitmap);
-	PatBlt(canvas, 0, 0, width, height, BLACKNESS);
-	for (int i = windows.count - 1; i >= 0; i--) {
-		RECT r;
-		GetWindowRect(windows.list[i], &r);
-		HDC from = GetWindowDC(windows.list[i]);
-		BitBlt(canvas, r.left, r.top, r.right - r.left, r.bottom - r.top, from, 0, 0, SRCCOPY);
-		ReleaseDC(windows.list[i], from);
-	}
-	GdiFlush();
-	DWORD stride = (width * 3 + 3) & ~3u, image = stride * height;
-	BITMAPFILEHEADER file = {
-		.bfType = 0x4d42,
-		.bfSize = sizeof file + sizeof header + image,
-		.bfOffBits = sizeof file + sizeof header,
-	};
-	FILE *out = fopen(path, "wb");
-	if (!out) {
-		snprintf(reply, size, "error cannot write %s", path);
-	} else {
-		fwrite(&file, sizeof file, 1, out);
-		fwrite(&header, sizeof header, 1, out);
-		fwrite(pixels, image, 1, out);
-		fclose(out);
-		snprintf(reply, size, "ok");
-	}
-	SelectObject(canvas, old);
-	DeleteObject(bitmap);
-	DeleteDC(canvas);
-	ReleaseDC(NULL, screen);
-}
-
 /* Answers one command line into reply; whether the game ends after it. */
 static BOOL answer(char *line, char *reply, size_t size)
 {
@@ -222,12 +161,6 @@ static BOOL answer(char *line, char *reply, size_t size)
 		}
 	} else if (!strcmp(word, "windows")) {
 		list_windows(reply, size);
-	} else if (!strcmp(word, "capture")) {
-		char *path = strtok(NULL, "");
-		if (!path)
-			snprintf(reply, size, "error capture PATH");
-		else
-			capture(path, reply, size);
 	} else if (!strcmp(word, "quit")) {
 		snprintf(reply, size, "ok");
 		return TRUE;
