@@ -1,0 +1,16 @@
+[package]
+name = "anstoss3-menu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.20", default-features = false, features = ["ui", "bevy_audio", "wav"] }
+chrono = { version = "0.4.40", default-features = false, features = ["clock"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "bmp", "png"] }
+
+# Bevy is unbearably slow at opt-level 0; optimise dependencies even in dev builds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
