@@ -19,6 +19,9 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 oracle=${ANSTOSS3_ORACLE:-"$HOME/.cache/anstoss3-menu/oracle"}
 runs="$oracle/runs"
 export A3PROBE_PORT=${A3PROBE_PORT:-47300}
+# WINE picks another Wine, as for setup.sh; its wineserver lies beside it.
+wine=${WINE:-wine}
+wineserver=$(dirname "$(command -v "$wine")")/wineserver
 export WINEPREFIX="$oracle/prefix" WINEDLLOVERRIDES="mscoree=;mshtml=" WINEDEBUG=${WINEDEBUG:--all}
 export A3PROBE_LOG="Z:${runs//\//\\}\\probe.log"
 # Every random draw, from the start (tools/probe/draws.py reads it); set it
@@ -38,7 +41,7 @@ screen=${A3ORACLE_SCREEN:-93}
 Xvfb ":$screen" -screen 0 1024x768x24 -nolisten tcp > "$runs/xvfb.log" 2>&1 &
 xvfb=$!
 finish() {
-    wineserver -k 2> /dev/null || true
+    "$wineserver" -k 2> /dev/null || true
     kill "$xvfb" 2> /dev/null || true
 }
 trap finish EXIT
@@ -48,7 +51,7 @@ unset WAYLAND_DISPLAY
 
 caller=$PWD
 cd "$WINEPREFIX/drive_c/GOG Games/ANSTOSS 3"
-wine "$here/target/probe/launch.exe" anstoss3.exe > "$runs/wine.log" 2>&1 &
+"$wine" "$here/target/probe/launch.exe" anstoss3.exe > "$runs/wine.log" 2>&1 &
 game=$!
 cd "$caller"
 probe() { python3 "$here/tools/probe/client.py" "$@"; }

@@ -190,16 +190,91 @@ static void __cdecl wait_for_screen(short *request)
 }
 
 /* FUN_007a0bfd: a modal dialog's loop; the vtable tells the class. */
+static void *modals[16];
+static volatile LONG modal_count;
 typedef int(__thiscall *modal_fn)(void *);
 static modal_fn modal_original;
 
 static int __thiscall modal(void *dialog)
 {
 	unsigned class = *(unsigned *)dialog;
+	LONG depth = InterlockedIncrement(&modal_count);
+	if (depth <= (LONG)(sizeof modals / sizeof *modals))
+		modals[depth - 1] = dialog;
 	event("dialog class=%#x this=%p", class, dialog);
 	int result = modal_original(dialog);
 	event("dialog-end class=%#x result=%d", class, result);
+	InterlockedDecrement(&modal_count);
 	return result;
+}
+
+static BOOL is_modal(void *dialog)
+{
+	LONG depth = modal_count;
+	for (LONG i = 0; i < depth && i < (LONG)(sizeof modals / sizeof *modals); i++) {
+		if (modals[i] == dialog)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* The dialogs the game shows, in the order shown: each a CMyDialog, its id
+ * in the dialog file at +0xb4, flags at +0x44, of which 0x10 is set while it
+ * is up, and the window it belongs to at +0x50. FUN_007a0a79 shows one,
+ * FUN_0079f127 destroys it; those in DoModal are marked modal. */
+#define DIALOG_ID(dialog) (*(int *)((char *)(dialog) + 0xb4))
+#define DIALOG_FLAGS(dialog) (*(unsigned *)((char *)(dialog) + 0x44))
+#define DIALOG_PARENT(dialog) (*(void **)((char *)(dialog) + 0x50))
+static CRITICAL_SECTION dialogs_lock;
+static void *dialogs[64];
+static int dialog_count;
+static volatile LONG dialogs_shown;
+
+typedef int(__thiscall *show_fn)(void *);
+typedef void(__thiscall *destroy_fn)(void *);
+static show_fn show_original;
+static destroy_fn destroy_original;
+
+static void forget(void *dialog)
+{
+	for (int i = 0; i < dialog_count; i++) {
+		if (dialogs[i] == dialog) {
+			memmove(&dialogs[i], &dialogs[i + 1], (dialog_count - i - 1) * sizeof *dialogs);
+			dialog_count--;
+			return;
+		}
+	}
+}
+
+static int __thiscall show(void *dialog)
+{
+	EnterCriticalSection(&dialogs_lock);
+	forget(dialog);
+	if (dialog_count < (int)(sizeof dialogs / sizeof *dialogs))
+		dialogs[dialog_count++] = dialog;
+	InterlockedIncrement(&dialogs_shown);
+	LeaveCriticalSection(&dialogs_lock);
+	event("show dialog=%d this=%p", DIALOG_ID(dialog), dialog);
+	return show_original(dialog);
+}
+
+static void __thiscall destroy(void *dialog)
+{
+	EnterCriticalSection(&dialogs_lock);
+	forget(dialog);
+	LeaveCriticalSection(&dialogs_lock);
+	destroy_original(dialog);
+}
+
+void report_dialogs(char *reply, size_t size)
+{
+	EnterCriticalSection(&dialogs_lock);
+	size_t used = snprintf(reply, size, "ok %ld", dialogs_shown);
+	for (int i = 0; i < dialog_count && used < size; i++)
+		used += snprintf(reply + used, size - used, " %d:%p:%#x:%p:%d", DIALOG_ID(dialogs[i]),
+				 dialogs[i], DIALOG_FLAGS(dialogs[i]), DIALOG_PARENT(dialogs[i]),
+				 is_modal(dialogs[i]));
+	LeaveCriticalSection(&dialogs_lock);
 }
 
 /* FUN_006da3a9: one round of the game cycle. */
@@ -258,6 +333,8 @@ static struct hook hooks[] = {
 	HOOK("cycle", 0x6da3a9, "\x55\x8b\xec\x83\xec\x24", cycle, cycle_original),
 	HOOK("state", 0x6c03d7, "\x55\x8b\xec\x6a\x00", state, state_original),
 	HOOK("autosave", 0x6ecfeb, "\x55\x8b\xec\x6a\xff", autosave, autosave_original),
+	HOOK("show", 0x7a0a79, "\x55\x8b\xec\x6a\xff", show, show_original),
+	HOOK("destroy", 0x79f127, "\x55\x8b\xec\x6a\xff", destroy, destroy_original),
 };
 
 static unsigned char *trampolines;
@@ -354,6 +431,7 @@ static void patch_import(struct import *import)
 void install_hooks(void)
 {
 	InitializeCriticalSection(&trace_lock);
+	InitializeCriticalSection(&dialogs_lock);
 	trampolines = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 	for (size_t i = 0; i < sizeof hooks / sizeof *hooks; i++)
 		install(&hooks[i]);

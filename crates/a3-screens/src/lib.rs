@@ -10,6 +10,7 @@ pub mod classic;
 pub mod controls;
 pub mod game;
 pub mod host;
+pub mod original;
 pub mod pointer;
 pub mod screens;
 pub mod script;

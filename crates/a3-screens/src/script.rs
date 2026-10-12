@@ -28,7 +28,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
-use a3_files::rch::Kind;
+use a3_files::rch::{Dialog, Kind};
 
 use crate::controls::button::{CANCEL_IMAGE, OK_IMAGE, with_image};
 use crate::game::Game;
@@ -45,11 +45,11 @@ const DEFAULT_SEED: u64 = 1;
 
 /// A parsed script.
 pub struct Script {
-    seed: u64,
-    lines: Vec<(usize, Line)>,
+    pub(crate) seed: u64,
+    pub(crate) lines: Vec<(usize, Line)>,
 }
 
-enum Line {
+pub(crate) enum Line {
     On(u16, Vec<Action>),
     Once(u16, Vec<Action>),
     Until(Until),
@@ -57,14 +57,14 @@ enum Line {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Until {
+pub(crate) enum Until {
     Dialog(u16),
     Day(usize),
     End,
 }
 
 #[derive(Clone, Debug)]
-enum Action {
+pub(crate) enum Action {
     Ok,
     Cancel,
     Press(u16),
@@ -95,6 +95,10 @@ pub enum Error {
     Ended,
     /// Days to repeat before there is a season.
     NoSeason,
+    /// What the probe in the original said went wrong, or that it is gone.
+    Probe(String),
+    /// An action the original cannot be driven to do yet.
+    Unsupported(u16, String),
 }
 
 impl fmt::Display for Error {
@@ -113,6 +117,10 @@ impl fmt::Display for Error {
             }
             Self::Ended => write!(f, "the game ended first"),
             Self::NoSeason => write!(f, "there is no season to count days in"),
+            Self::Probe(what) => write!(f, "the probe: {what}"),
+            Self::Unsupported(dialog, action) => {
+                write!(f, "dialog {dialog}: the original cannot be driven to {action} yet")
+            }
         }
     }
 }
@@ -298,29 +306,13 @@ impl<'a> Runner<'a> {
     /// Acts on the controls of the dialog `shown`.
     fn act(&mut self, shown: u16, action: &Action) -> Result<(), Error> {
         self.log.push(format!("  {action:?}"));
-        let (game, dialog) = (self.game, named(shown));
+        let game = self.game;
         let controls = &game.dialogs[&shown];
-        let find = |id: u16| control(controls, id).ok_or(Error::NoControl { dialog, control: id });
-        let button =
-            |image: u16| with_image(controls, image).ok_or(Error::NoControl { dialog, control: 0 });
         let target = match *action {
-            Action::Ok => Target::Button(button(OK_IMAGE)?),
-            Action::Cancel => Target::Button(button(CANCEL_IMAGE)?),
-            Action::Press(id) => Target::Button(find(id)?),
-            Action::Click(id) => Target::Control(find(id)?),
-            Action::Bar(item) => {
-                let bar = controls.controls.iter().position(|c| matches!(c.kind, Kind::Bar { .. }));
-                Target::Option {
-                    control: bar.ok_or(Error::NoControl { dialog, control: 0 })?,
-                    item,
-                }
-            }
-            Action::Choose(id, item) => Target::Option { control: find(id)?, item },
-            Action::Row(id, row) => Target::Row { control: find(id)?, row },
-            Action::Spin(id, up) => Target::Spin { control: find(id)?, up },
-            Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
-            Action::Type(id, ref text) => {
-                let field = find(id)?;
+            Action::Type(_, ref text) => {
+                let Target::Edit(field) = target_of(controls, named(shown), action)? else {
+                    unreachable!("a field to type into");
+                };
                 let change = self.host.input(game, Target::Edit(field), false);
                 self.change(change);
                 self.host.view_mut().set_text(field, "");
@@ -328,6 +320,7 @@ impl<'a> Runner<'a> {
                 return Ok(());
             }
             Action::Wait => return self.wait(shown),
+            _ => target_of(controls, named(shown), action)?,
         };
         let change = self.host.input(game, target, false);
         self.change(change);
@@ -353,6 +346,30 @@ impl<'a> Runner<'a> {
             self.log.push(format!("screen {}", named(self.host.view().id)));
         }
     }
+}
+
+/// What an action acts on in `controls`, the dialog `dialog`; `wait` acts on
+/// nothing.
+pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Result<Target, Error> {
+    let find = |id: u16| control(controls, id).ok_or(Error::NoControl { dialog, control: id });
+    let button =
+        |image: u16| with_image(controls, image).ok_or(Error::NoControl { dialog, control: 0 });
+    Ok(match *action {
+        Action::Ok => Target::Button(button(OK_IMAGE)?),
+        Action::Cancel => Target::Button(button(CANCEL_IMAGE)?),
+        Action::Press(id) => Target::Button(find(id)?),
+        Action::Click(id) => Target::Control(find(id)?),
+        Action::Bar(item) => {
+            let bar = controls.controls.iter().position(|c| matches!(c.kind, Kind::Bar { .. }));
+            Target::Option { control: bar.ok_or(Error::NoControl { dialog, control: 0 })?, item }
+        }
+        Action::Choose(id, item) => Target::Option { control: find(id)?, item },
+        Action::Row(id, row) => Target::Row { control: find(id)?, row },
+        Action::Spin(id, up) => Target::Spin { control: find(id)?, up },
+        Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
+        Action::Type(id, _) => Target::Edit(find(id)?),
+        Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
+    })
 }
 
 /// A dialog the replica shows by its id in the game's dialog file.
@@ -396,9 +413,11 @@ mod tests {
         assert_eq!(season.day, 42);
         assert!(season.managers[0].club.is_some() && season.managers[1].club.is_none());
         assert_eq!(seen(&runner, WEEK), 6, "{}", runner.log.join("\n"));
-        // Every turn ends with the whistle.
+        // Every turn ends with the whistle, one for each manager before each
+        // week; the script stops at the first turn of day 42. (The original
+        // gives the manager without a club no turns.)
         let whistles = runner.log.iter().filter(|line| line.trim() == "Bar(18)").count();
-        assert_eq!(whistles, 2 * 7);
+        assert_eq!(whistles, 2 * 6);
     }
 
     #[test]

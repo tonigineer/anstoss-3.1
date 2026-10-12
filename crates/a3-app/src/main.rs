@@ -15,8 +15,11 @@
 //! `--export-backgrounds` writes the artwork of every remastered dialog to the
 //! cache directory and exits, for `tools/outpaint.py` to extend to 16:9.
 //! `--script <file>` plays a script without a window, prints what came up
-//! and exits (see [`a3_screens::script`]). `--screens` prints the dialogs
-//! the replica's screens run, one id a line.
+//! and exits (see [`a3_screens::script`]); `--original <file>` plays it on
+//! the original instead, through the probe in it on `$A3PROBE_PORT` (see
+//! [`a3_screens::original`], `tools/oracle/run.sh`), and with `--explore`
+//! answers the dialogs the script does not know with OK. `--screens` prints the
+//! dialogs the replica's screens run, one id a line.
 
 mod dialog;
 mod fps;
@@ -31,6 +34,9 @@ use bevy::prelude::*;
 
 const EXPORT_FLAG: &str = "--export-backgrounds";
 const SCRIPT_FLAG: &str = "--script";
+const ORIGINAL_FLAG: &str = "--original";
+const EXPLORE_FLAG: &str = "--explore";
+const DEFAULT_PROBE_PORT: u16 = 47300;
 const SCREENS_FLAG: &str = "--screens";
 const DEFAULT_DIR: &str = ".local/share/bottles/bottles/ANSTOSS-3/drive_c/GOG Games/ANSTOSS 3";
 /// Fonts for the remastered look, in order of preference.
@@ -87,9 +93,14 @@ fn main() -> AppExit {
             return AppExit::error();
         }
     };
+    // The dialogs as the screens show them — as the original does, with the
+    // menu bar of its main screens, which the dialog file leaves out.
     dialog::compose(&mut game);
+    if let Some(script) = &args.original {
+        return play(&game, script, Some(args.explore));
+    }
     if let Some(script) = &args.script {
-        return play(&game, script);
+        return play(&game, script, None);
     }
     if args.export {
         return match dialog::export_backgrounds(&game) {
@@ -130,6 +141,8 @@ struct Args {
     dir: Option<PathBuf>,
     export: bool,
     script: Option<PathBuf>,
+    original: Option<PathBuf>,
+    explore: bool,
     screens: bool,
 }
 
@@ -144,6 +157,10 @@ impl Args {
                 args.screens = true;
             } else if word == SCRIPT_FLAG {
                 args.script = words.next().map(PathBuf::from);
+            } else if word == ORIGINAL_FLAG {
+                args.original = words.next().map(PathBuf::from);
+            } else if word == EXPLORE_FLAG {
+                args.explore = true;
             } else if args.dir.is_none() {
                 args.dir = Some(PathBuf::from(word));
             }
@@ -162,9 +179,10 @@ impl Args {
     }
 }
 
-/// Plays a script without a window and prints every screen that came up
-/// and every action.
-fn play(game: &Game, path: &Path) -> AppExit {
+/// Plays a script without a window, on the replica or — with whether to
+/// explore — the original, and prints every screen that came up and every
+/// action.
+fn play(game: &Game, path: &Path, original: Option<bool>) -> AppExit {
     let script = match std::fs::read_to_string(path) {
         Ok(text) => a3_screens::script::Script::parse(&text),
         Err(err) => {
@@ -179,8 +197,21 @@ fn play(game: &Game, path: &Path) -> AppExit {
             return AppExit::error();
         }
     };
-    let (runner, result) = a3_screens::script::Runner::play(game, &script);
-    runner.log.iter().for_each(|line| println!("{line}"));
+    let (log, result) = if let Some(explore) = original {
+        let port = std::env::var("A3PROBE_PORT").ok().and_then(|p| p.parse().ok());
+        match a3_screens::original::Probe::connect(port.unwrap_or(DEFAULT_PROBE_PORT)) {
+            Ok(probe) => {
+                let (original, result) =
+                    a3_screens::original::Original::play(game, probe, &script, explore);
+                (original.log, result)
+            }
+            Err(err) => (Vec::new(), Err(err)),
+        }
+    } else {
+        let (runner, result) = a3_screens::script::Runner::play(game, &script);
+        (runner.log, result)
+    };
+    log.iter().for_each(|line| println!("{line}"));
     match result {
         Ok(()) => AppExit::Success,
         Err(err) => {

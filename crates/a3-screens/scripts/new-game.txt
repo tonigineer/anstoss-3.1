@@ -1,4 +1,7 @@
-# A new game in Germany for two players without a club.
+# A new game in Germany for two players without a club, played to the eve
+# of the first matchday. It plays the original too (anstoss3-menu
+# --original): the lines for dialogs the replica does not show yet are the
+# original's.
 seed 7
 on 9 choose 4771 0; ok
 on 140 ok
@@ -17,10 +20,24 @@ once 99 press 2
 once 384 press 4739
 once 99 press 2
 on 384 press 4741
-until dialog 381
+# The original's season start and its news of the week: negotiations,
+# settings, draws, effects, the transfer list and who left it, the
+# appointments, cup bonuses, events, the cup matches and an alert.
+on 422 ok
+on 419 ok
+on 420 ok
+on 421 ok
+on 287 ok
+on 321 ok
+on 25 ok
+on 341 ok
+on 51 ok
+on 96 ok
+on 161 ok
+on 380 press 4731
 # Week after week, each takes a turn and whistles it off.
 on 381 wait
 on 147 click bar 18
 on 302 click bar 18
 on 2 wait
-until dialog 9
+until day 42

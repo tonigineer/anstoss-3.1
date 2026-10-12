@@ -11,6 +11,16 @@
  *   windows              ok HWND CLASS X Y W H client X Y W H style S "TITLE"; ...
  *                                       the game's visible top-level windows,
  *                                       topmost first, in screen coordinates
+ *   click X Y            ok             clicks the left button at X, Y of the
+ *                                       game's 640×480 screen, as the mouse
+ *                                       would (SendInput)
+ *   key VK               ok             presses and releases a virtual key
+ *   text TEXT            ok             types TEXT (Windows-1252) with the keys
+ *                                       of the keyboard layout
+ *   dialogs              ok SHOWN ID:THIS:FLAGS:PARENT:MODAL ...
+ *                                       how many dialogs the game has shown,
+ *                                       and those not destroyed, oldest first
+ *                                       (flag 0x10: up; MODAL 1 in DoModal)
  *   hooks                ok NAME:STATUS ...
  *                                       the hooks (hooks.c): on, differs (the
  *                                       routine starts unexpectedly), off
@@ -129,6 +139,75 @@ static void list_windows(char *reply, size_t size)
 	}
 }
 
+/* The game's main window: the bottommost of its visible top-level windows. */
+static HWND main_window(void)
+{
+	struct windows windows = {.count = 0};
+	EnumWindows(collect, (LPARAM)&windows);
+	return windows.count ? windows.list[windows.count - 1] : NULL;
+}
+
+/* Input as the hardware gives it, so the game sees it however it reads it. */
+static void inject(INPUT *inputs, int count)
+{
+	for (int i = 0; i < count; i++) {
+		SendInput(1, &inputs[i], sizeof *inputs);
+		Sleep(30);
+	}
+}
+
+static void click(int x, int y, char *reply, size_t size)
+{
+	HWND window = main_window();
+	POINT at = {x, y};
+	if (!window || !ClientToScreen(window, &at)) {
+		snprintf(reply, size, "error no game window");
+		return;
+	}
+	int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
+	INPUT inputs[3] = {{.type = INPUT_MOUSE}, {.type = INPUT_MOUSE}, {.type = INPUT_MOUSE}};
+	inputs[0].mi.dx = (at.x * 65535 + width / 2) / (width - 1);
+	inputs[0].mi.dy = (at.y * 65535 + height / 2) / (height - 1);
+	inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+	inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+	inputs[2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+	inject(inputs, 3);
+	snprintf(reply, size, "ok");
+}
+
+/* Presses and releases a virtual key, with Shift, Ctrl and Alt as the bits
+ * 1, 2, 4 of shift say. */
+static void key(WORD code, int shift)
+{
+	static const WORD modifiers[3] = {VK_SHIFT, VK_CONTROL, VK_MENU};
+	INPUT inputs[8];
+	int count = 0;
+	for (int i = 0; i < 3; i++) {
+		if (shift & 1 << i)
+			inputs[count++] = (INPUT){.type = INPUT_KEYBOARD, .ki.wVk = modifiers[i]};
+	}
+	inputs[count++] = (INPUT){.type = INPUT_KEYBOARD, .ki.wVk = code};
+	inputs[count++] = (INPUT){.type = INPUT_KEYBOARD, .ki.wVk = code, .ki.dwFlags = KEYEVENTF_KEYUP};
+	for (int i = 2; i >= 0; i--) {
+		if (shift & 1 << i)
+			inputs[count++] = (INPUT){.type = INPUT_KEYBOARD,
+						  .ki.wVk = modifiers[i],
+						  .ki.dwFlags = KEYEVENTF_KEYUP};
+	}
+	inject(inputs, count);
+}
+
+/* Types a Windows-1252 character with the keys the keyboard layout has for
+ * it: the game reads keys, not characters. */
+static BOOL type(char c)
+{
+	SHORT scan = VkKeyScanExA(c, GetKeyboardLayout(0));
+	if (scan == -1)
+		return FALSE;
+	key(LOBYTE(scan), HIBYTE(scan));
+	return TRUE;
+}
+
 /* Answers one command line into reply; whether the game ends after it. */
 static BOOL answer(char *line, char *reply, size_t size)
 {
@@ -171,6 +250,36 @@ static BOOL answer(char *line, char *reply, size_t size)
 		}
 	} else if (!strcmp(word, "windows")) {
 		list_windows(reply, size);
+	} else if (!strcmp(word, "click")) {
+		char *x = strtok(NULL, " \t"), *y = strtok(NULL, " \t");
+		if (!x || !y)
+			snprintf(reply, size, "error click X Y");
+		else
+			click(atoi(x), atoi(y), reply, size);
+	} else if (!strcmp(word, "key")) {
+		char *code = strtok(NULL, " \t");
+		if (!code) {
+			snprintf(reply, size, "error key VK");
+		} else {
+			key((WORD)strtoul(code, NULL, 0), 0);
+			snprintf(reply, size, "ok");
+		}
+	} else if (!strcmp(word, "text")) {
+		char *text = strtok(NULL, "");
+		if (!text) {
+			snprintf(reply, size, "error text TEXT");
+		} else {
+			/* The client sends Windows-1252. */
+			char *c = text;
+			while (*c && type(*c))
+				c++;
+			if (*c)
+				snprintf(reply, size, "error no key for %#x", (unsigned char)*c);
+			else
+				snprintf(reply, size, "ok");
+		}
+	} else if (!strcmp(word, "dialogs")) {
+		report_dialogs(reply, size);
 	} else if (!strcmp(word, "hooks")) {
 		report_hooks(reply, size);
 	} else if (!strcmp(word, "counts")) {

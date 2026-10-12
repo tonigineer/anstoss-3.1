@@ -11,6 +11,9 @@ void note(const char *format, ...) __attribute__((format(printf, 1, 2)));
 void install_hooks(void);
 /* "name on|off|differs ..." for each hook. */
 void report_hooks(char *reply, size_t size);
+/* "SHOWN ID:THIS:FLAGS:PARENT:MODAL ...": how many dialogs were shown, and
+ * those still there, in the order shown. */
+void report_dialogs(char *reply, size_t size);
 /* The draws so far, by source. */
 void report_counts(char *reply, size_t size);
 /* Starts writing every draw to path, or stops (path NULL); 0 on success. */
