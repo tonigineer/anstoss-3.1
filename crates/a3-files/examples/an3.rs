@@ -63,8 +63,18 @@ fn report(saves: &[Save]) -> io::Result<()> {
     if differences.header {
         writeln!(out, "the headers differ: {:?} against {:?}", saves[0].header, saves[1].header)?;
     }
+    let mut real_time = 0;
     for difference in &differences.blocks {
-        writeln!(out, "{difference}")?;
+        if an3::REAL_TIME.contains(&difference.name.as_str()) {
+            real_time += 1;
+            writeln!(out, "{difference} (real time)")?;
+        } else {
+            writeln!(out, "{difference}")?;
+        }
     }
-    writeln!(out, "{} blocks differ", differences.blocks.len())
+    writeln!(
+        out,
+        "{} blocks differ, {real_time} of them in real time",
+        differences.blocks.len()
+    )
 }

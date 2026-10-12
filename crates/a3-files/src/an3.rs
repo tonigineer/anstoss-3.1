@@ -36,6 +36,11 @@ use crate::cpr::{inflate, invalid};
 /// The oldest version the original loads.
 const OLDEST: u16 = 50;
 
+/// Blocks that hold real time rather than the game's: field 1 of a timer
+/// at 0xae6e30, seconds of `clock()` (`FUN_00788410`). Two runs of the same
+/// game, with the same random numbers, differ in them.
+pub const REAL_TIME: &[&str] = &["0xae6e34"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
     /// `DAT_01b9934c`.
