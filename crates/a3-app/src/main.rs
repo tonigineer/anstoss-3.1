@@ -15,7 +15,8 @@
 //! `--export-backgrounds` writes the artwork of every remastered dialog to the
 //! cache directory and exits, for `tools/outpaint.py` to extend to 16:9.
 //! `--script <file>` plays a script without a window, prints what came up
-//! and exits (see [`a3_screens::script`]).
+//! and exits (see [`a3_screens::script`]). `--screens` prints the dialogs
+//! the replica's screens run, one id a line.
 
 mod dialog;
 mod fps;
@@ -30,6 +31,7 @@ use bevy::prelude::*;
 
 const EXPORT_FLAG: &str = "--export-backgrounds";
 const SCRIPT_FLAG: &str = "--script";
+const SCREENS_FLAG: &str = "--screens";
 const DEFAULT_DIR: &str = ".local/share/bottles/bottles/ANSTOSS-3/drive_c/GOG Games/ANSTOSS 3";
 /// Fonts for the remastered look, in order of preference.
 const REGULAR_FONTS: [&str; 2] = [
@@ -68,6 +70,10 @@ pub struct Fonts {
 
 fn main() -> AppExit {
     let args = Args::read();
+    if args.screens {
+        a3_screens::host::Host::dialogs().iter().for_each(|id| println!("{id}"));
+        return AppExit::Success;
+    }
     let dir = args.game_dir();
     if !dir.join("anstoss3.exe").is_file() {
         eprintln!("No ANSTOSS 3 installation found at {}", dir.display());
@@ -124,6 +130,7 @@ struct Args {
     dir: Option<PathBuf>,
     export: bool,
     script: Option<PathBuf>,
+    screens: bool,
 }
 
 impl Args {
@@ -133,6 +140,8 @@ impl Args {
         while let Some(word) = words.next() {
             if word == EXPORT_FLAG {
                 args.export = true;
+            } else if word == SCREENS_FLAG {
+                args.screens = true;
             } else if word == SCRIPT_FLAG {
                 args.script = words.next().map(PathBuf::from);
             } else if args.dir.is_none() {

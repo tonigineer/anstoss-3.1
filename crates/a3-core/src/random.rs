@@ -17,6 +17,7 @@ impl Random {
         Self { s1, s2 }
     }
 
+    /// Original: FUN_0078a8f4, on the state at `DAT_0089dcc0`/`DAT_0089dcc4`.
     fn next(&mut self) -> i64 {
         self.s1 = 40_014 * self.s1 % M1;
         self.s2 = 40_692 * self.s2 % M2;
@@ -25,6 +26,8 @@ impl Random {
     }
 
     /// A number below `n`; 0 when there is no choice.
+    ///
+    /// Original: FUN_0078a810
     pub fn below(&mut self, n: u32) -> u32 {
         if n < 2 {
             return 0;
