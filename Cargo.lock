@@ -3,6 +3,47 @@
 version = 4
 
 [[package]]
+name = "a3-app"
+version = "0.1.0"
+dependencies = [
+ "a3-core",
+ "a3-files",
+ "a3-screens",
+ "bevy",
+ "chrono",
+ "image",
+]
+
+[[package]]
+name = "a3-core"
+version = "0.1.0"
+dependencies = [
+ "a3-files",
+ "chrono",
+ "tracing",
+]
+
+[[package]]
+name = "a3-files"
+version = "0.1.0"
+dependencies = [
+ "bevy_math",
+ "image",
+]
+
+[[package]]
+name = "a3-screens"
+version = "0.1.0"
+dependencies = [
+ "a3-core",
+ "a3-files",
+ "bevy_math",
+ "chrono",
+ "image",
+ "tracing",
+]
+
+[[package]]
 name = "ab_glyph"
 version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -198,15 +239,6 @@ dependencies = [
  "anstyle",
  "memchr",
  "unicode-width",
-]
-
-[[package]]
-name = "anstoss3-menu"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "chrono",
- "image",
 ]
 
 [[package]]

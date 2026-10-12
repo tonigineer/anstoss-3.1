@@ -1,0 +1,9 @@
+[package]
+name = "a3-files"
+description = "Reading the files of an ANSTOSS 3 installation; no game rules."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy_math.workspace = true
+image.workspace = true

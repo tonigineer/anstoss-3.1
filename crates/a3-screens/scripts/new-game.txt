@@ -1,0 +1,26 @@
+# A new game in Germany for two players without a club.
+seed 7
+on 9 choose 4771 0; ok
+on 140 ok
+on 209 choose 4772 1; ok
+once 212 type 3121 Anna; type 3122 Alpha; ok
+once 212 type 3121 Bert; type 3122 Beta; ok
+on 374 ok
+on 491 ok
+on 256 ok
+# The first manager signs with the first club that offers; the second
+# turns every offer down, after saying no once.
+once 99 choose 2063 0
+on 103 choose 2107 1
+on 104 press 2115
+once 99 press 2
+once 384 press 4739
+once 99 press 2
+on 384 press 4741
+until dialog 381
+# Week after week, each takes a turn and whistles it off.
+on 381 wait
+on 147 click bar 18
+on 302 click bar 18
+on 2 wait
+until dialog 9

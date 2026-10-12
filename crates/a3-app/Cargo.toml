@@ -1,0 +1,17 @@
+[package]
+name = "a3-app"
+description = "The replica's window: Bevy, input, the looks, intro, music and sound."
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "anstoss3-menu"
+path = "src/main.rs"
+
+[dependencies]
+a3-core.workspace = true
+a3-files.workspace = true
+a3-screens.workspace = true
+bevy.workspace = true
+chrono = { workspace = true, features = ["clock"] }
+image.workspace = true

@@ -1,0 +1,77 @@
+//! The small popups the game asks and tells things in: a question to answer
+//! yes or no, and a notice to take in.
+
+pub use a3_core::cycle::dialogs::{NOTICE, QUESTION};
+
+use crate::pointer::Target;
+use crate::screens::{Args, Cx, Outcome, Reply, Screen, control, set};
+use crate::view::View;
+
+const QUESTION_TEXT: u16 = 4738;
+const QUESTION_OK: u16 = 4741;
+const NOTICE_TEXT: u16 = 4730;
+/// The ball of the question, playing its frames forth and back.
+const QUESTION_BALL: u16 = 4740;
+const QUESTION_BALL_FRAMES: std::ops::RangeInclusive<u16> = 1745..=1753;
+/// The ball of the other small popups, looping.
+const BALLS: [u16; 3] = [1336, 2116, 4732];
+const BALL_FRAMES: std::ops::RangeInclusive<u16> = 1762..=1773;
+
+/// A question: OK answers yes, the other button no.
+pub struct Question;
+
+impl Screen for Question {
+    fn ids(&self) -> &[u16] {
+        &[QUESTION]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        if let Args::Text(text) = args {
+            set(view, cx.dialog, QUESTION_TEXT, cx.game.text(text).to_owned());
+        }
+        if let Some(ball) = control(cx.dialog, QUESTION_BALL).and_then(|b| view.anim_mut(b)) {
+            ball.frames = QUESTION_BALL_FRAMES.chain(QUESTION_BALL_FRAMES.rev().skip(1)).collect();
+            ball.frames.pop();
+            ball.playing = true;
+        }
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        let Target::Button(button) = target else { return Outcome::Stay };
+        let ok = cx.dialog.controls[button].id == Some(QUESTION_OK);
+        Outcome::Close(if ok { Reply::Ok } else { Reply::Cancel })
+    }
+}
+
+/// A notice with a button to take it in.
+pub struct Notice;
+
+impl Screen for Notice {
+    fn ids(&self) -> &[u16] {
+        &[NOTICE]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        ball(view, cx);
+        if let Args::Text(text) = args {
+            set(view, cx.dialog, NOTICE_TEXT, cx.game.text(text).to_owned());
+        }
+    }
+
+    fn input(&mut self, _: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(_) => Outcome::Close(Reply::Ok),
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// The looping ball of a small popup, if it has one.
+pub(crate) fn ball(view: &mut View, cx: &Cx) {
+    for id in BALLS {
+        if let Some(ball) = control(cx.dialog, id).and_then(|b| view.anim_mut(b)) {
+            ball.frames = BALL_FRAMES.collect();
+            ball.playing = true;
+        }
+    }
+}

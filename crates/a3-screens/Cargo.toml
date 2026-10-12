@@ -1,0 +1,13 @@
+[package]
+name = "a3-screens"
+description = "The game's dialogs, drawn from the installation; no Bevy."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+a3-core.workspace = true
+a3-files.workspace = true
+bevy_math.workspace = true
+chrono = { workspace = true, features = ["clock"] }
+image.workspace = true
+tracing.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "a3-core"
+description = "The game: its world, calendar, seasons and rules; no Bevy, no images."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+a3-files.workspace = true
+chrono.workspace = true
+tracing.workspace = true
