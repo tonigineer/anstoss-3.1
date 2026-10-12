@@ -1,8 +1,9 @@
 //! Reading an installed ANSTOSS 3: its archives, data files, dialog
-//! definitions, executable tables, video, sound and bitmap font. No game
-//! rules — what the files mean for the game is decided in `a3-core`.
+//! definitions, executable tables, video, sound, bitmap font and savegames.
+//! No game rules — what the files mean for the game is decided in `a3-core`.
 
 pub mod adpcm;
+pub mod an3;
 pub mod bitmap_font;
 pub mod cpr;
 pub mod exe;

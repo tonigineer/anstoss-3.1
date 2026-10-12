@@ -157,7 +157,7 @@ fn unpack(data: &[u8]) -> Option<io::Result<Vec<u8>>> {
 /// bits, `n + 1`, the distance takes, offset by `2^(n+1) - 2`; the length
 /// starts at 2 and grows by fields of 2, 3, 4 … bits as long as each field
 /// is all ones.
-fn inflate(chunk: &[u8], len: usize, out: &mut Vec<u8>) -> io::Result<()> {
+pub(crate) fn inflate(chunk: &[u8], len: usize, out: &mut Vec<u8>) -> io::Result<()> {
     let start = out.len();
     let mut bits = Bits { data: chunk, pos: 0 };
     while out.len() - start < len {
