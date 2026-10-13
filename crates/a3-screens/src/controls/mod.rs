@@ -12,6 +12,7 @@ pub mod header;
 pub mod list;
 pub mod menu;
 pub mod options;
+pub mod paint;
 pub mod player_box;
 pub mod slider;
 pub mod spin;
@@ -35,6 +36,7 @@ use self::header::HeaderState;
 use self::list::ListState;
 use self::menu::MenuState;
 use self::options::OptionsState;
+use self::paint::PaintState;
 use self::player_box::PlayerBox;
 use self::spin::Value;
 use self::text::StaticState;
@@ -65,6 +67,7 @@ pub enum ControlState {
     Check(CheckState),
     Menu(MenuState),
     Bar(BarState),
+    Paint(PaintState),
     Other,
 }
 
@@ -88,6 +91,7 @@ impl ControlView {
             Kind::Check => ControlState::Check(CheckState { checked: false, text: text() }),
             Kind::Menu => ControlState::Menu(MenuState::default()),
             Kind::Bar { .. } => ControlState::Bar(BarState::default()),
+            Kind::Paint => ControlState::Paint(PaintState::default()),
             Kind::Other => ControlState::Other,
         };
         Self { hidden: false, state }
@@ -126,6 +130,8 @@ kinds! {
     as_edit, as_edit_mut, Edit, EditState;
     as_options, as_options_mut, Options, OptionsState;
     as_bar, as_bar_mut, Bar, BarState;
+    as_check, as_check_mut, Check, CheckState;
+    as_paint, as_paint_mut, Paint, PaintState;
 }
 
 impl ControlState {
@@ -193,6 +199,7 @@ impl ControlState {
             Self::Check(c) => c.draw(frame, paint),
             Self::Menu(m) => m.draw(frame, paint),
             Self::Bar(b) => b.draw(frame, paint),
+            Self::Paint(p) => p.draw(frame, paint),
             Self::Spin(_) | Self::Player(None) | Self::Other => {}
         }
     }
@@ -221,7 +228,11 @@ impl ControlState {
             Self::Player(Some(player)) => {
                 out.push((Target::Control(index), geometry.map(player.rect(control))))
             }
-            Self::Header(_) | Self::Bitmap(_) | Self::Player(None) | Self::Other => {}
+            Self::Header(_)
+            | Self::Bitmap(_)
+            | Self::Player(None)
+            | Self::Paint(_)
+            | Self::Other => {}
         }
     }
 }

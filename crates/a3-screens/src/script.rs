@@ -693,6 +693,76 @@ mod tests {
         assert_eq!([text(4971), text(4972)], ["Geldgeier", "Skandalnudel"]);
     }
 
+    /// A page, a control of it, and the text it shows.
+    type Shown = (u16, u16, &'static str);
+
+    /// What the original's other pages showed of the first player of the
+    /// line-up, in the gate's save and in one a few matchdays on
+    /// (`tools/oracle`, 13.10.2026).
+    const PAGES_OF_THE_ORIGINAL: [(&str, &[Shown]); 2] = [
+        (
+            "Probe1",
+            &[
+                (402, 4879, "9.0"),
+                (402, 4880, "9"),
+                (402, 4882, "-"),
+                (402, 4875, "-"),
+                (400, 5019, "1"),
+                (400, 5029, "Im Verein seit 2025."),
+                (401, 5648, "Freundin"),
+                (401, 4961, "Karin"),
+                (401, 4962, "zusammen"),
+                (401, 4977, "Familie"),
+                (401, 6003, "Er ist zufrieden. Positiv: toller Vertrag"),
+            ],
+        ),
+        (
+            "Toni",
+            &[
+                (402, 4862, "2"),
+                (402, 4879, "15.0"),
+                (402, 4880, "16"),
+                (402, 4881, "12"),
+                (402, 4882, "4.0"),
+                (400, 5009, "2"),
+                (400, 5017, "1"),
+                (400, 5021, "Tore England"),
+                (401, 5648, "Ehefrau"),
+                (401, 4961, "Tatjana"),
+                (401, 4969, "101"),
+                (401, 4964, "98"),
+                (401, 6003, "Er ist zufrieden."),
+            ],
+        ),
+    ];
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_player_infos_pages_show_what_the_originals_do() {
+        let game = game();
+        for (save, expected) in PAGES_OF_THE_ORIGINAL {
+            let Some(row) = game.save_games().iter().position(|s| s.name == save) else {
+                eprintln!("no {save} among the saves; the oracle's copy has it");
+                continue;
+            };
+            let load = LOAD.replace("row 5144 0", &format!("row 5144 {row}"));
+            let mut script =
+                format!("{}\nnow rclick 2510; choose 9950 0\nuntil dialog 399", load.trim_end());
+            for page in [402, 400, 401] {
+                script += &format!("\nnow choose 4889 1\nuntil dialog {page}");
+                let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+                result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+                let view = runner.host.view();
+                let dialog = &game.dialogs[&page];
+                for &(_, id, text) in expected.iter().filter(|(p, ..)| *p == page) {
+                    // Some of the game's texts end in spaces ("Ehefrau        ").
+                    let shown = view.text(crate::screens::control(dialog, id).unwrap());
+                    assert_eq!(shown.trim_end(), text, "{save}, page {page}, control {id}");
+                }
+            }
+        }
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_start_menu_leads_where_the_game_does() {

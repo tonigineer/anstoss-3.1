@@ -16,6 +16,17 @@ const KEEPER_ABILITIES_AT: u32 = 0x888820;
 const YEARS_AT: u32 = 0x8a8468;
 const INJURIES_AT: u32 = 0x8a8758;
 const PORTRAITS_AT: u32 = 0x888870;
+/// First names by nation, a hundred each (the first fifty men's): the
+/// partners' and children's names.
+const FIRST_NAMES_AT: u32 = 0x8a23b0;
+const FIRST_NAMES: usize = 800;
+const PARTNERS_AT: u32 = 0x888c08;
+const PARTNERSHIPS_AT: u32 = 0x888c10;
+const HOBBIES_AT: u32 = 0x8a8c7e;
+const HOBBIES: usize = 40;
+const CONTENTMENT_AT: u32 = 0x8a8734;
+const REASONS_AT: u32 = 0x888b38;
+const REASON_MASKS_AT: u32 = 0x888bfc;
 const BITS: usize = 16;
 const KEEPER_BITS: usize = 9;
 const POSITIONS: usize = 11;
@@ -47,6 +58,17 @@ pub struct Words {
     pub injuries: Vec<u16>,
     /// The portraits' graphics, by face.
     pub portraits: Vec<u16>,
+    pub first_names: Vec<String>,
+    /// A partner's kind, and how they stand.
+    pub partners: Vec<u16>,
+    pub partnerships: Vec<u16>,
+    pub hobbies: Vec<u16>,
+    /// How content he is, happy to wanting to leave; the reasons by bit of
+    /// his record's flags, and which of them count first when he is least
+    /// content with the trainer, the team or the club.
+    pub contentment: Vec<u16>,
+    pub reasons: Vec<u16>,
+    pub reason_masks: Vec<u32>,
 }
 
 impl Words {
@@ -65,6 +87,17 @@ impl Words {
             years: ids(YEARS_AT, YEARS)?,
             injuries: ids(INJURIES_AT, INJURIES)?,
             portraits: exe.u16s(PORTRAITS_AT, PORTRAITS)?,
+            first_names: exe
+                .u32s(FIRST_NAMES_AT, FIRST_NAMES)?
+                .into_iter()
+                .map(|p| exe.text_at(p).unwrap_or_default())
+                .collect(),
+            partners: exe.u16s(PARTNERS_AT, 4)?,
+            partnerships: exe.u16s(PARTNERSHIPS_AT, 6)?,
+            hobbies: exe.u16s(HOBBIES_AT, HOBBIES)?,
+            contentment: ids(CONTENTMENT_AT, 4)?,
+            reasons: ids(REASONS_AT, 32)?,
+            reason_masks: exe.u32s(REASON_MASKS_AT, 3)?,
         })
     }
 

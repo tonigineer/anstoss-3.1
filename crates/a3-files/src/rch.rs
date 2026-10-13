@@ -94,6 +94,8 @@ pub enum Kind {
     Bar {
         items: Vec<Item>,
     },
+    /// A strip the screen paints bars into, the game's `CMyPaint`.
+    Paint,
     Other,
 }
 
@@ -216,6 +218,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         10 => Kind::Edit { max_len: usize::from(u16s(4)?).clamp(1, 64) },
         11 => Kind::Options { image: u16s(1)?, items: parse_items(extra, usize::from(u16s(0)?)) },
         13 => Kind::Check,
+        15 => Kind::Paint,
         _ => Kind::Other,
     };
     let align = match style & 3 {

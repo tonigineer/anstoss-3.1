@@ -381,6 +381,14 @@ impl Screen for MenuBar {
                 }
                 Outcome::Stay
             }
+            // The player info goes on to another of its pages.
+            (Some(page), Reply::Goto(next))
+                if playerinfo::PAGES_IN_ORDER.contains(&page)
+                    && playerinfo::PAGES_IN_ORDER.contains(&next) =>
+            {
+                self.popup = Some(next);
+                Outcome::Popup(Request::new(next))
+            }
             (None, Reply::Ok) => Outcome::Close(Reply::Ok),
             _ => Outcome::Stay,
         }
@@ -498,7 +506,7 @@ fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
 }
 
 /// The squad as the list shows it: the eleven, the bench, then the rest.
-pub(crate) fn list_order(lineup: &Lineup, players: usize) -> Vec<usize> {
+fn list_order(lineup: &Lineup, players: usize) -> Vec<usize> {
     let squad: Vec<usize> = lineup.squad().collect();
     squad.iter().copied().chain((0..players).filter(|p| !squad.contains(p))).collect()
 }

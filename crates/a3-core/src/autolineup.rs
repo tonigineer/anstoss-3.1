@@ -123,7 +123,7 @@ pub fn variant(tables: &Tables, club: &mut ClubState, variant: usize, today: Nai
                 match variant {
                     FITTEST => {
                         let condition = f.condition / 100;
-                        if f.worn { (condition - 5).max(0) } else { condition }
+                        if f.smoker { (condition - 5).max(0) } else { condition }
                     }
                     FRESHEST => {
                         let fresh: i32 = f.freshness.iter().sum();

@@ -7,9 +7,11 @@ use a3_files::rch::{Dialog, Kind};
 use crate::controls::anim::AnimState;
 use crate::controls::bar::BarState;
 use crate::controls::bitmap::Picture;
+use crate::controls::check::CheckState;
 use crate::controls::header::HeaderState;
 use crate::controls::list::{ListState, WHEEL_ROWS, visible_rows};
 use crate::controls::options::OptionsState;
+use crate::controls::paint::PaintState;
 use crate::controls::player_box::PlayerBox;
 use crate::controls::spin::Value;
 use crate::controls::{ControlState, ControlView};
@@ -56,6 +58,8 @@ impl View {
         bar, bar_mut, as_bar, as_bar_mut, BarState;
         anim, anim_mut, as_anim, as_anim_mut, AnimState;
         value, value_mut, as_value, as_value_mut, Value;
+        check, check_mut, as_check, as_check_mut, CheckState;
+        paint, paint_mut, as_paint, as_paint_mut, PaintState;
     }
 
     /// What a static, field or header says; nothing for other controls.

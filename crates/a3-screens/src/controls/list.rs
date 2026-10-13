@@ -154,7 +154,9 @@ impl ListState {
                 ink.map_or(TEXT, |[r, g, b]| Rgba([r, g, b, 255]))
             };
             let cells = line.split('\t');
-            columns(font, frame, (x + 2, top), cells, &self.tabs, &self.aligns, color, right);
+            // The text sits at the list's left edge, a pixel above the row.
+            let at = (x, top - 1);
+            columns(font, frame, at, cells, &self.tabs, &self.aligns, color, right);
             for &(left, id) in self.row_icons.get(self.scroll + row).into_iter().flatten() {
                 if let Some(icon) = paint.image(id) {
                     paste(frame, icon, Vec2::new(x as f32 + left, top as f32));

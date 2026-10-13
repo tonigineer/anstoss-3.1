@@ -417,7 +417,7 @@ impl Lineup {
 /// A player's form, from 0 to 20: how fit and fresh he is, around his mood.
 pub fn form(fitness: Fitness) -> i32 {
     let mut condition = fitness.condition / 100;
-    if fitness.worn {
+    if fitness.smoker {
         condition = (condition - 5).max(0);
     }
     let fresh = (fitness.freshness.iter().sum::<i32>() / 100).clamp(0, 100);

@@ -132,7 +132,7 @@ fn fitness(record: &records::Player) -> Fitness {
         morale: record.morale().into(),
         mood: record.mood().into(),
         knock: record.knocks() & KNOCKS != 0,
-        worn: record.shown() & WORN != 0,
+        smoker: record.shown() & SMOKER != 0,
     }
 }
 
@@ -145,8 +145,8 @@ const UNKNOWN: u8 = 0x80;
 /// The automatic line-ups' bits: always pick him, never.
 const ALWAYS: u8 = 0x20;
 const NEVER: u8 = 0x10;
-/// His condition counts five less in them.
-const WORN: u32 = 0x800;
+/// He smokes: his condition counts five less.
+const SMOKER: u32 = 0x800;
 
 fn status(records: &Records, record: &records::Player) -> Status {
     let globals = &records.globals;
@@ -168,8 +168,8 @@ fn status(records: &Records, record: &records::Player) -> Status {
         matches: record.league_matches(),
         matches_less: record.league_less(),
         id: record.id(),
-        friends: record.friends(),
-        enemies: record.enemies(),
+        understands: record.understands(),
+        clashes: record.clashes(),
         joined: record.joined().and_then(|(day, month, year)| {
             NaiveDate::from_ymd_opt(year.into(), month.into(), day.into())
         }),

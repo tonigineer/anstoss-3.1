@@ -1,7 +1,7 @@
 //! How well a team plays together — "Eingespieltheit", from 0 to 200 — as
 //! the original reckons it for a human club (`FUN_0069774b`): how long the
 //! best sixteen of the squad have been at the club, each of the eleven on
-//! his own position or a foreign one, friends and enemies side by side,
+//! his own position or a foreign one, those who understand each other blindly or do not get on side by side,
 //! the matches the eleven have played, and what training and the manager's
 //! time at the club add; less one for each of the sixteen injured for a
 //! week or more.
@@ -18,7 +18,7 @@ use crate::season::ClubState;
 const BEST: usize = 16;
 const MOST_MONTHS: i32 = 60;
 /// A player on his main position adds, one on a foreign one takes away;
-/// friends side by side add, enemies take away.
+/// two who understand each other blindly add, two who do not get on take away.
 const OWN_POSITION: i32 = 2;
 const FRIENDS: i32 = 3;
 /// Injured for more than this many days.
@@ -93,9 +93,9 @@ pub fn of(tables: &Tables, club: &ClubState, today: NaiveDate) -> i32 {
             if id == 0 {
                 continue;
             }
-            if s.friends.contains(&id) {
+            if s.understands.contains(&id) {
                 cohesion += FRIENDS;
-            } else if s.enemies.contains(&id) {
+            } else if s.clashes.contains(&id) {
                 cohesion -= FRIENDS;
             }
         }

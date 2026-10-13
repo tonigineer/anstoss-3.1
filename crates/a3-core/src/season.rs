@@ -259,8 +259,9 @@ pub struct Fitness {
     pub mood: i32,
     /// He plays with a knock, at 0.9 of his strength.
     pub knock: bool,
-    /// His condition counts five less in his form (`FUN_00457e00`).
-    pub worn: bool,
+    /// He smokes: his condition counts five less in his form
+    /// (`FUN_00457e00`).
+    pub smoker: bool,
 }
 
 /// What the line-up's list tells of a player besides his fitness, as the
@@ -293,10 +294,11 @@ pub struct Status {
     /// them (meaning not traced yet).
     pub matches: u8,
     pub matches_less: [u8; 2],
-    /// His id in the save, 0 in a new game; his friends' and enemies' ids.
+    /// His id in the save, 0 in a new game; who he understands blindly on
+    /// the pitch, and who he does not get on with there, by id.
     pub id: u16,
-    pub friends: [u16; 2],
-    pub enemies: [u16; 2],
+    pub understands: [u16; 2],
+    pub clashes: [u16; 2],
     /// When he came to the club.
     pub joined: Option<NaiveDate>,
 }
@@ -336,7 +338,7 @@ impl Fitness {
             morale: FULL_MORALE,
             mood: NEUTRAL_MOOD,
             knock: false,
-            worn: false,
+            smoker: false,
         }
     }
 }

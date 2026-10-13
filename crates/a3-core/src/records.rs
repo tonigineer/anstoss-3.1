@@ -146,24 +146,42 @@ record! {
     0x156 => fixed_fee, set_fixed_fee: u16;
     /// The year the contract runs to, in the low twelve bits.
     0x15c => contract, set_contract: u16;
+    /// His goals and his appearances in all his career, by league: the
+    /// country's four, then the more countries' (`FUN_00704b05`).
+    0x190 => career_goals, set_career_goals: [u16; 8];
+    0x1a0 => career_appearances, set_career_appearances: [u16; 8];
     /// The contract's terms: the leagues it holds for (low two bits), on
     /// loan (0x100), not to play in the European cups (0x10), extended
     /// itself (0x80), options for club (0x2000) and player (0x1000), a
     /// regular place (0x4000).
     0x15e => terms, set_terms: u16;
-    /// His enemies and friends in the squad, by id, 0 none.
-    0x208 => enemies, set_enemies: [u16; 2];
-    0x20c => friends, set_friends: [u16; 2];
+    /// The game's day his red card was given, its suspension's date.
+    0x1f2 => sent_off_on, set_sent_off_on: i16;
+    /// How many children he has.
+    0x1f6 => children, set_children: i16;
+    /// Team-mates, by id (0 none): his friends and those he does not like,
+    /// his best friend and the one he hates.
+    0x1f8 => friends, set_friends: [u16; 3];
+    0x1fe => dislikes, set_dislikes: [u16; 3];
+    0x204 => best_friend, set_best_friend: u16;
+    0x206 => hates, set_hates: u16;
+    /// On the pitch: those he does not get on with, and those he
+    /// understands blindly.
+    0x208 => clashes, set_clashes: [u16; 2];
+    0x20c => understands, set_understands: [u16; 2];
     /// How many stations his career has (at most 15); the last one's date
     /// tells how long he has been at the club.
     0x212 => career_count, set_career_count: i16;
+    /// Goals for his national team.
+    0x214 => international_goals, set_international_goals: u16;
     0x168 => birth_day, set_birth_day: u8;
     0x169 => birth_month, set_birth_month: u8;
     0x16a => birth_year, set_birth_year: u16;
     /// Bits: the fans love him (0x10000) or hate him (0x400).
     0x1b0 => flags, set_flags: u32;
-    /// Bit 31: the nickname is shown; bit 11: his condition counts five
-    /// less in the automatic line-ups.
+    /// Bits: the nickname is shown (31), ostracised (17), an extra trainer
+    /// (13), he smokes (11 — his condition counts five less), has a coach's
+    /// licence (7), overweight (5).
     0x1b4 => shown, set_shown: u32;
     /// What he has earned so far.
     0x1b8 => earned, set_earned: i32;
@@ -189,7 +207,8 @@ record! {
     0x1da => injured_to, set_injured_to: [u16; 2];
     /// Not zero: "angeschlagen", knocked about.
     0x1de => knocked, set_knocked: u8;
-    /// Matches of the competitions of the kinds 12 to 15 this season.
+    /// Matches of the competitions of the kinds 12 to 15 this season: his
+    /// internationals.
     0x266 => kind_12_matches, set_kind_12_matches: u8;
     /// Bit 7: he ends his career.
     0x26f => retiring, set_retiring: u8;
@@ -201,8 +220,8 @@ record! {
     /// of the kinds 3–4, 5–10 and 12–15 (the line-up's object +0x54, +0x59,
     /// +0x5f, +0x61).
     0x253 => league_matches, set_league_matches: u8;
-    /// Two counts the cohesion takes from the league matches (meaning not
-    /// traced yet).
+    /// Two counts the cohesion takes from the league matches: the first,
+    /// those he came on in as a substitute.
     0x254 => league_less, set_league_less: [u8; 2];
     /// Away from the club, with the national team, and for long (a year
     /// and a day of the year each).
@@ -231,11 +250,79 @@ record! {
     /// Matches suspended in the low six bits; bit 7: for how long is not
     /// known yet.
     0x229 => suspension, set_suspension: u8;
+    /// Weeks of a ban in the league (`FUN_0070304f`).
+    0x22a => banned_weeks, set_banned_weeks: u8;
+    /// Cards this season — yellow, red, yellow-red — and suspensions: in
+    /// the league (matches in the low five bits of the first byte, not known
+    /// yet bit 7; the second's bit 7 red, bits 5 and 6 others), the cup (bit
+    /// 7 red, 6 yellow-red, else yellow) and the European cups (weeks, the
+    /// low five bits).
+    0x22c => league_cards, set_league_cards: [u8; 3];
+    0x22f => league_ban, set_league_ban: [u8; 2];
+    0x231 => cup_cards, set_cup_cards: [u8; 3];
+    0x234 => cup_ban, set_cup_ban: u8;
+    0x235 => europe_cards, set_europe_cards: [u8; 3];
+    0x238 => europe_ban, set_europe_ban: u8;
+    /// Goals this season: in the league, the cup, the European cups; and in
+    /// all his career in the cup and the European cups.
+    0x23c => goals, set_goals: [u8; 3];
+    0x23f => career_cup_goals, set_career_cup_goals: u8;
+    0x240 => career_europe_goals, set_career_europe_goals: u8;
+    /// This season: own goals, assists, goals coming on as a substitute.
+    0x246 => own_goals, set_own_goals: u8;
+    0x247 => assists, set_assists: u8;
+    0x248 => joker_goals, set_joker_goals: u8;
+    /// Penalties and free kicks this season: taken, and scored.
+    0x24b => penalties, set_penalties: [u8; 2];
+    0x24d => free_kicks, set_free_kicks: [u8; 2];
+    /// Appearances in all his career: in the cups, in the European cups.
+    0x25f => career_cup_appearances, set_career_cup_appearances: [u8; 5];
+    0x265 => career_europe_appearances, set_career_europe_appearances: u8;
+    /// Times in the team of the day this season.
+    0x268 => of_the_day, set_of_the_day: u8;
     /// Why he is away from the club, in the low four bits; bit 4 marks him
     /// on the line-up list (its status icon 6).
     0x26b => away_kind, set_away_kind: u8;
     /// Bit 7: the long absence's length is not known yet.
     0x26e => long_unknown, set_long_unknown: u8;
+    /// His partner: her kind in the low two bits (0 none, girlfriend,
+    /// fiancée, wife), how they stand in bits 2 to 4.
+    0x27e => partner, set_partner: u8;
+    /// Problems: gambled away at the president's (low two bits), with the
+    /// language (bits 2 and 3).
+    0x27f => problems, set_problems: u8;
+    /// Names, from the first names of the nation at +0x286: his partner's,
+    /// an affair's, his children's.
+    0x283 => partner_name, set_partner_name: u8;
+    0x284 => affair_name, set_affair_name: u8;
+    0x286 => names_nation, set_names_nation: u8;
+    0x288 => children_names, set_children_names: [u8; 5];
+    /// His hobby, 0 none.
+    0x28d => hobby, set_hobby: u8;
+    /// His contentment with the trainer, the team, the club, the press, his
+    /// private life, his distractions and his offers (100 middling).
+    0x28f => contentment, set_contentment: [u8; 7];
+    /// As a club's player: championships, cups, Champions League, Europa
+    /// League, player of the year, Europe's footballer of the year, top
+    /// scorer, goals of the month, goal of the year, team of the day and of
+    /// the year, yellow-red and red cards, other punishments.
+    0x299 => honours, set_honours: [u8; 14];
+    /// European championships won (low four bits) and world cups.
+    0x2a7 => titles, set_titles: u8;
+    /// His form, week by week: how many weeks so far (from 26 counted round
+    /// again) and a ring of the last 26.
+    0x2a8 => form_weeks, set_form_weeks: u8;
+    /// Goals season by season (bit 7: the season counts) and his strength
+    /// by half-season, a nibble each (0 none yet).
+    0x2a9 => season_goals, set_season_goals: [u8; 20];
+    0x2bd => development, set_development: [u8; 20];
+    0x2d1 => form_ring, set_form_ring: [u8; 26];
+    /// Each league matchday of the season: his goals (high nibble) and
+    /// assists, and how he played — bits 6 and 7 played, came on, went off;
+    /// bits 2 to 5 his grade; the low two his card (yellow, yellow-red,
+    /// red).
+    0x2eb => matchday_goals, set_matchday_goals: [u8; 46];
+    0x319 => matchdays, set_matchdays: [u8; 46];
     /// Bit 5: the automatic line-ups always pick him; bit 4: never.
     0x271 => picks, set_picks: u8;
     /// 100 is neither happy nor unhappy.
@@ -291,6 +378,11 @@ record! {
     0x129 => number, set_number: u8;
     /// The country: a nation code.
     0x12d => country, set_country: u8;
+    /// Its league's level, 0 the first.
+    0x12e => level, set_level: u8;
+    /// The club it is one with, by number (or, if the first is below 0,
+    /// the second): a club and its amateurs.
+    0x872 => linked, set_linked: [i8; 2];
     /// Player ids of the eleven and the bench, 0 an empty place.
     0x148 => lineup, set_lineup: [u16; 11];
     0x15e => bench, set_bench: [u16; 7];
@@ -436,6 +528,10 @@ record! {
     Globals, 0x1590, base 0xb5cb88;
     /// Whether each human slot is in play: above 0.
     0xb5cb9c => slots, set_slots: [i16; MANAGERS];
+    /// The countries played besides the main one: how many, which.
+    0xb5cbae => more_count, set_more_count: i16;
+    0xb5cbb0 => main_country, set_main_country: i16;
+    0xb5cbb4 => more_countries, set_more_countries: [i16; 4];
     /// The year the game started in.
     0xb5cbca => start_year, set_start_year: u16;
     0xb5cbcc => year, set_year: u16;
@@ -445,6 +541,9 @@ record! {
     0xb5cbd2 => half_weeks, set_half_weeks: u16;
     /// Days since the start of the first season.
     0xb5cbd4 => day, set_day: u16;
+    /// The game's day 0 is this many days after the first of July of the
+    /// start year (`FUN_0067677e`).
+    0xb5cbd8 => first_day, set_first_day: i16;
     0xb5cbda => date, set_date: [u16; 3];
     /// The day of the year, from 0.
     0xb5cbe0 => day_of_year, set_day_of_year: u16;
@@ -456,6 +555,24 @@ record! {
     /// Where the game cycle goes on after loading (`FUN_006da3a9`): 998
     /// inside the week, the half weeks at a week's turn.
     0xb5d172 => resume, set_resume: u16;
+}
+
+impl Globals {
+    /// Whether the game follows a country's matches: the main country's
+    /// and the more ones' (`FUN_00676c03`).
+    pub fn played(&self, country: i16) -> bool {
+        let more = usize::try_from(self.more_count()).unwrap_or(0);
+        self.main_country() == country
+            || self.more_countries().iter().take(more).any(|&c| c == country)
+    }
+
+    /// The date of a day of the game (`FUN_0067677e`).
+    pub fn date_of(&self, day: i16) -> Option<NaiveDate> {
+        let start = NaiveDate::from_ymd_opt(self.start_year().into(), 7, 1)?;
+        start.checked_add_signed(chrono::Duration::days(
+            i64::from(day) + i64::from(self.first_day()),
+        ))
+    }
 }
 
 /// The block of tables by country (`0xae5b18`, its data from `0xae5b38`).
@@ -474,6 +591,19 @@ impl Countries {
     /// The index of a country's first team.
     pub fn first_team(&self, country: usize) -> i16 {
         self.get(0xae5ef0 + 2 * country)
+    }
+
+    /// How a country's clubs are kept: 1 and 2 its teams (1 with forty
+    /// amateur clubs after them), others only abroad.
+    pub fn kind(&self, country: usize) -> u8 {
+        self.get(0xae61ae + country)
+    }
+
+    /// By which rule yellow cards add up to a suspension in a country's
+    /// league and in its cup (`FUN_0074612e`, `FUN_007464a4`).
+    pub fn card_rules(&self, country: usize) -> [i32; 2] {
+        let system: u8 = self.get(0xae5c97 + country);
+        self.get(0xae62cc + 8 * usize::from(system))
     }
 }
 
