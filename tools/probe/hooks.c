@@ -54,7 +54,9 @@ static LONG total_draws(void)
 	return total;
 }
 
-#define event(format, ...) note("event " format " draws=%ld", __VA_ARGS__, total_draws())
+#define event(format, ...)                                                                    \
+	note("event " format " draws=%ld thread=%lu", __VA_ARGS__, total_draws(),               \
+	     GetCurrentThreadId())
 
 static void record(enum source source, void *caller, unsigned argument, int result)
 {
@@ -170,6 +172,185 @@ static void __cdecl srand_sim(unsigned seed)
 	seed_crt(1, seed, __builtin_return_address(0));
 }
 
+/* Dumps: the original's own savegame writer, FUN_006ed31e(path, 0, 0, 1) as
+ * the autosave (FUN_006ecfeb) calls it, run on the logic thread at a safe
+ * point — when it sleeps to wait for the player (its dozens of wait loops
+ * poll a flag with Sleep(2) to Sleep(100); spin locks use Sleep(0)), or when the
+ * game cycle announces a state; daily dumps at the last. Modal dialogs run on
+ * the main thread meanwhile.
+ * The path is an MFC CString, made and freed by the game's own thunks to
+ * MFC42. */
+typedef void(__cdecl *write_fn)(void *path, int, int, int);
+typedef void *(__thiscall *cstring_make_fn)(void *self, const char *text);
+typedef void(__thiscall *cstring_free_fn)(void *self);
+#define WRITE_SAVE ((write_fn)0x6ed31e)
+#define CSTRING_MAKE ((cstring_make_fn)0x7e09e0)
+#define CSTRING_FREE ((cstring_free_fn)0x7e09e6)
+
+static CRITICAL_SECTION dump_lock, dump_turn; /* the second: one dump at a time */
+static volatile DWORD logic_thread; /* the thread of the game's logic */
+static char dump_path[MAX_PATH]; /* asked for, empty when none */
+static HANDLE dump_done;
+static char dump_dir[MAX_PATH]; /* a dump on every new day into it */
+static int dumped_day = -1;
+
+static void write_save(const char *path)
+{
+	void *text = NULL;
+	CSTRING_MAKE(&text, path);
+	event("dump %s day=%d", path, DAY);
+	WRITE_SAVE(&text, 0, 0, 1);
+	CSTRING_FREE(&text);
+}
+
+/* On the logic thread, at a safe point; daily dumps only from the game
+ * cycle, when there is a game. */
+static void safe_point(BOOL in_cycle)
+{
+	char path[MAX_PATH] = "";
+	EnterCriticalSection(&dump_lock);
+	if (dump_path[0]) {
+		strcpy(path, dump_path);
+		dump_path[0] = 0;
+	}
+	char dir[MAX_PATH];
+	strcpy(dir, dump_dir);
+	LeaveCriticalSection(&dump_lock);
+	if (path[0]) {
+		write_save(path);
+		SetEvent(dump_done);
+	}
+	if (in_cycle && dir[0] && DAY != dumped_day) {
+		char daily[MAX_PATH + 16];
+		dumped_day = DAY;
+		snprintf(daily, sizeof daily, "%s\\day-%03d.an3", dir, DAY);
+		write_save(daily);
+	}
+}
+
+int dump(const char *path, DWORD timeout)
+{
+	if (strlen(path) >= MAX_PATH)
+		return -1;
+	EnterCriticalSection(&dump_turn);
+	int result = -1;
+	EnterCriticalSection(&dump_lock);
+	ResetEvent(dump_done);
+	strcpy(dump_path, path);
+	LeaveCriticalSection(&dump_lock);
+	if (WaitForSingleObject(dump_done, timeout) == WAIT_OBJECT_0) {
+		result = 0;
+	} else {
+		EnterCriticalSection(&dump_lock);
+		dump_path[0] = 0;
+		LeaveCriticalSection(&dump_lock);
+	}
+	LeaveCriticalSection(&dump_turn);
+	return result;
+}
+
+void report_logic_thread(char *reply, size_t size)
+{
+	DWORD id = logic_thread;
+	HANDLE thread = id ? OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, id) : NULL;
+	if (!thread) {
+		snprintf(reply, size, "error no logic thread yet");
+		return;
+	}
+	CONTEXT context = {.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER};
+	SuspendThread(thread);
+	BOOL got = GetThreadContext(thread, &context);
+	size_t used = snprintf(reply, size, "ok thread %lu eip %#lx", id, got ? context.Eip : 0);
+	/* The frames by their saved EBP, while they lie on readable stack. */
+	DWORD frame = got ? context.Ebp : 0;
+	for (int depth = 0; depth < 24 && frame && used < size; depth++) {
+		MEMORY_BASIC_INFORMATION info;
+		if (!VirtualQuery((void *)frame, &info, sizeof info) || info.State != MEM_COMMIT)
+			break;
+		DWORD *pair = (DWORD *)frame;
+		used += snprintf(reply + used, size - used, " %#lx", pair[1]);
+		if (pair[0] <= frame)
+			break;
+		frame = pair[0];
+	}
+	ResumeThread(thread);
+	CloseHandle(thread);
+}
+
+/* A write watchpoint without debug registers (Wine does not pass them on):
+ * the page holding the address is made read-only; a write to it faults, is
+ * logged if it hits the two watched bytes, and goes through with the page
+ * writable for one single step, after which the page is read-only again. */
+static volatile DWORD watched;
+static volatile LONG rearm;
+
+static void log_frames(const CONTEXT *context, char *out, size_t size)
+{
+	size_t used = 0;
+	DWORD frame = context->Ebp;
+	out[0] = 0;
+	for (int depth = 0; depth < 12 && frame && used < size; depth++) {
+		MEMORY_BASIC_INFORMATION info;
+		if (!VirtualQuery((void *)frame, &info, sizeof info) || info.State != MEM_COMMIT)
+			break;
+		DWORD *pair = (DWORD *)frame;
+		used += snprintf(out + used, size - used, " %#lx", pair[1]);
+		if (pair[0] <= frame)
+			break;
+		frame = pair[0];
+	}
+}
+
+static void protect(DWORD protection)
+{
+	DWORD old;
+	VirtualProtect((void *)(watched & ~0xffful), 0x1000, protection, &old);
+}
+
+static LONG CALLBACK on_watch(EXCEPTION_POINTERS *info)
+{
+	EXCEPTION_RECORD *record = info->ExceptionRecord;
+	if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && watched &&
+	    record->ExceptionInformation[0] == 1 &&
+	    (record->ExceptionInformation[1] & ~0xffful) == (watched & ~0xffful)) {
+		ULONG_PTR at = record->ExceptionInformation[1];
+		if (at + 4 > watched && at < watched + 2) {
+			char frames[256];
+			log_frames(info->ContextRecord, frames, sizeof frames);
+			event("watch %#lx = %d before the write at %p, frames%s", watched,
+			      *(volatile short *)watched, record->ExceptionAddress, frames);
+		}
+		protect(PAGE_READWRITE);
+		InterlockedExchange(&rearm, 1);
+		info->ContextRecord->EFlags |= 0x100; /* trap after the write */
+		return EXCEPTION_CONTINUE_EXECUTION;
+	}
+	if (record->ExceptionCode == EXCEPTION_SINGLE_STEP && InterlockedExchange(&rearm, 0)) {
+		protect(PAGE_READONLY);
+		info->ContextRecord->EFlags &= ~0x100ul;
+		return EXCEPTION_CONTINUE_EXECUTION;
+	}
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+int watch(DWORD address)
+{
+	static PVOID handler;
+	if (!handler)
+		handler = AddVectoredExceptionHandler(1, on_watch);
+	watched = address;
+	protect(PAGE_READONLY);
+	return 1;
+}
+
+void dump_daily(const char *dir)
+{
+	EnterCriticalSection(&dump_lock);
+	snprintf(dump_dir, sizeof dump_dir, "%s", dir ? dir : "");
+	dumped_day = -1;
+	LeaveCriticalSection(&dump_lock);
+}
+
 /* FUN_00786b61(request): the logic thread waits until the screen it asked for
  * answers; the request is step, result, done (FLOW.md), and a flag at
  * 0x1c6aaec ends the thread instead. The original's loop jumps back into the
@@ -182,9 +363,12 @@ static wait_fn wait_original;
 static void __cdecl wait_for_screen(short *request)
 {
 	volatile short *done = &request[2];
+	logic_thread = GetCurrentThreadId();
 	event("request step=%d day=%d", request[0], DAY);
-	while (!*done && !QUITTING)
+	while (!*done && !QUITTING) {
+		safe_point(FALSE);
 		Sleep(100);
+	}
 	event("answer step=%d result=%d", request[0], request[1]);
 	wait_original(request);
 }
@@ -277,7 +461,7 @@ void report_dialogs(char *reply, size_t size)
 	LeaveCriticalSection(&dialogs_lock);
 }
 
-/* FUN_006da3a9: one round of the game cycle. */
+/* FUN_006da3a9: the game cycle, which runs a whole season. */
 typedef void(__cdecl *cycle_fn)(void);
 static cycle_fn cycle_original, autosave_original;
 
@@ -293,8 +477,21 @@ static state_fn state_original;
 
 static void __cdecl state(int value)
 {
+	logic_thread = GetCurrentThreadId();
 	event("state %d day=%d", (short)value, DAY);
+	safe_point(TRUE);
 	state_original(value);
+}
+
+/* Sleep, as the game calls it: a wait of the logic thread is a safe point. */
+typedef void(WINAPI *sleep_fn)(DWORD);
+static sleep_fn sleep_original;
+
+static void WINAPI game_sleep(DWORD ms)
+{
+	if (ms > 0 && GetCurrentThreadId() == logic_thread)
+		safe_point(FALSE);
+	sleep_original(ms);
 }
 
 /* FUN_006ecfeb: the weekly autosave. */
@@ -367,7 +564,8 @@ static void install(struct hook *hook)
 	hook->status = "on";
 }
 
-/* The import hooks: rand and srand of MSVCRT in the game and its match DLL. */
+/* The import hooks: rand and srand of MSVCRT in the game and its match DLL,
+ * and the game's Sleep. */
 
 struct import {
 	const char *name;
@@ -385,6 +583,8 @@ static struct import imports[] = {
 	 (void **)&rand_original[1], "off"},
 	{"srand-activesim", "activesim.dll", "msvcrt.dll", "srand", (void *)srand_sim,
 	 (void **)&srand_original[1], "off"},
+	{"sleep", NULL, "kernel32.dll", "Sleep", (void *)game_sleep, (void **)&sleep_original,
+	 "off"},
 };
 
 static void patch_import(struct import *import)
@@ -432,6 +632,9 @@ void install_hooks(void)
 {
 	InitializeCriticalSection(&trace_lock);
 	InitializeCriticalSection(&dialogs_lock);
+	InitializeCriticalSection(&dump_lock);
+	InitializeCriticalSection(&dump_turn);
+	dump_done = CreateEventA(NULL, TRUE, FALSE, NULL);
 	trampolines = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 	for (size_t i = 0; i < sizeof hooks / sizeof *hooks; i++)
 		install(&hooks[i]);

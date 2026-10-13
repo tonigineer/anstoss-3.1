@@ -21,6 +21,14 @@
  *                                       how many dialogs the game has shown,
  *                                       and those not destroyed, oldest first
  *                                       (flag 0x10: up; MODAL 1 in DoModal)
+ *   dump PATH            ok             writes the game's state as a savegame,
+ *                                       with the original's own writer, at the
+ *                                       logic thread's next safe point
+ *   dumps DIR|off        ok             a dump on every new day into DIR
+ *   where                ok thread ID eip EIP RET ...
+ *                                       where the game's logic thread is
+ *   watch ADDR           ok 1           logs every write to the two bytes at
+ *                                       ADDR (the page made read-only)
  *   hooks                ok NAME:STATUS ...
  *                                       the hooks (hooks.c): on, differs (the
  *                                       routine starts unexpectedly), off
@@ -208,16 +216,41 @@ static BOOL type(char c)
 	return TRUE;
 }
 
+/* The next word of the line at *cursor, or with rest everything left of it;
+ * NULL at the end. Clients run in threads of their own, so no strtok. */
+static char *take(char **cursor, BOOL rest)
+{
+	char *at = *cursor;
+	while (*at == ' ' || *at == '\t')
+		at++;
+	if (!*at) {
+		*cursor = at;
+		return NULL;
+	}
+	char *word = at;
+	if (rest) {
+		at += strlen(at);
+	} else {
+		while (*at && *at != ' ' && *at != '\t')
+			at++;
+		if (*at)
+			*at++ = 0;
+	}
+	*cursor = at;
+	return word;
+}
+
 /* Answers one command line into reply; whether the game ends after it. */
 static BOOL answer(char *line, char *reply, size_t size)
 {
-	char *word = strtok(line, " \t");
+	char *cursor = line;
+	char *word = take(&cursor, FALSE);
 	if (!word) {
 		snprintf(reply, size, "error empty command");
 	} else if (!strcmp(word, "ping")) {
 		snprintf(reply, size, "ok probe %d", VERSION);
 	} else if (!strcmp(word, "peek")) {
-		char *address = strtok(NULL, " \t"), *count = strtok(NULL, " \t");
+		char *address = take(&cursor, FALSE), *count = take(&cursor, FALSE);
 		unsigned long at = address ? strtoul(address, NULL, 0) : 0;
 		unsigned long length = count ? strtoul(count, NULL, 0) : 0;
 		if (!at || !length || length > MAX_PEEK || 4 + 2 * length >= size) {
@@ -230,7 +263,7 @@ static BOOL answer(char *line, char *reply, size_t size)
 				out += sprintf(out, "%02x", ((unsigned char *)at)[i]);
 		}
 	} else if (!strcmp(word, "poke")) {
-		char *address = strtok(NULL, " \t"), *bytes = strtok(NULL, " \t");
+		char *address = take(&cursor, FALSE), *bytes = take(&cursor, FALSE);
 		unsigned long at = address ? strtoul(address, NULL, 0) : 0;
 		size_t length = bytes ? strlen(bytes) / 2 : 0;
 		if (!at || !length || strlen(bytes) % 2) {
@@ -251,13 +284,13 @@ static BOOL answer(char *line, char *reply, size_t size)
 	} else if (!strcmp(word, "windows")) {
 		list_windows(reply, size);
 	} else if (!strcmp(word, "click")) {
-		char *x = strtok(NULL, " \t"), *y = strtok(NULL, " \t");
+		char *x = take(&cursor, FALSE), *y = take(&cursor, FALSE);
 		if (!x || !y)
 			snprintf(reply, size, "error click X Y");
 		else
 			click(atoi(x), atoi(y), reply, size);
 	} else if (!strcmp(word, "key")) {
-		char *code = strtok(NULL, " \t");
+		char *code = take(&cursor, FALSE);
 		if (!code) {
 			snprintf(reply, size, "error key VK");
 		} else {
@@ -265,7 +298,7 @@ static BOOL answer(char *line, char *reply, size_t size)
 			snprintf(reply, size, "ok");
 		}
 	} else if (!strcmp(word, "text")) {
-		char *text = strtok(NULL, "");
+		char *text = take(&cursor, TRUE);
 		if (!text) {
 			snprintf(reply, size, "error text TEXT");
 		} else {
@@ -278,6 +311,30 @@ static BOOL answer(char *line, char *reply, size_t size)
 			else
 				snprintf(reply, size, "ok");
 		}
+	} else if (!strcmp(word, "dump")) {
+		char *path = take(&cursor, TRUE);
+		if (!path)
+			snprintf(reply, size, "error dump PATH");
+		else if (dump(path, 20000)) /* within the client's 30 s */
+			snprintf(reply, size, "error no safe point came for the dump");
+		else
+			snprintf(reply, size, "ok");
+	} else if (!strcmp(word, "dumps")) {
+		char *dir = take(&cursor, TRUE);
+		if (!dir) {
+			snprintf(reply, size, "error dumps DIR|off");
+		} else {
+			dump_daily(strcmp(dir, "off") ? dir : NULL);
+			snprintf(reply, size, "ok");
+		}
+	} else if (!strcmp(word, "watch")) {
+		char *address = take(&cursor, FALSE);
+		if (!address)
+			snprintf(reply, size, "error watch ADDR");
+		else
+			snprintf(reply, size, "ok %d", watch((DWORD)strtoul(address, NULL, 0)));
+	} else if (!strcmp(word, "where")) {
+		report_logic_thread(reply, size);
 	} else if (!strcmp(word, "dialogs")) {
 		report_dialogs(reply, size);
 	} else if (!strcmp(word, "hooks")) {
@@ -285,7 +342,7 @@ static BOOL answer(char *line, char *reply, size_t size)
 	} else if (!strcmp(word, "counts")) {
 		report_counts(reply, size);
 	} else if (!strcmp(word, "trace")) {
-		char *path = strtok(NULL, "");
+		char *path = take(&cursor, TRUE);
 		if (!path)
 			snprintf(reply, size, "error trace PATH|off");
 		else if (trace_draws(strcmp(path, "off") ? path : NULL))
@@ -293,7 +350,7 @@ static BOOL answer(char *line, char *reply, size_t size)
 		else
 			snprintf(reply, size, "ok");
 	} else if (!strcmp(word, "srand")) {
-		char *seed = strtok(NULL, " \t");
+		char *seed = take(&cursor, FALSE);
 		if (!seed)
 			snprintf(reply, size, "error srand SEED|off");
 		else {
@@ -309,12 +366,14 @@ static BOOL answer(char *line, char *reply, size_t size)
 	return FALSE;
 }
 
-static void serve_client(SOCKET client)
+#define LINE 4096
+#define REPLY (2 * MAX_PEEK + 64)
+
+static void serve_client(SOCKET client, char *line, char *reply)
 {
-	static char line[4096], reply[2 * MAX_PEEK + 64];
 	size_t used = 0;
 	for (;;) {
-		int got = recv(client, line + used, (int)(sizeof line - 1 - used), 0);
+		int got = recv(client, line + used, (int)(LINE - 1 - used), 0);
 		if (got <= 0)
 			return;
 		used += got;
@@ -324,21 +383,38 @@ static void serve_client(SOCKET client)
 			if (end > line && end[-1] == '\r')
 				end[-1] = 0;
 			note("< %s", line);
-			BOOL quit = answer(line, reply, sizeof reply);
+			BOOL quit = answer(line, reply, REPLY);
 			note("> %.120s", reply);
 			strcat(reply, "\n");
 			send(client, reply, (int)strlen(reply), 0);
 			if (quit) {
 				shutdown(client, SD_SEND);
 				note("quit");
+				trace_draws(NULL);
 				ExitProcess(0);
 			}
 			used -= end + 1 - line;
 			memmove(line, end + 1, used);
 		}
-		if (used == sizeof line - 1)
+		if (used == LINE - 1)
 			used = 0; /* a line too long to answer */
 	}
+}
+
+/* A client of its own thread: a script runner and a watcher may be connected
+ * at once. */
+static DWORD WINAPI serve_one(LPVOID socket)
+{
+	SOCKET client = (SOCKET)socket;
+	char *line = malloc(LINE), *reply = malloc(REPLY);
+	note("client connected");
+	if (line && reply)
+		serve_client(client, line, reply);
+	closesocket(client);
+	note("client gone");
+	free(line);
+	free(reply);
+	return 0;
 }
 
 static DWORD WINAPI serve(LPVOID unused)
@@ -357,7 +433,7 @@ static DWORD WINAPI serve(LPVOID unused)
 	local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	BOOL reuse = TRUE;
 	setsockopt(server, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof reuse);
-	if (bind(server, (struct sockaddr *)&local, sizeof local) || listen(server, 1)) {
+	if (bind(server, (struct sockaddr *)&local, sizeof local) || listen(server, 8)) {
 		note("cannot listen on port %d (error %d)", port, WSAGetLastError());
 		return 1;
 	}
@@ -366,10 +442,11 @@ static DWORD WINAPI serve(LPVOID unused)
 		SOCKET client = accept(server, NULL, NULL);
 		if (client == INVALID_SOCKET)
 			continue;
-		note("client connected");
-		serve_client(client);
-		closesocket(client);
-		note("client gone");
+		HANDLE thread = CreateThread(NULL, 0, serve_one, (LPVOID)client, 0, NULL);
+		if (thread)
+			CloseHandle(thread);
+		else
+			closesocket(client);
 	}
 }
 
