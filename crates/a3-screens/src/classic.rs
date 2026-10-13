@@ -26,6 +26,8 @@ const CELL_HEIGHT: u32 = 13;
 pub const PLAIN: Rgba<u8> = Rgba([224, 222, 226, 255]);
 pub(crate) const TEXT: Rgba<u8> = Rgba([0, 0, 0, 255]);
 pub(crate) const TEXT_HOVER: Rgba<u8> = Rgba([176, 48, 0, 255]);
+/// A popup's edge, in pixels: black, as text.
+const POPUP_EDGE: i32 = 2;
 /// The handle of sliders and scrollbars, and the arrows of list scrollbars,
 /// which the game loads by name.
 pub(crate) const HANDLE: &str = "ScrollerBlau.bmp";
@@ -44,10 +46,19 @@ pub fn is_scene(id: u16) -> bool {
 /// A dialog's own picture, or the plain grey of Windows dialogs if it has
 /// none that can be read.
 pub fn picture(game: &Game, dialog: &Dialog) -> RgbaImage {
-    game.graphic(dialog.background).unwrap_or_else(|err| {
+    let mut picture = game.graphic(dialog.background).unwrap_or_else(|err| {
         warn!("background {}: {err}", dialog.background);
         RgbaImage::from_pixel(640, 480, PLAIN)
-    })
+    });
+    // A popup has a black edge over the rim of its picture.
+    if dialog.frame.is_some() {
+        let (w, h) = (picture.width() as i32, picture.height() as i32);
+        fill(&mut picture, 0, 0, w, POPUP_EDGE, TEXT);
+        fill(&mut picture, 0, h - POPUP_EDGE, w, POPUP_EDGE, TEXT);
+        fill(&mut picture, 0, 0, POPUP_EDGE, h, TEXT);
+        fill(&mut picture, w - POPUP_EDGE, 0, POPUP_EDGE, h, TEXT);
+    }
+    picture
 }
 
 /// A dialog in the classic look: its background and everything it draws

@@ -8,13 +8,13 @@ use std::cmp::Ordering;
 use chrono::NaiveDate;
 use std::collections::BTreeMap;
 
-use crate::cohesion;
 use crate::data::Data;
 use crate::lineup::{BENCH, FIELD, Lineup};
 use crate::random::Random;
 use crate::records::{self, Globals, Records, Team};
 use crate::season::{ClubState, Fitness, Manager, Season, Status};
 use crate::world::Player;
+use crate::{autolineup, cohesion};
 
 /// A manager under contract (`records::Manager::status`).
 const HIRED: u8 = 3;
@@ -55,6 +55,7 @@ pub fn season(records: &Records, data: &Data, random: Random) -> Season {
         current: 0,
         expected: BTreeMap::new(),
         clubs,
+        talk_of: None,
         random,
     }
 }
@@ -107,8 +108,37 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
     let formation = usize::from(team.formation());
     let tickets = team.tickets().into();
     let co_trainer = team.co_trainer() != 0;
-    ClubState { cohesion_bonus, status, strengths, formation, tickets, co_trainer, ..state }
+    let line_up_flags =
+        human.and_then(|slot| records.extras.get(slot)).map_or(0, |e| e.line_up_flags());
+    let pitch = &data.rules.pitch;
+    let country = usize::from(team.country());
+    let counted = pitch.european.get(country).copied().unwrap_or(false);
+    let foreigner_rule = counted && !(country == GERMANY && team.level() > 1);
+    let mut club = ClubState {
+        cohesion_bonus,
+        status,
+        strengths,
+        formation,
+        tickets,
+        co_trainer,
+        line_up_flags,
+        foreigner_rule,
+        ..state
+    };
+    // A game saved in the middle of a matchday goes on with its matches: the
+    // human's turn before his, which lets the co-trainer line the team up.
+    if records.globals.resume() == MATCHES_RESUMED {
+        autolineup::before_match(pitch, &mut club);
+    }
+    club
 }
+
+/// Where the cycle goes on after loading, for a game saved during a
+/// matchday's matches (`FUN_006da3a9`).
+const MATCHES_RESUMED: u16 = 0x3e6;
+/// Germany's nation code: below its second league foreigners count no more
+/// (`FUN_0042c802`).
+const GERMANY: usize = 14;
 
 /// A player record as the world has the players of the data files.
 fn player(records: &Records, record: &records::Player) -> Player {
@@ -168,6 +198,7 @@ fn status(records: &Records, record: &records::Player) -> Status {
         matches: record.league_matches(),
         matches_less: record.league_less(),
         id: record.id(),
+        nations: [record.nation(), record.second_nation()],
         understands: record.understands(),
         clashes: record.clashes(),
         joined: record.joined().and_then(|(day, month, year)| {

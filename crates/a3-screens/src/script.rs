@@ -517,7 +517,10 @@ mod tests {
                 .any(|c| view.text(c).ends_with(&format!(", {day}.{month}.{year}")));
             assert!(dated, "{}: no caption with the date {day}.{month}.{year}", save.name);
 
-            // The squad as the save has it: the eleven, the bench, the rest.
+            // The squad as the save has it: the eleven, the bench, the rest —
+            // unless the save goes on with a matchday's matches, before
+            // which the co-trainer may line the team up anew (see
+            // `the_co_trainer_lines_up_a_resumed_matchday`).
             let manager = records.humans().next().unwrap();
             let team = records.team(manager.country(), manager.team()).unwrap();
             let squad = team.players();
@@ -525,6 +528,14 @@ mod tests {
                 team.lineup().into_iter().chain(team.bench()).filter(|&id| id != 0).collect();
             let rest: Vec<u16> = squad.iter().copied().filter(|id| !order.contains(id)).collect();
             order.extend(rest);
+            if records.globals.resume() == MATCHES_RESUMED {
+                let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+                let id = |p: usize| club.status[p].id;
+                let mut shown: Vec<u16> = club.lineup.squad().map(id).collect();
+                let rest: Vec<u16> = squad.iter().copied().filter(|i| !shown.contains(i)).collect();
+                shown.extend(rest);
+                order = shown;
+            }
             let list = view.controls.iter().find_map(|c| match &c.state {
                 crate::controls::ControlState::List(list) if list.rows.len() == squad.len() => {
                     Some(list)
@@ -804,6 +815,70 @@ mod tests {
         let changed = |x: u32, y: u32| before.get_pixel(x, y) != after.get_pixel(x, y);
         assert!(changed(at.x as u32, at.y as u32));
         assert!(!changed(at.x as u32 + 80, at.y as u32));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_booked_talk_comes_on_its_day() {
+        let game = game();
+        // The talk booked for today, the turn ended with the whistle and
+        // yes to no training: the week's first day brings the talk; the
+        // keeper is praised.
+        // The other manager's turn, in the dressing room, ends the same.
+        let then = "now rclick 2510; choose 9950 1\nuntil dialog 412\nnow choose 5034 0\n\
+                    until dialog 147\non 302 click bar 18\non 384 press 4741\non 2 wait\n\
+                    now click bar 18\nuntil dialog 461\nnow choose 5839 0";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&461];
+        let text = |id| view.text(crate::screens::control(dialog, id).unwrap()).to_owned();
+        assert_eq!(text(5833), "Max Schmitt");
+        assert!(!text(1416).is_empty(), "his reaction");
+        // One topic a talk.
+        let topics = view.options(crate::screens::control(dialog, 5839).unwrap()).unwrap();
+        assert!(topics.off.iter().all(|&off| off));
+    }
+
+    /// Where the cycle goes on after loading a game saved during a
+    /// matchday's matches.
+    const MATCHES_RESUMED: u16 = 0x3e6;
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_co_trainer_lines_up_a_resumed_matchday() {
+        let game = game();
+        // Saved during a matchday, with "Automatische Aufstellung freies
+        // System" ticked: the original opened it on this eleven and bench
+        // (`tools/oracle`, 13.10.2026).
+        let Some(runner) = on_save(&game, "Toni", "") else { return };
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let records = state.records.as_ref().unwrap();
+        let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+        let name = |p: Option<usize>| {
+            p.map_or_else(String::new, |p| {
+                records.name(records.player(club.status[p].id).unwrap().last_name()).to_owned()
+            })
+        };
+        let eleven: Vec<String> = club.lineup.field.iter().map(|&p| name(p)).collect();
+        let bench: Vec<String> = club.lineup.bench.iter().map(|&p| name(p)).collect();
+        assert_eq!(
+            eleven,
+            [
+                "Rönnow",
+                "Leite",
+                "Nsoki",
+                "Juranovic",
+                "Moore",
+                "Skov",
+                "Moscardo",
+                "Lubiniecki",
+                "Haberer",
+                "Burke",
+                "Ljubicic"
+            ]
+        );
+        assert_eq!(bench, ["Raab", "Král", "Schäfer", "Querfeld", "Kemlein", "Khedira", "Köhn"]);
     }
 
     /// A page, a control of it, and the text it shows.

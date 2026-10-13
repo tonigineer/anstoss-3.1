@@ -16,8 +16,6 @@ const DAYS: u16 = 5034;
 const PROMPT: u16 = 5037;
 /// The hidden OK; a day chosen closes it.
 const OK: u16 = 1;
-/// A row's label starts right of the weekday the picture shows.
-const LABEL_INDENT: f32 = 100.0;
 const WEEK: usize = 7;
 
 /// A talk with a player, as the planner books it.
@@ -124,7 +122,6 @@ impl Screen for Planner {
         }
         if let Some(rows) = control(cx.dialog, DAYS).and_then(|c| view.options_mut(c)) {
             rows.labels = labels;
-            rows.label_indent = LABEL_INDENT;
             rows.actions = true;
         }
     }

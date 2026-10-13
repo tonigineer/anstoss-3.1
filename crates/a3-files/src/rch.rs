@@ -114,6 +114,9 @@ pub enum Kind {
 pub struct Item {
     /// Relative to the control.
     pub rect: Rect,
+    /// Where its label starts, from the rectangle's corner; without a
+    /// height the label is centred between top and bottom.
+    pub text_at: Vec2,
     pub text: String,
 }
 
@@ -157,6 +160,9 @@ pub fn load_dialogs(path: &Path) -> io::Result<HashMap<u16, Dialog>> {
 
 /// Where a dialog record's German title starts.
 const TITLE: usize = 0x1e;
+/// A bitmap button's style bits: the dialog's picture shows until it is
+/// held (0x100), and its text is drawn on it (0x200).
+const PUSH_STYLE: u16 = 0x300;
 
 fn parse_dialog(record: &[u8]) -> Option<Dialog> {
     let size = Vec2::new(u32_at(record, 0x10).ok()? as f32, u32_at(record, 0x14).ok()? as f32);
@@ -179,7 +185,9 @@ fn parse_dialog(record: &[u8]) -> Option<Dialog> {
         .collect();
     let screen = Vec2::new(640.0, 480.0);
     let frame = (size.x > 0.0 && size.y > 0.0 && size.cmplt(screen).any()).then(|| {
-        let at = ((screen - size) / 2.0).floor();
+        // The original centres on the middle of the screen, half the size
+        // rounded down: an odd height sits a pixel lower.
+        let at = screen / 2.0 - (size / 2.0).floor();
         Rect::from_corners(at, at + size)
     });
     if let Some(frame) = frame {
@@ -219,6 +227,12 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
     let text = if PLACEHOLDERS.contains(&german.as_str()) { String::new() } else { german };
     let kind = match kind {
         1 => Kind::Static,
+        // A bitmap button that shows the dialog's picture until it is held
+        // and draws its text on it is a push button (`CMyBitmapButton`'s
+        // style bits 0x100 and 0x200).
+        2 if u16s(7)? & PUSH_STYLE == PUSH_STYLE => {
+            Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? }
+        }
         2 => Kind::Button { normal: u16s(5)?, hover: u16s(6)? },
         4 => Kind::ListBox,
         6 => Kind::Anim,
@@ -288,7 +302,8 @@ fn parse_items_by_label(extra: &[u8], count: usize) -> Vec<Item> {
                 let text = cp1252(&extra[start..start + len]);
                 let (_, after_english) =
                     cstr(extra, start + len + 1).unwrap_or((String::new(), start + len + 1));
-                items.push(Item { rect, text });
+                let text_at = text_at(extra, start - ITEM_FLAGS);
+                items.push(Item { rect, text_at, text });
                 pos = after_english;
                 continue;
             }
@@ -314,11 +329,17 @@ fn parse_items_in_order(extra: &[u8], count: usize) -> Vec<Item> {
         if text.chars().any(|c| c < ' ') {
             break;
         }
-        items.push(Item { rect, text });
+        items.push(Item { rect, text_at: text_at(extra, pos + 8), text });
         // Two more bytes, and padding to an even place.
         pos = (after + 2).next_multiple_of(2);
     }
     items
+}
+
+/// Where an item's label starts, the first two of its flags.
+fn text_at(extra: &[u8], flags: usize) -> Vec2 {
+    let at = |i: usize| f32::from(u16_at(extra, flags + 2 * i).unwrap_or(0) as i16);
+    Vec2::new(at(0), at(1))
 }
 
 /// An item's rectangle, if it is one: inside the screen and not empty.

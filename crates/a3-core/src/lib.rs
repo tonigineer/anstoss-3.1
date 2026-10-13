@@ -18,6 +18,7 @@ pub mod random;
 pub mod records;
 pub mod season;
 pub mod state;
+pub mod talk;
 pub mod value;
 pub mod words;
 pub mod world;

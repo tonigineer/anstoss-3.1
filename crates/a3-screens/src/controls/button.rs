@@ -17,6 +17,10 @@ pub const CANCEL_IMAGE: u16 = 1260;
 pub struct ButtonState {
     /// A disabled button ignores the pointer.
     pub disabled: bool,
+    /// Other pictures than the dialog file's, normal and pointed at, and
+    /// those to have ready for them.
+    pub images: Option<(u16, u16)>,
+    pub ready: Vec<u16>,
 }
 
 impl ButtonState {
@@ -26,6 +30,7 @@ impl ButtonState {
             Kind::PushButton { normal, hover } => (normal, hover, true),
             _ => return,
         };
+        let (normal, hover) = self.images.unwrap_or((normal, hover));
         let target = Target::Button(paint.index);
         let pointed = paint.pointed(target) && !self.disabled;
         // The objects of a scene change only while they are held down.
@@ -47,7 +52,13 @@ impl ButtonState {
     }
 }
 
-pub(crate) fn graphics(control: &Control) -> (Vec<u16>, bool) {
+pub(crate) fn graphics(state: &ButtonState, control: &Control) -> (Vec<u16>, bool) {
+    let (mut ids, sprite) = file_graphics(control);
+    ids.extend(&state.ready);
+    (ids, sprite)
+}
+
+fn file_graphics(control: &Control) -> (Vec<u16>, bool) {
     match control.kind {
         Kind::Button { normal, hover } => (vec![normal, hover], true),
         Kind::PushButton { normal, hover } => (vec![normal, hover], false),

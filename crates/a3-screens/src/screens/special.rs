@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use bevy_math::{Rect, Vec2};
 
+use a3_core::autolineup;
 use a3_core::cycle::dialogs::NOTICE;
 use a3_files::rch::{Align, Control, Dialog, Kind};
 
@@ -63,15 +64,29 @@ impl Screen for Special {
         if let Some(variants) = control(cx.dialog, VARIANTS).and_then(|c| view.options_mut(c)) {
             variants.actions = true;
         }
+        // The co-trainer's settings, which only a club with one has
+        // (`CMannaufSpezial`'s OnInitDialog).
+        let (flags, co_trainer) = club(cx).map_or((0, false), |c| (c.line_up_flags, c.co_trainer));
+        for (id, bit) in [(AUTO_FREE, autolineup::AUTO_FREE), (AUTO_OLD, autolineup::AUTO_OLD)] {
+            let Some(c) = control(cx.dialog, id) else { continue };
+            if let Some(check) = view.check_mut(c) {
+                check.checked = co_trainer && flags & bit != 0;
+            }
+            if !co_trainer {
+                view.inert.push(Target::Check(c));
+            }
+        }
         show(cx, view);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
         if ok_or_cancel(cx.dialog, target).0 {
+            keep_settings(cx, view);
             return Outcome::Close(Reply::Ok);
         }
         match target {
             Target::Option { control: c, item } if cx.dialog.controls[c].id == Some(VARIANTS) => {
+                keep_settings(cx, view);
                 Outcome::Close(Reply::Choice(item))
             }
             Target::Row { control: c, row } => {
@@ -84,6 +99,13 @@ impl Screen for Special {
                 let outcome = mark(cx, scroll + row, always);
                 show(cx, view);
                 outcome
+            }
+            // Without a co-trainer the boxes do not answer.
+            Target::Check(c) if view.inert.contains(&target) => {
+                if let Some(check) = view.check_mut(c) {
+                    check.checked = false;
+                }
+                Outcome::Stay
             }
             Target::Check(c) => {
                 // Ticking one unticks the other.
@@ -104,6 +126,42 @@ impl Screen for Special {
             }
             _ => Outcome::Stay,
         }
+    }
+}
+
+/// The club the dialog lines up.
+fn club<'a>(cx: &'a Cx) -> Option<&'a a3_core::season::ClubState> {
+    let season = cx.state.season.as_ref()?;
+    season.clubs.get(&season.manager()?.club?)
+}
+
+/// The co-trainer's settings as the boxes have them, kept with the club and
+/// in its record (`FUN_0063c846`).
+fn keep_settings(cx: &mut Cx, view: &View) {
+    let ticked = |id: u16| {
+        control(cx.dialog, id).and_then(|c| view.check(c)).is_some_and(|check| check.checked)
+    };
+    let mut flags = 0;
+    if ticked(AUTO_FREE) {
+        flags |= autolineup::AUTO_FREE;
+    }
+    if ticked(AUTO_OLD) {
+        flags |= autolineup::AUTO_OLD;
+    }
+    let state = &mut *cx.state;
+    let Some(season) = state.season.as_mut() else { return };
+    let current = season.current;
+    let Some(key) = season.manager().and_then(|m| m.club) else { return };
+    let Some(club) = season.clubs.get_mut(&key) else { return };
+    // The other settings the word holds stay as they are.
+    club.line_up_flags =
+        club.line_up_flags & !(autolineup::AUTO_FREE | autolineup::AUTO_OLD) | flags;
+    let word = club.line_up_flags;
+    if let Some(records) = state.records.as_mut()
+        && let Some(slot) = records.human_slot(current)
+        && let Some(extra) = records.extras.get_mut(slot)
+    {
+        extra.set_line_up_flags(word);
     }
 }
 

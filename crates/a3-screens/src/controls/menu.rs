@@ -26,13 +26,13 @@ pub struct MenuState {
     pub entries: Vec<String>,
 }
 
-impl MenuState {
-    /// Where an entry is, while the menu is open.
-    fn entry(&self, at: Vec2, i: usize) -> Rect {
-        let top = at.y + ENTRY * i as f32;
-        Rect::new(at.x, top, at.x + WIDTH, top + ENTRY)
-    }
+/// Where entry `i` is of a menu opened at `at`.
+pub(crate) fn entry(at: Vec2, i: usize) -> Rect {
+    let top = at.y + ENTRY * i as f32;
+    Rect::new(at.x, top, at.x + WIDTH, top + ENTRY)
+}
 
+impl MenuState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let Some(at) = self.at else { return };
         let height = (ENTRY * self.entries.len() as f32) as i32;
@@ -42,7 +42,7 @@ impl MenuState {
         fill(frame, x + 1, y + 1, WIDTH as i32 - 2, height - 2, PAPER);
         let Some(font) = paint.font() else { return };
         for (i, text) in self.entries.iter().enumerate() {
-            let r = self.entry(at, i);
+            let r = entry(at, i);
             let pointed = paint.pointed(Target::Option { control: paint.index, item: i });
             let color = if pointed { TEXT_HOVER } else { TEXT };
             let top = r.min.y as i32 + (ENTRY as i32 - font.height() as i32) / 2;
@@ -60,10 +60,7 @@ impl MenuState {
         let Some(at) = self.at else { return };
         for (i, text) in self.entries.iter().enumerate() {
             if !text.trim().is_empty() {
-                out.push((
-                    Target::Option { control: index, item: i },
-                    geometry.map(self.entry(at, i)),
-                ));
+                out.push((Target::Option { control: index, item: i }, geometry.map(entry(at, i))));
             }
         }
     }

@@ -15,6 +15,7 @@ pub mod playerinfo;
 pub mod popups;
 pub mod special;
 pub mod start;
+pub mod talk;
 
 pub use a3_core::cycle::{Args, Reply, Request};
 use a3_core::state::GameState;
@@ -110,6 +111,8 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(discipline::FineReply),
         Box::new(discipline::Change),
         Box::new(planner::Planner::default()),
+        Box::new(talk::TalkScreen::default()),
+        Box::new(talk::Mates::default()),
     ]
 }
 

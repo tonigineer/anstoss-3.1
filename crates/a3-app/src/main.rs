@@ -224,8 +224,13 @@ fn play(game: &Game, path: &Path, original: Option<bool>, shot: Option<&Path>) -
                     return AppExit::error();
                 };
                 let picture = a3_screens::classic::picture(game, dialog);
-                let background = match (frame.take(), dialog.frame) {
-                    (Some(mut under), Some(at)) => {
+                // A popup lies over what is under it, or, alone, over a
+                // plain screen — as the app shows it.
+                let background = match dialog.frame {
+                    Some(at) => {
+                        let mut under = frame.take().unwrap_or_else(|| {
+                            image::RgbaImage::from_pixel(640, 480, a3_screens::classic::PLAIN)
+                        });
                         image::imageops::overlay(
                             &mut under,
                             &picture,
@@ -234,7 +239,7 @@ fn play(game: &Game, path: &Path, original: Option<bool>, shot: Option<&Path>) -
                         );
                         under
                     }
-                    _ => picture,
+                    None => picture,
                 };
                 let classic = a3_screens::classic::Classic::new(game, dialog, view, background);
                 frame = Some(classic.draw(dialog, view, false, 0.0));

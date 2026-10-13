@@ -232,6 +232,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
             .iter()
             .map(|&x| Item {
                 rect: Rect::new(f32::from(x), 0.0, f32::from(x) + SYMBOL, BAR.height()),
+                text_at: Vec2::ZERO,
                 text: String::new(),
             })
             .collect();

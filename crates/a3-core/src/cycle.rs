@@ -53,6 +53,8 @@ pub mod dialogs {
     pub const LINEUP: u16 = 147;
     pub const DRESSING_ROOM: u16 = 302;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
+    /// A talk with a player, on the day it was booked for.
+    pub const TALK: u16 = 461;
 }
 
 use self::dialogs::*;
@@ -71,6 +73,9 @@ const GRAND_CLASS: i64 = 5;
 /// The manager's choice of the office over the menu bar.
 const OFFICE_MENU: u8 = 1;
 const WEEK_DAYS: usize = 7;
+/// A talk booked in the week planner, and the talk itself.
+const TALK: u8 = 0x19;
+const TALK_DIALOG: u16 = dialogs::TALK;
 
 /// A screen to open, with what it is to show.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -363,6 +368,7 @@ impl Cycle {
             };
             self.ask(Request::new(week))?;
             for _ in 0..WEEK_DAYS {
+                self.talks()?;
                 self.season(|s| {
                     s.pass_day();
                     s.day += 1;
@@ -370,6 +376,41 @@ impl Cycle {
                 self.ask(Request::new(week))?;
             }
         }
+    }
+
+    /// The talks the managers booked for today with a player still in
+    /// their squads, each in its manager's turn (`FUN_0072fd53`,
+    /// `FUN_0048ddbe`); the week tells of them.
+    fn talks(&self) -> Result<(), Gone> {
+        // Each day's message is new.
+        self.season(|s| s.talk_of = None);
+        let talks: Vec<(usize, u16, String)> = {
+            let state = self.state();
+            let (Some(season), Some(records)) = (state.season.as_ref(), state.records.as_ref())
+            else {
+                return Ok(());
+            };
+            (0..season.managers.len())
+                .filter_map(|n| {
+                    let slot = records.human_slot(n)?;
+                    let booked = records.planners.get(slot)?.day(season.day);
+                    let manager = &season.managers[n];
+                    let club = season.clubs.get(&manager.club?)?;
+                    let in_squad = club.status.iter().any(|s| s.id == booked.player);
+                    (booked.kind == TALK && booked.player != 0 && in_squad)
+                        .then(|| (n, booked.player, manager.last_name.clone()))
+                })
+                .collect()
+        };
+        for (n, player, last_name) in talks {
+            self.season(|s| {
+                s.current = n;
+                s.talk_of = Some(last_name);
+            });
+            self.ask(Request::with(TALK_DIALOG, Args::Record(player)))?;
+        }
+        self.season(|s| s.current = 0);
+        Ok(())
     }
 
     /// The week after the turns: its screen, or none in the week of the

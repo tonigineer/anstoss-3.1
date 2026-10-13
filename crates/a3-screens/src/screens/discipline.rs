@@ -78,6 +78,8 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
         NOTICE,
         QUESTION,
         super::planner::PLANNER,
+        super::talk::TALK,
+        super::talk::MATES,
     ];
     for id in ids {
         let Some(dialog) = dialogs.get_mut(&id) else { continue };
@@ -159,16 +161,19 @@ fn is(cx: &Cx, target: Target, id: u16) -> bool {
     cx.dialog.controls[c].id == Some(id)
 }
 
-/// Shows the line-up the morale the records now have.
-fn refresh_morale(cx: &mut Cx) {
+/// Shows the line-up the morale the records now have, and who is
+/// suspended.
+pub(crate) fn refresh_morale(cx: &mut Cx) {
     let (Some(season), Some(records)) = (cx.state.season.as_mut(), cx.state.records.as_ref())
     else {
         return;
     };
     let Some(key) = season.manager().and_then(|m| m.club) else { return };
     let Some(club) = season.clubs.get_mut(&key) else { return };
-    for (p, status) in club.status.iter().enumerate() {
-        if let (Some(fitness), Some(r)) = (club.fitness.get_mut(p), records.player(status.id)) {
+    for (p, status) in club.status.iter_mut().enumerate() {
+        let Some(r) = records.player(status.id) else { continue };
+        status.away_kind = r.away_kind();
+        if let Some(fitness) = club.fitness.get_mut(p) {
             fitness.morale = r.morale().into();
         }
     }

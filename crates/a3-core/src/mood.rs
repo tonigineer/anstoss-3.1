@@ -100,3 +100,34 @@ pub fn change_trainer(r: &mut Player, by: i32) {
     r.set_contentment(parts);
     r.set_morale(morale(r));
 }
+
+/// How content he is, as one of four: happy, content, unhappy, wanting to
+/// leave (`FUN_00770877`): the last when the trainer, the team and the club
+/// together please him too little, else by the sum of all seven parts.
+pub fn content_level(parts: [i32; 7]) -> usize {
+    let [trainer, team, club, press, private, distraction, offers] = parts;
+    let work = trainer + team + club - 200;
+    let all = work + press + private + distraction + offers - 300;
+    match () {
+        _ if work < 70 => 3,
+        _ if all < 170 => 2,
+        _ if all < 201 => 1,
+        _ => 0,
+    }
+}
+
+/// Moves his contentment with his private life by `by`, and his morale with
+/// it (`FUN_007010d9`).
+pub fn change_private(r: &mut Player, by: i32) {
+    let mut parts = r.contentment();
+    parts[4] = (i32::from(parts[4]) + by).clamp(0, MOST) as u8;
+    r.set_contentment(parts);
+    r.set_morale(morale(r));
+}
+
+/// Takes the reasons of `mask` from him, and reckons his morale anew
+/// (`FUN_00770942`).
+pub fn clear_reasons(r: &mut Player, mask: u32) {
+    r.set_flags(r.flags() & !mask);
+    r.set_morale(morale(r));
+}

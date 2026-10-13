@@ -162,15 +162,8 @@ pub(super) fn show(s: &Shown, view: &mut View) {
 /// before what pleases him.
 fn content_sentence(s: &Shown, r: &Record, parts: [i32; 7]) -> String {
     let words = &s.game.rules.words;
-    let [trainer, team, club, press, private, distraction, offers] = parts;
-    let work = trainer + team + club - 200;
-    let all = work + press + private + distraction + offers - 300;
-    let level = match () {
-        _ if work < 70 => 3,
-        _ if all < 170 => 2,
-        _ if all < 201 => 1,
-        _ => 0,
-    };
+    let [trainer, team, club, ..] = parts;
+    let level = mood::content_level(parts);
     let mut sentence = s.text(words.contentment[level]);
     let mut weakest = (trainer, 0);
     for (i, value) in [(1, team), (2, club)] {

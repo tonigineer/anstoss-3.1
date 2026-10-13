@@ -221,6 +221,9 @@ pub struct Season {
     pub expected: BTreeMap<(usize, usize), (usize, usize)>,
     /// The clubs with a human manager, as the week shows them.
     pub clubs: BTreeMap<(usize, usize), ClubState>,
+    /// The last name of the manager whose booked talk the week had today,
+    /// for its message (`IDC_ABLAUF_WOCHE_MELDUNG`).
+    pub talk_of: Option<String>,
     pub random: Random,
 }
 
@@ -243,6 +246,12 @@ pub struct ClubState {
     pub status: Vec<Status>,
     /// Whether the club has a co-trainer, who can line the team up.
     pub co_trainer: bool,
+    /// The line-up's special settings: bit 1 the co-trainer lines the team
+    /// up before a match in a system of his choosing, bit 2 in the one it
+    /// stands in (the club's extra data +0x2824).
+    pub line_up_flags: u16,
+    /// Whether the club's league lets three foreigners play at most.
+    pub foreigner_rule: bool,
     /// What the team counts for in goal, defence, midfield and attack, as
     /// the save has it; `None` while it is reckoned from the line-up.
     pub strengths: Option<[i32; lineup::PARTS]>,
@@ -300,6 +309,8 @@ pub struct Status {
     /// His id in the save, 0 in a new game; who he understands blindly on
     /// the pitch, and who he does not get on with there, by id.
     pub id: u16,
+    /// His nations, 0 none (or not known, in a new game).
+    pub nations: [u8; 2],
     pub understands: [u16; 2],
     pub clashes: [u16; 2],
     /// When he came to the club.
@@ -326,6 +337,8 @@ impl ClubState {
             fitness,
             status: Vec::new(),
             co_trainer: false,
+            line_up_flags: 0,
+            foreigner_rule: false,
             strengths: None,
             week,
         }
@@ -449,6 +462,7 @@ impl Season {
             main,
             expected,
             clubs: BTreeMap::new(),
+            talk_of: None,
             random,
         };
         for m in 0..season.managers.len() {

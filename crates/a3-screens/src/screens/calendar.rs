@@ -22,6 +22,9 @@ use crate::view::View;
 /// is put together under ids of its own, [`WEEKS`], with no panel, one, …
 /// four.
 pub const WEEK: u16 = 2;
+/// The week's message of the day, and what a booked talk says there.
+const WEEK_MESSAGE: u16 = 5844;
+const TALK_TEXT: u16 = 4230;
 const WEEK_PANEL: u16 = 460;
 pub const WEEK_BACKGROUNDS: [u16; 5] = [2835, 2798, 2799, 2800, 2801];
 pub const PANEL_LEFT: f32 = 128.0;
@@ -226,6 +229,12 @@ fn show_week(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
 
 /// Every human club's panel, as the week has gone so far.
 fn show_panels(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
+    // Today's message: a talk the manager had booked.
+    let message = season
+        .talk_of
+        .as_ref()
+        .map_or_else(String::new, |name| format!("{} {name}", game.text(TALK_TEXT)));
+    set(view, dialog, WEEK_MESSAGE, message);
     let clubs = season.managers.iter().filter_map(|m| Some((m, m.club?)));
     for (panel, (manager, own)) in clubs.enumerate() {
         let set = |view: &mut View, id: u16, text: String| {

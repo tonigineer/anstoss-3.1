@@ -78,6 +78,9 @@ pub const NEUTRAL_MOOD: i32 = 10;
 /// The game's morale of a player, from which his strength counts fully.
 pub const FULL_MORALE: i32 = 100;
 const MORALE_TOP: i32 = 110;
+/// Whether a nation is of the European Union, by nation code.
+const EUROPEAN_AT: u32 = 0x89e0b8;
+const NATIONS: usize = 0x80;
 
 /// The game's tables for the pitch.
 pub struct Tables {
@@ -96,6 +99,11 @@ pub struct Tables {
     fit: Vec<i16>,
     parts: Vec<[u8; PARTS]>,
     ability_icons: Vec<u16>,
+    /// The co-trainer's free system: how many of each kind he puts up at
+    /// most, and the spots for so many defenders, midfielders and strikers.
+    pub co_trainer: crate::autolineup::CoTrainerTables,
+    /// The nations of the European Union, whose players are no foreigners.
+    pub european: Vec<bool>,
 }
 
 impl Tables {
@@ -138,6 +146,8 @@ impl Tables {
                 .into_iter()
                 .map(|id| id as u16)
                 .collect(),
+            co_trainer: crate::autolineup::CoTrainerTables::load(exe)?,
+            european: exe.bytes(EUROPEAN_AT, NATIONS)?.iter().map(|&b| b != 0).collect(),
         })
     }
 

@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use a3_files::rch::Kind;
 use bevy_math::Vec2;
 
+use crate::controls::menu;
 use crate::game::Game;
 use crate::pointer::{self, Grip, Pixels, Target};
 use crate::script::{Action, Error, Line, Script, Until, target_of};
@@ -105,6 +106,8 @@ pub struct Original<'a> {
     pub log: Vec<String>,
     logged: Option<Up>,
     explore: bool,
+    /// Where the last right click fell: the menu it opened is there.
+    menu_at: Option<Vec2>,
 }
 
 impl<'a> Original<'a> {
@@ -125,6 +128,7 @@ impl<'a> Original<'a> {
             log: Vec::new(),
             logged: None,
             explore,
+            menu_at: None,
         };
         let result = original.run(script);
         (original, result)
@@ -296,6 +300,17 @@ impl<'a> Original<'a> {
         if let Target::Menu(at) = target {
             let at = rect(grip(at))?.center();
             self.probe.ask(format!("rclick {} {}", at.x as i32, at.y as i32).as_bytes())?;
+            self.menu_at = Some(at);
+            sleep(PAUSE);
+            return Ok(());
+        }
+        // An entry of the menu a right click opened (dialog 415).
+        if let Target::Option { control, item } = target
+            && matches!(dialog.controls[control].kind, Kind::Menu)
+        {
+            let at =
+                self.menu_at.ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))?;
+            self.click(menu::entry(at, item).center())?;
             sleep(PAUSE);
             return Ok(());
         }

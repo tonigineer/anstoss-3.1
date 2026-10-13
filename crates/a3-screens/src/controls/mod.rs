@@ -189,7 +189,7 @@ impl ControlState {
     /// whether their black is clear.
     pub(crate) fn graphics(&self, control: &Control) -> (Vec<u16>, bool) {
         match self {
-            Self::Button(_) => button::graphics(control),
+            Self::Button(b) => button::graphics(b, control),
             Self::Options(_) => options::graphics(control),
             Self::Anim(anim) => (anim.frames.clone(), true),
             Self::Bar(_) => (bar::IMAGES.to_vec(), false),

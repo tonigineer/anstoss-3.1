@@ -288,6 +288,11 @@ record! {
     0x26d => doping, set_doping: u8;
     /// Bit 7: the long absence's length is not known yet.
     0x26e => long_unknown, set_long_unknown: u8;
+    /// Bits a match sets (meaning not traced): a player with none of them
+    /// takes heart from being cheered up.
+    0x25b => match_bits, set_match_bits: u8;
+    /// His grade in the last match, twice it, in the low four bits.
+    0x273 => grade, set_grade: u8;
     /// His partner: her kind in the low two bits (0 none, girlfriend,
     /// fiancée, wife), how they stand in bits 2 to 4.
     0x27e => partner, set_partner: u8;
@@ -390,6 +395,10 @@ record! {
     0x12d => country, set_country: u8;
     /// Its league's level, 0 the first.
     0x12e => level, set_level: u8;
+    /// The team's mood ("Stimmung"), 0 to 200 (`FUN_007147ce`).
+    0xc4 => mood, set_mood: u8;
+    /// Kept between 10 and 50, 30 at first (meaning not traced).
+    0x138 => spirit, set_spirit: u8;
     /// This season: bonuses paid the first team, fines taken from players.
     0x500 => bonuses_paid, set_bonuses_paid: i32;
     0x504 => fines, set_fines: i32;
@@ -450,6 +459,10 @@ record! {
     0x380 => sessions_34, set_sessions_34: i16;
     /// A count cohesion takes twice (`FUN_0069d5a7`; meaning not traced).
     0x2564 => together, set_together: i16;
+    /// The line-up's special settings (`CMannaufSpezial`): bit 1 the
+    /// co-trainer lines the team up before a match in a system of his
+    /// choosing, bit 2 in the one it stands in.
+    0x2824 => line_up_flags, set_line_up_flags: u16;
 }
 
 impl Extra {
@@ -481,6 +494,11 @@ record! {
     0x2e => birth_day, set_birth_day: u8;
     0x2f => birth_month, set_birth_month: u8;
     0x30 => birth_year, set_birth_year: u16;
+    /// His abilities at every level, seven a row: the fourth his authority
+    /// (`Autorität`).
+    0x34 => abilities, set_abilities: [[i16; 7]; 16];
+    /// How the public, the fans and the media like him, 0 to 100.
+    0x126 => popularity, set_popularity: [u8; 3];
     /// When he signed with his club: day, month, year.
     0x17c => signed_day, set_signed_day: u8;
     0x17d => signed_month, set_signed_month: u8;
@@ -638,6 +656,21 @@ impl Globals {
     }
 }
 
+/// A table of luck the game draws anew each season: thirty numbers below 30,
+/// a player's by his id (`DAT_00ae6de8`, `FUN_0065e659`).
+const LUCK_AT: u32 = 0xae6de8;
+record! {
+    Luck, 60, base 0xae6de8;
+    0xae6de8 => values, set_values: [i16; 30];
+}
+
+impl Luck {
+    /// A player's luck.
+    pub fn of(&self, id: u16) -> i16 {
+        self.values()[usize::from(id) % 30]
+    }
+}
+
 /// The block of tables by country (`0xae5b18`, its data from `0xae5b38`).
 const COUNTRIES_AT: u32 = 0xae5b18;
 record! {
@@ -684,6 +717,7 @@ pub struct Records {
     pub extras: Vec<Extra>,
     /// The human managers' week planners, by slot.
     pub planners: Vec<Planner>,
+    pub luck: Luck,
     /// The pool of names the players' names point into.
     pub names: Vec<String>,
     save: Save,
@@ -716,9 +750,21 @@ impl Records {
             .map(|n| Planner::new(block(format!("{PLANNER_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
         let globals = Globals::new(block(format!("{GLOBALS_AT:#x}"))?)?;
+        let luck = Luck::new(block(format!("{LUCK_AT:#x}"))?)?;
         let countries = Countries::new(block(format!("{COUNTRIES_AT:#x}"))?)?;
         let names = block("names".to_owned())?.split(|&b| b == 0).map(cp1252).collect();
-        Ok(Self { players, teams, managers, globals, countries, extras, planners, names, save })
+        Ok(Self {
+            players,
+            teams,
+            managers,
+            globals,
+            countries,
+            extras,
+            planners,
+            luck,
+            names,
+            save,
+        })
     }
 
     /// The save with the records written back into their blocks.
@@ -744,6 +790,7 @@ impl Records {
             put(format!("{PLANNER_AT:#x}[{n}]"), 0, planner.bytes());
         }
         put(format!("{GLOBALS_AT:#x}"), 0, self.globals.bytes());
+        put(format!("{LUCK_AT:#x}"), 0, self.luck.bytes());
         put(format!("{COUNTRIES_AT:#x}"), 0, self.countries.bytes());
         for block in &mut save.blocks {
             for (at, bytes) in records.get(&block.name).into_iter().flatten() {
