@@ -68,7 +68,7 @@ const MOST_STRENGTH: i32 = 140;
 /// Form is reckoned from condition and freshness between these two, in a
 /// third, around a mood the game starts every player at.
 const FORM_RANGE: (i32, i32) = (20, 80);
-const NEUTRAL_MOOD: i32 = 10;
+pub const NEUTRAL_MOOD: i32 = 10;
 /// The game's morale of a player, from which his strength counts fully.
 pub const FULL_MORALE: i32 = 100;
 const MORALE_TOP: i32 = 110;
@@ -195,10 +195,14 @@ impl Tables {
     pub fn strength_at(&self, player: &Player, fitness: Fitness, position: u8) -> i32 {
         let base = (i32::from(player.strength) - 1) * 10 + form(fitness);
         let mut value = base * self.fit(player, position) / 10;
-        let morale = FULL_MORALE;
+        let morale = fitness.morale;
         value =
             if morale <= MORALE_TOP { value * morale } else { value * (2 * MORALE_TOP - morale) };
-        (value / 100).clamp(0, MOST_STRENGTH)
+        value = (value / 100).min(MOST_STRENGTH);
+        if fitness.knock {
+            value = value * 9 / 10;
+        }
+        value.max(0)
     }
 
     /// The strongest eleven of a squad on the spots of a formation, the
@@ -304,11 +308,11 @@ pub fn form(fitness: Fitness) -> i32 {
     let fresh = (fitness.freshness.iter().sum::<i32>() / 100).clamp(0, 100);
     let (low, high) = FORM_RANGE;
     let fit = ((condition + fresh) / 2).clamp(low, high);
-    ((fit - low) / 3 + NEUTRAL_MOOD) / 2
+    ((fit - low) / 3 + fitness.mood) / 2
 }
 
 pub fn fitness_of(fitness: &[Fitness], player: usize) -> Fitness {
-    fitness.get(player).copied().unwrap_or(Fitness { condition: 5000, freshness: [5000, 0, 0] })
+    fitness.get(player).copied().unwrap_or(Fitness::new(5000, 5000))
 }
 
 #[cfg(test)]
@@ -346,7 +350,7 @@ mod tests {
         assert_eq!(unique.len(), squad.len());
         assert!(lineup.bench.iter().all(Option::is_some));
         // On his main position a player brings his whole strength.
-        let fresh = Fitness { condition: 5000, freshness: [5000, 0, 0] };
+        let fresh = Fitness::new(5000, 5000);
         let p = &club.players[keeper];
         assert_eq!(pitch.fit(p, 1), 10);
         let strength = (i32::from(p.strength) - 1) * 10 + super::form(fresh);
@@ -355,7 +359,7 @@ mod tests {
 
     #[test]
     fn form_follows_condition_and_freshness_around_the_mood() {
-        let at = |condition, fresh| super::form(Fitness { condition, freshness: [fresh, 0, 0] });
+        let at = |condition, fresh| super::form(Fitness::new(condition, fresh));
         assert_eq!(at(0, 0), 5);
         assert_eq!(at(10_000, 10_000), 15);
         assert_eq!(at(4000, 7000), 10);

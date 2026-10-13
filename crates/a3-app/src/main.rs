@@ -36,6 +36,7 @@ const EXPORT_FLAG: &str = "--export-backgrounds";
 const SCRIPT_FLAG: &str = "--script";
 const ORIGINAL_FLAG: &str = "--original";
 const EXPLORE_FLAG: &str = "--explore";
+const SHOT_FLAG: &str = "--shot";
 const DEFAULT_PROBE_PORT: u16 = 47300;
 const SCREENS_FLAG: &str = "--screens";
 const DEFAULT_DIR: &str = ".local/share/bottles/bottles/ANSTOSS-3/drive_c/GOG Games/ANSTOSS 3";
@@ -97,10 +98,10 @@ fn main() -> AppExit {
     // menu bar of its main screens, which the dialog file leaves out.
     dialog::compose(&mut game);
     if let Some(script) = &args.original {
-        return play(&game, script, Some(args.explore));
+        return play(&game, script, Some(args.explore), None);
     }
     if let Some(script) = &args.script {
-        return play(&game, script, None);
+        return play(&game, script, None, args.shot.as_deref());
     }
     if args.export {
         return match dialog::export_backgrounds(&game) {
@@ -143,6 +144,8 @@ struct Args {
     script: Option<PathBuf>,
     original: Option<PathBuf>,
     explore: bool,
+    /// Where `--script` saves the screen it ends on.
+    shot: Option<PathBuf>,
     screens: bool,
 }
 
@@ -161,6 +164,8 @@ impl Args {
                 args.original = words.next().map(PathBuf::from);
             } else if word == EXPLORE_FLAG {
                 args.explore = true;
+            } else if word == SHOT_FLAG {
+                args.shot = words.next().map(PathBuf::from);
             } else if args.dir.is_none() {
                 args.dir = Some(PathBuf::from(word));
             }
@@ -181,8 +186,9 @@ impl Args {
 
 /// Plays a script without a window, on the replica or — with whether to
 /// explore — the original, and prints every screen that came up and every
-/// action.
-fn play(game: &Game, path: &Path, original: Option<bool>) -> AppExit {
+/// action. On the replica, `shot` saves the screen it ends on, drawn in the
+/// classic look.
+fn play(game: &Game, path: &Path, original: Option<bool>, shot: Option<&Path>) -> AppExit {
     let script = match std::fs::read_to_string(path) {
         Ok(text) => a3_screens::script::Script::parse(&text),
         Err(err) => {
@@ -209,6 +215,19 @@ fn play(game: &Game, path: &Path, original: Option<bool>) -> AppExit {
         }
     } else {
         let (runner, result) = a3_screens::script::Runner::play(game, &script);
+        if let Some(shot) = shot {
+            let view = runner.host.view();
+            let Some(dialog) = game.dialogs.get(&view.id) else {
+                eprintln!("no dialog {} to draw", view.id);
+                return AppExit::error();
+            };
+            let background = a3_screens::classic::picture(game, dialog);
+            let classic = a3_screens::classic::Classic::new(game, dialog, view, background);
+            if let Err(err) = classic.draw(dialog, view, false, 0.0).save(shot) {
+                eprintln!("{}: {err}", shot.display());
+                return AppExit::error();
+            }
+        }
         (runner.log, result)
     };
     log.iter().for_each(|line| println!("{line}"));

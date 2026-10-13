@@ -1,6 +1,7 @@
-//! Reader for ANSTOSS 3 savegames (`saves/*.an3`): the file split into the
-//! blocks the original's loader reads, each decompressed and named after the
-//! memory it fills — the base for comparing two saves block by block.
+//! ANSTOSS 3 savegames (`saves/*.an3`): the file split into the blocks the
+//! original's loader reads, each decompressed and named after the memory it
+//! fills — the base for comparing two saves block by block — and written
+//! back, every block as it was read unless its data changed.
 //!
 //! The writer is `FUN_006ed31e`, the loader `CDiLoad::FUN_00678f07`; the
 //! order of the blocks below is the loader's, for version 50 and later (the
@@ -15,7 +16,9 @@
 //!   memory object's data, which starts 0x20 bytes into the object;
 //! - a few objects stored as they are, whose sizes the file does not say
 //!   (the object's header does, at run time): fixed here;
-//! - the players: 17 blocks of 1000 records and one of the last 6;
+//! - the players: 17 blocks of 1000 records and one of the last 6, each the
+//!   buffer of 0x354 bytes a record that the writer packs them into without
+//!   their headers, 0x334 bytes apart (`FUN_007cfff4`);
 //! - the pool of names: a count, a size, the strings;
 //! - two lists with a u16 count: entries of 4000 bytes as they are, and
 //!   blocks of 0x324;
@@ -74,8 +77,9 @@ pub enum Form {
 pub struct Block {
     /// Where the block goes: an address, with the loop's rounds as indices.
     pub name: String,
-    /// Where it starts in the file.
+    /// Where it starts in the file, and how many bytes it takes there.
     pub offset: usize,
+    pub size: usize,
     pub form: Form,
     /// Its bytes, decompressed.
     pub data: Vec<u8>,
@@ -85,6 +89,18 @@ pub struct Block {
 pub struct Save {
     pub header: Header,
     pub blocks: Vec<Block>,
+    /// The file as it was read, whose blocks are written again while their
+    /// data stays the same.
+    source: Source,
+}
+
+#[derive(Clone)]
+struct Source(Vec<u8>);
+
+impl fmt::Debug for Source {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} bytes", self.0.len())
+    }
 }
 
 impl Save {
@@ -114,7 +130,43 @@ impl Save {
                 file.pos
             )));
         }
-        Ok(Self { header: Header { value, flag, date, version, extra }, blocks: file.blocks })
+        let header = Header { value, flag, date, version, extra };
+        Ok(Self { header, blocks: file.blocks, source: Source(bytes.to_vec()) })
+    }
+
+    pub fn write(&self, path: &Path) -> io::Result<()> {
+        std::fs::write(path, self.to_bytes()?)
+    }
+
+    /// The file: every block as it was read while its data is what it was,
+    /// one whose data changed stored as it is — the loader copies a chunk
+    /// with a negative word (`FUN_007d30f0`) — and the header as it is now.
+    pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
+        self.encode(true)
+    }
+
+    /// The file with every packed block stored as it is, none compressed.
+    pub fn to_bytes_stored(&self) -> io::Result<Vec<u8>> {
+        self.encode(false)
+    }
+
+    fn encode(&self, keep: bool) -> io::Result<Vec<u8>> {
+        let mut file =
+            Writer { save: self, keep, next: 0, out: Vec::with_capacity(self.source.0.len()) };
+        for i in 0..4 {
+            file.raw(&format!("{:#x}[{i}]", 0x1b990d8))?;
+        }
+        let Header { value, flag, date, version, extra } = self.header;
+        file.out.extend(value.to_le_bytes());
+        file.out.push(flag);
+        for word in [date.0, date.1, date.2, version, extra] {
+            file.out.extend(word.to_le_bytes());
+        }
+        file.steps(LAYOUT, &mut Vec::new())?;
+        if let Some(block) = self.blocks.get(file.next) {
+            return Err(invalid(&format!("{}: a block the layout has no place for", block.name)));
+        }
+        Ok(file.out)
     }
 
     /// The block of this name (the first, if the loader reads it twice).
@@ -531,7 +583,7 @@ impl Reader<'_> {
     fn raw(&mut self, name: String, len: usize) -> io::Result<&Block> {
         let offset = self.pos;
         let data = self.take(len)?.to_vec();
-        self.blocks.push(Block { name, offset, form: Form::Raw, data });
+        self.blocks.push(Block { name, offset, size: len, form: Form::Raw, data });
         Ok(self.blocks.last().unwrap())
     }
 
@@ -570,7 +622,7 @@ impl Reader<'_> {
                 data.len()
             )));
         }
-        self.blocks.push(Block { name, offset, form, data });
+        self.blocks.push(Block { name, offset, size: self.pos - offset, form, data });
         Ok(self.blocks.last().unwrap())
     }
 
@@ -640,6 +692,124 @@ impl Reader<'_> {
     }
 }
 
+/// Writes a save's blocks in the order of the layout, as [`Reader`] reads
+/// them.
+struct Writer<'a> {
+    save: &'a Save,
+    /// Whether blocks whose data stayed the same are written as they were
+    /// read.
+    keep: bool,
+    /// The next block to write.
+    next: usize,
+    out: Vec<u8>,
+}
+
+impl<'a> Writer<'a> {
+    /// The next block, which the layout calls `name`.
+    fn block(&mut self, name: &str) -> io::Result<&'a Block> {
+        let save = self.save;
+        let block =
+            save.blocks.get(self.next).ok_or_else(|| invalid(&format!("no block {name}")))?;
+        if block.name != name {
+            return Err(invalid(&format!("{} where the layout has {name}", block.name)));
+        }
+        self.next += 1;
+        Ok(block)
+    }
+
+    /// The next block if the layout may have it here.
+    fn peek(&self, name: &str) -> bool {
+        self.save.blocks.get(self.next).is_some_and(|block| block.name == name)
+    }
+
+    fn raw(&mut self, name: &str) -> io::Result<()> {
+        let block = self.block(name)?;
+        self.out.extend(&block.data);
+        Ok(())
+    }
+
+    fn packed(&mut self, name: &str) -> io::Result<()> {
+        let block = self.block(name)?;
+        let read = &self.save.source.0[block.offset..block.offset + block.size];
+        if self.keep && unchanged(block, read) {
+            self.out.extend(read);
+        } else if block.data.is_empty() && block.form == Form::Empty {
+            self.out.extend(0u32.to_le_bytes());
+        } else {
+            let len = i32::try_from(block.data.len()).map_err(|_| invalid("a block of 2 GB"))?;
+            self.out.extend((len as u32 + 4).to_le_bytes());
+            self.out.extend((-len).to_le_bytes());
+            self.out.extend(&block.data);
+        }
+        Ok(())
+    }
+
+    fn steps(&mut self, steps: &[Step], rounds: &mut Vec<usize>) -> io::Result<()> {
+        for step in steps {
+            match *step {
+                Object { at, strides } => self.packed(&name(at, strides, rounds))?,
+                Global { at, .. } => self.packed(&format!("{at:#x}"))?,
+                Local { name, .. } => self.packed(name)?,
+                Raw { at, strides, .. } => self.raw(&name(at, strides, rounds))?,
+                RawGlobal { at, .. } => self.raw(&format!("{at:#x}"))?,
+                Repeat { count, steps } => {
+                    for round in 0..count {
+                        rounds.push(round);
+                        self.steps(steps, rounds)?;
+                        rounds.pop();
+                    }
+                }
+                Players => {
+                    for block in 0..PLAYERS.div_ceil(PLAYERS_PER_BLOCK) {
+                        self.packed(&format!("players[{block}]"))?;
+                    }
+                }
+                Names => {
+                    for name in ["names.count", "names.size", "names"] {
+                        self.packed(name)?;
+                    }
+                }
+                List { at } => self.raw(&format!("{at:#x}"))?,
+                PtrList { at } => {
+                    let mut count = 0u16;
+                    while self.peek(&format!("{at:#x}[{count}]")) {
+                        count += 1;
+                    }
+                    self.out.extend(count.to_le_bytes());
+                    for i in 0..count {
+                        self.packed(&format!("{at:#x}[{i}]"))?;
+                    }
+                }
+                Flagged { at, stride } => {
+                    let flags = self.save.blocks[..self.next]
+                        .last()
+                        .map(|b| b.data.clone())
+                        .unwrap_or_default();
+                    for i in 0..10 {
+                        if flags.get(i * 4).is_some_and(|&flag| flag != 0) {
+                            self.packed(&name(at, &[stride], &[i]))?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether a packed block's data is still what its bytes in the file give.
+fn unchanged(block: &Block, read: &[u8]) -> bool {
+    match block.form {
+        Form::Empty => block.data.is_empty(),
+        Form::Stored => read.get(8..8 + block.data.len()) == Some(block.data.as_slice()),
+        Form::Packed(_) => {
+            let mut out = Vec::with_capacity(block.data.len());
+            inflate(&read[8..], block.data.len(), &mut out).is_ok() && out == block.data
+        }
+        Form::Raw => false,
+    }
+}
+
 /// `0x1a72ff8[17]`: the base address and the rounds it is indexed with.
 fn name(at: u32, strides: &[u32], rounds: &[usize]) -> String {
     let mut name = format!("{at:#x}");
@@ -683,6 +853,38 @@ mod tests {
         assert!(read > 0, "no saves in {}", dir.display());
     }
 
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_saves_write_back() {
+        let dir = std::path::PathBuf::from(std::env::var_os("ANSTOSS3_DIR").expect("ANSTOSS3_DIR"));
+        let mut written = 0;
+        for entry in std::fs::read_dir(dir.join("saves")).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|extension| !extension.eq_ignore_ascii_case("an3")) {
+                continue;
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            let mut save = Save::parse(&bytes).unwrap();
+            assert!(
+                save.to_bytes().unwrap() == bytes,
+                "{} does not write back as it was",
+                path.display()
+            );
+            let stored = Save::parse(&save.to_bytes_stored().unwrap()).unwrap();
+            assert!(stored.blocks.iter().all(|block| !matches!(block.form, Form::Packed(_))));
+            assert!(compare(&save, &stored).blocks.is_empty(), "{}", path.display());
+            // A block that changed is stored; the others stay as they were.
+            let players = save.blocks.iter().position(|block| block.name == "players[3]").unwrap();
+            save.blocks[players].data[0x19c] ^= 0xff;
+            let changed = Save::parse(&save.to_bytes().unwrap()).unwrap();
+            assert_eq!(changed.blocks[players].form, Form::Stored);
+            assert!(changed.blocks[players].data == save.blocks[players].data);
+            assert_eq!(compare(&save, &changed).blocks.len(), 0);
+            written += 1;
+        }
+        assert!(written > 0, "no saves in {}", dir.display());
+    }
+
     /// The dumps `tools/oracle/check.sh` has the original write.
     #[test]
     #[ignore = "reads the oracle's dumps from $ANSTOSS3_ORACLE (tools/oracle/check.sh)"]
@@ -697,7 +899,8 @@ mod tests {
                 if path.is_dir() {
                     dirs.push(path);
                 } else if path.extension().is_some_and(|extension| extension == "an3") {
-                    Save::read(&path).unwrap();
+                    let save = Save::read(&path).unwrap();
+                    assert!(save.to_bytes().unwrap() == std::fs::read(&path).unwrap());
                     read += 1;
                 }
             }

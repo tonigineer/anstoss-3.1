@@ -14,7 +14,9 @@ use bevy_math::{Rect, Vec2};
 use tracing::info;
 
 use a3_core::lineup::{self, BENCH, FIELD, Lineup, PARTS};
-use a3_core::season::{BAR_SYMBOLS, ClubState, Rules, Season};
+use a3_core::load;
+use a3_core::records::Records;
+use a3_core::season::{BAR_SYMBOLS, ClubState, Rules, Season, Status};
 use a3_core::world::Player;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
@@ -46,6 +48,8 @@ const CAPTION_RECT: Rect = Rect { min: Vec2::new(5.0, 3.0), max: Vec2::new(635.0
 const LINEUP_CAPTION: u16 = 2515;
 const DRESSING_CAPTION: u16 = 2527;
 const DATE: u16 = 1997;
+/// "%dT": days away from the club.
+const ONLY_DAYS: u16 = 3609;
 const NO_TRAINING: u16 = 3238;
 
 /// Ids for the controls the game makes itself.
@@ -93,6 +97,8 @@ const ABILITY_COLUMNS: [f32; 3] = [180.0, 196.0, 212.0];
 const PLAYING_INK: [u8; 3] = [0, 0, 0];
 const BENCH_INK: [u8; 3] = [10, 10, 250];
 const STANDS_INK: [u8; 3] = [69, 147, 11];
+/// Out, or at the end of his contract.
+const OUT_INK: [u8; 3] = [255, 0, 0];
 /// The comparison with the next opponent: the cohesion, both clubs' names,
 /// and goal, defence, midfield and attack, the total and the average form
 /// for either.
@@ -214,11 +220,10 @@ impl Screen for MenuBar {
             }
         }
         if view.id == LINEUP
-            && let Some((slot, index)) = manager.club
-            && let Some(club) = game.world.country(slot).and_then(|c| c.clubs.get(index))
-            && let Some(state) = season.clubs.get(&(slot, index))
+            && let Some(club) = manager.club
+            && let Some(state) = season.clubs.get(&club)
         {
-            show_lineup(view, dialog, game, season, &club.players, state);
+            show_lineup(view, dialog, game, season, state, cx.state.records.as_ref());
         }
     }
 
@@ -263,10 +268,11 @@ fn show_lineup(
     dialog: &Dialog,
     game: &Game,
     season: &Season,
-    players: &[Player],
     state: &ClubState,
+    records: Option<&Records>,
 ) {
     let pitch = &game.rules.pitch;
+    let players = &state.players;
     let lineup = &state.lineup;
     let fitness = |p: usize| lineup::fitness_of(&state.fitness, p);
     let abbreviation = |kind: u8| {
@@ -306,6 +312,7 @@ fn show_lineup(
         view.set_player(c, shown);
     }
 
+    let status = |p: usize| state.status.get(p).copied().unwrap_or_default();
     if let Some(state) = control(dialog, SQUAD).and_then(|l| view.list_mut(l)) {
         let order: Vec<usize> = lineup
             .squad()
@@ -333,16 +340,18 @@ fn show_lineup(
                     sides,
                     player.strength.to_string(),
                     form.to_string(),
-                    " ".to_owned(),
-                    lineup::FULL_MORALE.to_string(),
+                    trend(form, status(p).last_form).to_owned(),
+                    fitness(p).morale.to_string(),
                     tenths(pitch.strength_at(player, fitness(p), main)),
                     player.shirt.to_string(),
                     player.age(today).to_string(),
-                    String::new(),
+                    out_for(&status(p), game),
                 ]
                 .join("\t"),
             );
-            state.inks.push(Some(if lineup.playing(p) {
+            state.inks.push(Some(if out(&status(p)) {
+                OUT_INK
+            } else if lineup.playing(p) {
                 PLAYING_INK
             } else if lineup.on_bench(p) {
                 BENCH_INK
@@ -354,24 +363,71 @@ fn show_lineup(
                 .push(ABILITY_COLUMNS.into_iter().zip(pitch.ability_icons(player)).collect());
         }
     }
-    show_comparison(view, dialog, game, season, players, state);
+    show_comparison(view, dialog, game, season, state, records);
+}
+
+/// A player's form against the one the list showed last.
+fn trend(form: i32, last: Option<i32>) -> &'static str {
+    match last {
+        Some(last) if form < last => "-",
+        Some(last) if form > last => "+",
+        _ => " ",
+    }
+}
+
+/// How long a player is out, as the list says it (`FUN_0050ada7`): the
+/// first of a long absence in weeks, an injury of a week or more in weeks,
+/// a suspension in matches — "?" while their length is not known — and
+/// days away from the club.
+fn out_for(status: &Status, game: &Game) -> String {
+    const UNKNOWN: u8 = 0x80;
+    const MATCHES: u8 = 0x3f;
+    let days = WEEK_DAYS as i32;
+    if status.long > 0 {
+        if status.long_unknown { "?".into() } else { ((status.long + days - 1) / days).to_string() }
+    } else if status.injured > 0 {
+        if status.injured >= days { (status.injured / days).to_string() } else { String::new() }
+    } else if status.suspended & MATCHES != 0 {
+        if status.suspended & UNKNOWN != 0 {
+            "?".into()
+        } else {
+            (status.suspended & MATCHES).to_string()
+        }
+    } else if status.away > 0 {
+        game.text(ONLY_DAYS).replace("%d", &status.away.to_string())
+    } else {
+        String::new()
+    }
+}
+
+/// Whether the list writes a player in red: out for a while, suspended, or
+/// at the end of his contract.
+fn out(status: &Status) -> bool {
+    status.long > 0
+        || status.suspended != 0
+        || status.injured >= WEEK_DAYS as i32
+        || status.away > 0
+        || status.contract.is_some_and(|years| years <= 0)
 }
 
 /// The panel that holds the line-up against the next opponent's, if the
-/// club plays this week.
+/// club plays this week: in a loaded game the opponent as the save has it,
+/// else the data files' squad in the first formation.
 fn show_comparison(
     view: &mut View,
     dialog: &Dialog,
     game: &Game,
     season: &Season,
-    players: &[Player],
     state: &ClubState,
+    records: Option<&Records>,
 ) {
     let pitch = &game.rules.pitch;
+    let players = &state.players;
     let Some(own) = season.manager().and_then(|m| m.club) else { return };
     let club = |(slot, c): (usize, usize)| game.world.country(slot).and_then(|k| k.clubs.get(c));
     let own_name = club(own).map_or("", |c| c.name.as_str());
-    set(view, dialog, COHESION, tenths(pitch.cohesion(&state.lineup, players)));
+    let cohesion = state.cohesion.unwrap_or_else(|| pitch.cohesion(&state.lineup, players));
+    set(view, dialog, COHESION, tenths(cohesion));
     let side = |view: &mut View,
                 lineup: &Lineup,
                 players: &[Player],
@@ -410,9 +466,16 @@ fn show_comparison(
         |home: bool, name: &str| game.text(if home { HOME } else { AWAY }).replacen("%s", name, 1);
     set(view, dialog, OWN_NAME, mark(home, own_name));
     set(view, dialog, OPPONENT_NAME, mark(!home, club(opponent).map_or("", |c| c.name.as_str())));
-    let theirs = club(opponent).map_or(&[][..], |c| &c.players[..]);
-    let lineup = pitch.line_up(theirs, 0);
-    side(view, &lineup, theirs, &[], (OPPONENT_PARTS, OPPONENT_TOTAL, OPPONENT_FORM));
+    let theirs = match records.and_then(|records| load::club(records, &game.data, opponent)) {
+        Some(theirs) => theirs,
+        None => {
+            let players = club(opponent).map_or_else(Vec::new, |c| c.players.clone());
+            let lineup = pitch.line_up(&players, 0);
+            ClubState::new(players, lineup, Vec::new(), 0)
+        }
+    };
+    let ids = (OPPONENT_PARTS, OPPONENT_TOTAL, OPPONENT_FORM);
+    side(view, &theirs.lineup, &theirs.players, &theirs.fitness, ids);
 }
 
 /// Tenths as the game prints them: "7.3".

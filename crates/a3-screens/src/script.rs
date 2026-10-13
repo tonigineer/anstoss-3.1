@@ -420,6 +420,70 @@ mod tests {
         assert_eq!(whistles, 2 * 6);
     }
 
+    /// Loads the newest save and stops on the line-up.
+    const LOAD: &str = include_str!("../scripts/load.txt");
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn every_save_opens_on_its_line_up() {
+        let game = game();
+        let saves = game.save_games();
+        assert!(!saves.is_empty(), "no saves");
+        for (row, save) in saves.iter().enumerate() {
+            let script =
+                Script::parse(&LOAD.replace("row 5144 0", &format!("row 5144 {row}"))).unwrap();
+            let (runner, result) = Runner::play(&game, &script);
+            result.unwrap_or_else(|err| panic!("{}: {err}\n{}", save.name, runner.log.join("\n")));
+            let view = runner.host.view();
+            assert_eq!(view.id, 147, "{}", save.name);
+            let state = runner.host.state();
+            let (season, records) =
+                (state.season.as_ref().unwrap(), state.records.as_ref().unwrap());
+            assert_eq!(season.day, usize::from(records.globals.day()));
+            let [day, month, year] = records.globals.date();
+            let dated = (0..view.controls.len())
+                .any(|c| view.text(c).ends_with(&format!(", {day}.{month}.{year}")));
+            assert!(dated, "{}: no caption with the date {day}.{month}.{year}", save.name);
+
+            // The squad as the save has it: the eleven, the bench, the rest.
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            let squad = team.players();
+            let mut order: Vec<u16> =
+                team.lineup().into_iter().chain(team.bench()).filter(|&id| id != 0).collect();
+            let rest: Vec<u16> = squad.iter().copied().filter(|id| !order.contains(id)).collect();
+            order.extend(rest);
+            let list = view.controls.iter().find_map(|c| match &c.state {
+                crate::controls::ControlState::List(list) if list.rows.len() == squad.len() => {
+                    Some(list)
+                }
+                _ => None,
+            });
+            let list =
+                list.unwrap_or_else(|| panic!("{}: no list of {} players", save.name, squad.len()));
+            for (row, id) in list.rows.iter().zip(order) {
+                let player = records.player(id).unwrap();
+                let columns: Vec<&str> = row.split('\t').collect();
+                let initial = records
+                    .name(player.first_name())
+                    .chars()
+                    .next()
+                    .map_or(String::new(), |c| format!(", {c}."));
+                assert_eq!(
+                    columns[0],
+                    format!("{}{initial}", records.name(player.last_name())),
+                    "{}",
+                    save.name
+                );
+                assert_eq!(columns[3], player.strength().to_string());
+                assert_eq!(columns[6], player.morale().to_string());
+                assert_eq!(columns[8], player.shirt().to_string());
+                let age = season.date().years_since(player.birthday().unwrap()).unwrap();
+                assert_eq!(columns[9], age.to_string());
+            }
+        }
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_start_menu_leads_where_the_game_does() {

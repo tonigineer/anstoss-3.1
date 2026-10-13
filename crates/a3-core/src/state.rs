@@ -3,6 +3,7 @@
 //! and change it, as the game's dialogs do.
 
 use crate::newgame::{Mode, Player, Setup};
+use crate::records::Records;
 use crate::season::Season;
 
 #[derive(Default)]
@@ -15,6 +16,8 @@ pub struct GameState {
     pub setup: Setup,
     /// The player of a network game.
     pub player: Player,
-    /// The saved game picked to load.
+    /// The saved game picked to load: its name in `saves/`.
     pub save: Option<String>,
+    /// The records of the game loaded, to be written back when it is saved.
+    pub records: Option<Records>,
 }

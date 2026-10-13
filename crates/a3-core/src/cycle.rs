@@ -11,11 +11,15 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
+use a3_files::an3::Save;
 use chrono::Datelike;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::data::Data;
+use crate::load;
 use crate::newgame::{self, Mode, Setup};
+use crate::random::Random;
+use crate::records::Records;
 use crate::season::Season;
 use crate::state::GameState;
 
@@ -242,7 +246,7 @@ impl Cycle {
             state.season = Some(newgame::calculate(&self.data, &state.setup, seed));
         }
         self.job_offers()?;
-        self.weeks()
+        self.weeks(true)
     }
 
     /// Every manager without a club looks at the offers and talks, until a
@@ -324,10 +328,14 @@ impl Cycle {
 
     /// The season week by week: the autosave's wait screen, every human
     /// manager's turn, and the week running day by day — until the week of
-    /// the first match, which is not played yet.
-    fn weeks(&mut self) -> Result<(), Gone> {
+    /// the first match, which is not played yet. A loaded game starts with
+    /// the turns, as the original's does (its cycle's case 2).
+    fn weeks(&mut self, mut wait: bool) -> Result<(), Gone> {
         loop {
-            self.ask(Request::new(WAIT))?;
+            if wait {
+                self.ask(Request::new(WAIT))?;
+            }
+            wait = true;
             let managers = self.season(|s| s.managers.len()).unwrap_or(0);
             for manager in 0..managers {
                 self.season(|s| s.current = manager);
@@ -403,8 +411,8 @@ impl Cycle {
         if manager.club.is_some() { LINEUP } else { DRESSING_ROOM }
     }
 
-    /// Loading a saved game ends where the game would load it, or for a
-    /// network game where it would host it.
+    /// A saved game: read, and on with its weeks; for a network game, where
+    /// it would be hosted.
     fn load(&mut self) -> Result<(), Gone> {
         if !self.ok(LOAD)? {
             return Ok(());
@@ -412,9 +420,23 @@ impl Cycle {
         if self.state().mode == Mode::ServerLoad {
             return self.network_games();
         }
-        let save = self.state().save.clone().unwrap_or_default();
-        would_start(&format!("Spielstand \"{save}\""));
-        Ok(())
+        let name = self.state().save.clone().unwrap_or_default();
+        let path = self.data.dir.join("saves").join(format!("{name}.an3"));
+        let records = match Save::read(&path).and_then(Records::from_save) {
+            Ok(records) => records,
+            Err(err) => {
+                warn!("{}: {err}", path.display());
+                return Ok(());
+            }
+        };
+        let season = load::season(&records, &self.data, Random::new((self.seed)()));
+        info!("Spielstand \"{name}\" geladen: Tag {}, {}", season.day, season.date());
+        {
+            let mut state = self.state();
+            state.season = Some(season);
+            state.records = Some(records);
+        }
+        self.weeks(false)
     }
 
     /// A network game: the player's name, the details for hosting one, and

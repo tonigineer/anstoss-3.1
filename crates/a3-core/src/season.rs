@@ -16,7 +16,7 @@ use a3_files::exe::Exe;
 
 use crate::calendar::{self, Calendar};
 use crate::jobs::Offer;
-use crate::lineup::{self, Lineup, Tables};
+use crate::lineup::{self, FULL_MORALE, Lineup, NEUTRAL_MOOD, Tables};
 use crate::random::Random;
 use crate::world::{GOALKEEPER, Player, STRIKER, World};
 
@@ -218,20 +218,91 @@ pub struct Season {
 /// What the game follows of a club with a human manager.
 #[derive(PartialEq)]
 pub struct ClubState {
+    /// The squad: the world's for a new game, the save's for a loaded one.
+    pub players: Vec<Player>,
     pub lineup: Lineup,
     pub tickets: i64,
     pub ticket_target: i64,
-    /// Every player's condition and freshness, in hundredths.
+    /// How well the team plays together, as the save has it (0 to 200, the
+    /// original's `FUN_0069774b` keeps it up to date); `None` while the
+    /// replica reckons it from the line-up, as for a new game.
+    pub cohesion: Option<i32>,
+    /// Every player's condition, freshness, morale and mood.
     pub fitness: Vec<Fitness>,
+    /// Every player's trend and absences, as far as the save tells them.
+    pub status: Vec<Status>,
     /// The week so far: the team's condition and freshness at its start and
     /// after each day.
     pub week: Vec<(i32, i32)>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+/// How a player is: fit and fresh, in hundredths, and in what spirits.
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Fitness {
     pub condition: i32,
     pub freshness: [i32; 3],
+    /// 100 is neither happy nor unhappy (`FULL_MORALE`).
+    pub morale: i32,
+    /// Around 10 (`NEUTRAL_MOOD`).
+    pub mood: i32,
+    /// He plays with a knock, at 0.9 of his strength.
+    pub knock: bool,
+}
+
+/// What the line-up's list tells of a player besides his fitness, as the
+/// original reckons it from his record (`FUN_00636638`): nothing for a new
+/// game.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Status {
+    /// The form the list compares today's with, for its trend.
+    pub last_form: Option<i32>,
+    /// Days of a long absence, and whether its length is not known yet.
+    pub long: i32,
+    pub long_unknown: bool,
+    /// Days the injury still keeps him out.
+    pub injured: i32,
+    /// Matches suspended in the low six bits; bit 7: how many is not known.
+    pub suspended: u8,
+    /// Days away from the club.
+    pub away: i32,
+    /// Years his contract still runs.
+    pub contract: Option<i32>,
+}
+
+impl ClubState {
+    /// A club followed from now on: no season tickets sold yet, the week's
+    /// record starting today.
+    pub fn new(
+        players: Vec<Player>,
+        lineup: Lineup,
+        fitness: Vec<Fitness>,
+        ticket_target: i64,
+    ) -> Self {
+        let week = vec![team_fitness(&lineup, &fitness)];
+        Self {
+            players,
+            lineup,
+            tickets: 0,
+            ticket_target,
+            cohesion: None,
+            fitness,
+            status: Vec::new(),
+            week,
+        }
+    }
+}
+
+impl Fitness {
+    /// A player as a new game starts him, with this condition and freshness.
+    pub fn new(condition: i32, freshness: i32) -> Self {
+        Self {
+            condition,
+            freshness: [freshness, 0, 0],
+            morale: FULL_MORALE,
+            mood: NEUTRAL_MOOD,
+            knock: false,
+        }
+    }
 }
 
 #[derive(PartialEq)]
@@ -385,7 +456,7 @@ impl Season {
                 if easiest && fresh < EASY_FLOOR + 100 {
                     fresh = (random.below(9) as i32 + 51) * 100;
                 }
-                Fitness { condition, freshness: [fresh, 0, 0] }
+                Fitness::new(condition, fresh)
             })
             .collect();
         let league =
@@ -408,9 +479,7 @@ impl Season {
         target = target.min(club.capacity * TICKET_SHARE / 100).max(0);
         // A new manager starts with the first formation.
         let lineup = rules.pitch.line_up(&club.players, 0);
-        let mut state =
-            ClubState { lineup, tickets: 0, ticket_target: target, fitness, week: Vec::new() };
-        state.week.push(team_fitness(&state.lineup, &state.fitness));
+        let state = ClubState::new(club.players.clone(), lineup, fitness, target);
         self.clubs.insert((slot, index), state);
     }
 

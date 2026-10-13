@@ -170,6 +170,7 @@ pub struct Club {
     pub players: Vec<Player>,
 }
 
+#[derive(Clone, PartialEq, Debug)]
 pub struct Player {
     pub last_name: String,
     pub first_name: String,
