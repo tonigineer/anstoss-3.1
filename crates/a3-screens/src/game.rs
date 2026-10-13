@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use image::{ImageFormat, Rgba, RgbaImage};
@@ -13,6 +13,8 @@ use image::{ImageFormat, Rgba, RgbaImage};
 use a3_core::data::Data;
 use a3_files::cpr::Archive;
 use a3_files::rch::{self, Dialog};
+
+use crate::fonts::Fonts;
 
 /// The installed game, which shows as its [`Data`] too.
 pub struct Game {
@@ -25,6 +27,8 @@ pub struct Game {
     archive: Mutex<Archive>,
     /// The flags' archive, `Archives/flaggen.cpr` (`klein/Flag14.bmp` …).
     flags: Option<Mutex<Archive>>,
+    /// The game's fonts, read when first drawn with.
+    fonts: OnceLock<Arc<Fonts>>,
 }
 
 pub struct SaveGame {
@@ -61,6 +65,7 @@ impl Game {
             graphics: rch::load_graphics(&dir.join("deb/ListeDerGrafik.rh"))?,
             archive: Mutex::new(Archive::open(&dir.join("Archives/grafik.cpr"))?),
             flags: Archive::open(&dir.join("Archives/flaggen.cpr")).ok().map(Mutex::new),
+            fonts: OnceLock::new(),
         })
     }
 
@@ -157,7 +162,18 @@ impl Game {
             (Err(_), Some(flags)) => flags.lock().unwrap().read(path)?,
             (Err(err), None) => return Err(err.into()),
         };
-        Ok(image::load_from_memory(&bytes)?.to_rgba8())
+        // A TGA does not say what it is.
+        let picture = if path.to_lowercase().ends_with(".tga") {
+            image::load_from_memory_with_format(&bytes, ImageFormat::Tga)?
+        } else {
+            image::load_from_memory(&bytes)?
+        };
+        Ok(picture.to_rgba8())
+    }
+
+    /// The fonts the game draws its dialogs' text with.
+    pub fn fonts(&self) -> Arc<Fonts> {
+        self.fonts.get_or_init(|| Arc::new(Fonts::load(self))).clone()
     }
 
     /// A button bitmap, with its black background made transparent.

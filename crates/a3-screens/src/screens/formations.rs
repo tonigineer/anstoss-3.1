@@ -28,7 +28,6 @@ const FILES: u16 = 3387;
 const CAPTION_ID: u16 = 9921;
 const CAPTION_TEXT: u16 = 1431;
 const CAPTION_KIND: u16 = 4361;
-const CAPTION_RECT: Rect = Rect { min: Vec2::new(5.0, 3.0), max: Vec2::new(515.0, 19.0) };
 /// The boxes on the pitch, and where its spots start, in the dialog.
 const BOXES: u16 = 9940;
 const PITCH: Vec2 = Vec2::new(10.0, 22.0);
@@ -38,17 +37,7 @@ const BOX_SIZE: Vec2 = Vec2::new(99.0, 24.0);
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     let Some(dialog) = dialogs.get_mut(&FORMATIONS) else { return };
     let origin = dialog.frame.map_or(Vec2::ZERO, |f| f.min);
-    let rect = Rect::from_corners(origin + CAPTION_RECT.min, origin + CAPTION_RECT.max);
-    let caption = Control {
-        kind: Kind::Static,
-        rect,
-        align: Align::Left,
-        text: String::new(),
-        id: Some(CAPTION_ID),
-        bold: true,
-        ink: [0; 3],
-    };
-    dialog.controls.insert(0, caption);
+    dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
     let spots = rules.pitch.formations.first().map_or([(0, 0); FIELD], |f| f.1);
     for (i, (x, y)) in spots.into_iter().enumerate() {
         let at = origin + PITCH + Vec2::new(f32::from(x), f32::from(y));
@@ -58,7 +47,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
             align: Align::Left,
             text: String::new(),
             id: Some(BOXES + i as u16),
-            bold: false,
+            font: a3_files::rch::PLAIN_FONT,
             ink: [0; 3],
         });
     }

@@ -14,6 +14,8 @@ pub const PLANNER: u16 = 412;
 const WEEK_TEXT: u16 = 3811;
 const DAYS: u16 = 5034;
 const PROMPT: u16 = 5037;
+/// The notepad in the corner of the planner's picture.
+const NOTEPAD: u16 = 5036;
 /// The hidden OK; a day chosen closes it.
 const OK: u16 = 1;
 const WEEK: usize = 7;
@@ -94,6 +96,10 @@ impl Screen for Planner {
             view.controls[ok].hidden = true;
         }
         set(view, cx.dialog, PROMPT, cx.game.text(CHOOSE).to_owned());
+        // The notepad does nothing yet.
+        let dialog = cx.dialog;
+        let notepad = |t| matches!(t, Target::Button(b) if dialog.controls[b].id == Some(NOTEPAD));
+        super::mark_inert(view, dialog, |t| !notepad(t));
         let (Some((slot, start, today)), Some(records)) = (week(cx), cx.state.records.as_ref())
         else {
             return;

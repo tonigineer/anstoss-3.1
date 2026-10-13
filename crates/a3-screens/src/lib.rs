@@ -8,6 +8,7 @@
 
 pub mod classic;
 pub mod controls;
+pub mod fonts;
 pub mod game;
 pub mod host;
 pub mod original;

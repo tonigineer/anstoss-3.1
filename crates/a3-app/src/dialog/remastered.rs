@@ -14,11 +14,11 @@ use bevy::prelude::*;
 use image::RgbaImage;
 
 use a3_core::cycle::dialogs::*;
-use a3_files::rch::{Align, Control, Dialog, Kind};
+use a3_files::rch::{Align, Control, Dialog, Kind, PLAIN_FONT};
 use a3_screens::controls::bitmap::Picture;
 use a3_screens::controls::list::{ListState, ROW_HEIGHT, visible_rows};
 use a3_screens::controls::options::{BULLET_SIZE, bullet_centre};
-use a3_screens::controls::player_box::{PlayerBox, fit_ink};
+use a3_screens::controls::player_box::PlayerBox;
 use a3_screens::controls::slider::{self, SLIDER_ARROW};
 use a3_screens::controls::spin::Value;
 use a3_screens::controls::{ControlState, bar};
@@ -760,8 +760,8 @@ fn spawn_text(
     let (face, size, ink) = match style {
         TextStyle::Title => (&fonts.bold, TITLE_SIZE, INK),
         TextStyle::Header => (&fonts.bold, TEXT_SIZE, INK),
-        TextStyle::Note => (face(control.bold), TEXT_SIZE - 1.0, INK_SOFT),
-        TextStyle::Plain => (face(control.bold), TEXT_SIZE, INK),
+        TextStyle::Note => (face(control.font != PLAIN_FONT), TEXT_SIZE - 1.0, INK_SOFT),
+        TextStyle::Plain => (face(control.font != PLAIN_FONT), TEXT_SIZE, INK),
     };
     commands
         .spawn((
@@ -1638,7 +1638,7 @@ fn spawn_player(
         ));
         return card;
     }
-    let [red, green, blue] = fit_ink(player.fit);
+    let [red, green, blue] = card_ink(player.fit);
     commands.spawn((
         Text::new(player.name.as_str()),
         font(&fonts.bold, BOX_NAME_SIZE),
@@ -1966,4 +1966,16 @@ fn to_right(colors: &[(Color, f32)]) -> BackgroundGradient {
 
 fn font(face: &Handle<Font>, size: f32) -> TextFont {
     TextFont { font: face.into(), font_size: FontSize::Px(size), ..default() }
+}
+
+/// The colour of a player's name on his card, by how he fits his spot: the
+/// classic look's white, green, blue and red, lightened to read on the
+/// card's blue.
+fn card_ink(fit: i32) -> [u8; 3] {
+    match fit {
+        10.. => [255, 255, 255],
+        8..=9 => [96, 255, 96],
+        6..=7 => [150, 210, 255],
+        _ => [255, 72, 72],
+    }
 }

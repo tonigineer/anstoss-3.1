@@ -25,6 +25,8 @@ pub struct Dialog {
     /// templates the game fills in itself.
     pub title: String,
     pub background: u16,
+    /// What the game adds of its own: [`HELP_FLAG`], [`PRINTER_FLAG`].
+    pub flags: u32,
     pub controls: Vec<Control>,
     /// A dialog smaller than the screen is a popup over the screen it was
     /// opened from, in the middle of it; its controls are placed there.
@@ -39,8 +41,9 @@ pub struct Control {
     pub align: Align,
     pub text: String,
     pub id: Option<u16>,
-    /// Statics drawn in the emphasised dialog font.
-    pub bold: bool,
+    /// Which of the game's fonts a static's text is drawn in: [`PLAIN_FONT`],
+    /// [`BOLD_FONT`] …; the plain one for the other controls.
+    pub font: u8,
     /// The colour of a static's text, red, green and blue; black for the
     /// other controls.
     pub ink: [u8; 3],
@@ -158,6 +161,21 @@ pub fn load_dialogs(path: &Path) -> io::Result<HashMap<u16, Dialog>> {
     Ok(dialogs)
 }
 
+/// The game's fonts by their numbers in the dialog file (the table at
+/// 0x8adcb8 in `anstoss3.exe`): the dialog font, its bold face, a larger
+/// one, the captions' and an italic one.
+pub const PLAIN_FONT: u8 = 0;
+pub const LARGE_FONT: u8 = 2;
+pub const CAPTION_FONT: u8 = 3;
+pub const ITALIC_FONT: u8 = 4;
+pub const BOLD_FONT: u8 = 5;
+pub const FONTS: u8 = 6;
+
+/// A dialog's flags: a help button in its top right corner, and a
+/// printer's left of it.
+pub const HELP_FLAG: u32 = 1;
+pub const PRINTER_FLAG: u32 = 2;
+
 /// Where a dialog record's German title starts.
 const TITLE: usize = 0x1e;
 /// A bitmap button's style bits: the dialog's picture shows until it is
@@ -171,6 +189,7 @@ fn parse_dialog(record: &[u8]) -> Option<Dialog> {
     let mut pos = name + record[name..].iter().position(|&b| b == 0)? + 1;
     pos = skip_padding(record, pos);
     let background = u16_at(record, pos)?;
+    let flags = u32_at(record, pos + 2).unwrap_or(0);
 
     let starts: Vec<usize> = (pos..record.len().saturating_sub(10))
         .filter(|&p| is_control_start(&record[p..]))
@@ -196,7 +215,7 @@ fn parse_dialog(record: &[u8]) -> Option<Dialog> {
                 Rect::from_corners(control.rect.min + frame.min, control.rect.max + frame.min);
         }
     }
-    Some(Dialog { title, background, controls, frame })
+    Some(Dialog { title, background, flags, controls, frame })
 }
 
 fn is_control_start(bytes: &[u8]) -> bool {
@@ -254,9 +273,12 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         _ => Align::Left,
     };
     // Statics carry their colour (a COLORREF) and a font number after their
-    // name; 5 is the emphasised font.
+    // name.
     let is_static = matches!(kind, Kind::Static);
-    let bold = is_static && u16s(2) == Some(5);
+    let font = u16s(2)
+        .and_then(|f| u8::try_from(f).ok())
+        .filter(|&f| is_static && f < FONTS)
+        .unwrap_or(PLAIN_FONT);
     let ink = match extra.get(..3) {
         Some(&[r, g, b]) if is_static => [r, g, b],
         _ => [0; 3],
@@ -267,7 +289,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         align,
         text,
         id: (id != u16::MAX).then_some(id),
-        bold,
+        font,
         ink,
     })
 }

@@ -121,7 +121,7 @@ pub(crate) fn bitmap(at: Vec2, size: f32, id: u16) -> Control {
         align: Align::Left,
         text: String::new(),
         id: Some(id),
-        bold: false,
+        font: a3_files::rch::PLAIN_FONT,
         ink: [0; 3],
     }
 }

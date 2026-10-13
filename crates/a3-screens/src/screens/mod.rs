@@ -17,9 +17,14 @@ pub mod special;
 pub mod start;
 pub mod talk;
 
+use std::collections::HashMap;
+
 pub use a3_core::cycle::{Args, Reply, Request};
 use a3_core::state::GameState;
-use a3_files::rch::{Dialog, Kind};
+use a3_files::rch::{
+    Align, CAPTION_FONT, Control, Dialog, HELP_FLAG, Kind, PLAIN_FONT, PRINTER_FLAG,
+};
+use bevy_math::{Rect, Vec2};
 
 use crate::controls::button::{CANCEL_IMAGE, OK_IMAGE};
 use crate::game::Game;
@@ -127,6 +132,83 @@ pub fn compose(game: &mut Game) {
     special::compose(&mut game.dialogs);
     playerinfo::compose(&mut game.dialogs);
     discipline::compose(&mut game.dialogs);
+    corner_buttons(&mut game.dialogs);
+}
+
+/// The help button and the printer's that a dialog's flags ask for, in
+/// its top right corner, as `CDialogH` puts them there (`FUN_0043fb82`):
+/// 30 and 40 pixels wide, two in from the edge, the printer's left of the
+/// help button.
+fn corner_buttons(dialogs: &mut HashMap<u16, Dialog>) {
+    const TOP: f32 = 2.0;
+    const BOTTOM: f32 = 23.0;
+    const EDGE: f32 = 2.0;
+    let buttons = [
+        (HELP_FLAG, HELP, 30.0, (HELP_IMAGE, HELP_IMAGE + 1)),
+        (PRINTER_FLAG, PRINTER, 40.0, (PRINTER_IMAGE, PRINTER_IMAGE + 1)),
+    ];
+    for dialog in dialogs.values_mut() {
+        let frame = dialog.frame.unwrap_or(Rect::new(0.0, 0.0, 640.0, 480.0));
+        let mut right = frame.max.x - EDGE;
+        for (flag, id, width, (normal, hover)) in buttons {
+            if dialog.flags & flag == 0 {
+                continue;
+            }
+            dialog.controls.push(Control {
+                kind: Kind::Button { normal, hover },
+                rect: Rect::new(right - width, frame.min.y + TOP, right, frame.min.y + BOTTOM),
+                align: Align::Left,
+                text: String::new(),
+                id: Some(id),
+                font: PLAIN_FONT,
+                ink: [0; 3],
+            });
+            right -= width + 1.0;
+        }
+    }
+}
+
+/// Whether `target` is a corner button, which does nothing yet.
+pub(crate) fn is_corner_button(dialog: &Dialog, target: Target) -> bool {
+    let Target::Button(i) = target else { return false };
+    dialog.controls.get(i).is_some_and(|c| matches!(c.id, Some(HELP | PRINTER)))
+}
+
+/// The corner buttons, crossed out on every screen.
+pub(crate) fn cross_corner_buttons(view: &mut View, dialog: &Dialog) {
+    for i in 0..dialog.controls.len() {
+        let target = Target::Button(i);
+        if is_corner_button(dialog, target) && !view.inert.contains(&target) {
+            view.inert.push(target);
+        }
+    }
+}
+
+/// The help button's id and pictures (the cap, held down); the printer's.
+const HELP: u16 = 5417;
+const HELP_IMAGE: u16 = 2446;
+const PRINTER: u16 = 3945;
+const PRINTER_IMAGE: u16 = 3378;
+
+/// Where a window's title starts, in the caption font, as the original
+/// writes it (`CMyDialog`, `FUN_007a0330`); and the font's height.
+const CAPTION_AT: Vec2 = Vec2::new(8.0, 2.0);
+const CAPTION_HEIGHT: f32 = 18.0;
+
+/// A static for the caption of a window in `frame`, the whole screen
+/// without one.
+pub(crate) fn caption(frame: Option<Rect>, id: u16, text: String) -> Control {
+    let frame = frame.unwrap_or(Rect::new(0.0, 0.0, 640.0, 480.0));
+    let at = frame.min + CAPTION_AT;
+    Control {
+        kind: Kind::Static,
+        rect: Rect::from_corners(at, Vec2::new(frame.max.x, at.y + CAPTION_HEIGHT)),
+        align: Align::Left,
+        text,
+        id: Some(id),
+        font: CAPTION_FONT,
+        ink: [0; 3],
+    }
 }
 
 /// The index of the dialog's control with `id`.
@@ -148,6 +230,7 @@ pub(crate) fn mark_inert(view: &mut View, dialog: &Dialog, works: impl Fn(Target
         .map(|(target, _)| target)
         .filter(|&t| matches!(t, Target::Button(_) | Target::Option { .. }) && !works(t))
         .collect();
+    cross_corner_buttons(view, dialog);
 }
 
 /// Sets the text of the dialog's control with `id`.

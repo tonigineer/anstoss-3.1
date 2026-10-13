@@ -50,7 +50,6 @@ pub const WHISTLE: usize = 18;
 const SATURDAY: usize = 6;
 const WEEK_DAYS: usize = 7;
 /// The screen's title, which the game draws into its frame.
-const CAPTION_RECT: Rect = Rect { min: Vec2::new(5.0, 3.0), max: Vec2::new(635.0, 19.0) };
 const LINEUP_CAPTION: u16 = 2515;
 const DRESSING_CAPTION: u16 = 2527;
 const DATE: u16 = 1997;
@@ -186,18 +185,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     for id in [LINEUP, DRESSING_ROOM] {
         let Some(dialog) = dialogs.get_mut(&id) else { continue };
         dialog.controls.retain(|c| !matches!(c.id, Some(OK_BUTTON | SECOND_TITLES)));
-        dialog.controls.insert(
-            0,
-            Control {
-                kind: Kind::Static,
-                rect: CAPTION_RECT,
-                align: Align::Left,
-                text: String::new(),
-                id: Some(CAPTION_ID),
-                bold: true,
-                ink: [0; 3],
-            },
-        );
+        dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
         if id == LINEUP {
             let spots = rules.pitch.formations.first().map_or([(0, 0); FIELD], |f| f.1);
             for control in &mut dialog.controls {
@@ -222,7 +210,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
                 align: Align::Left,
                 text: String::new(),
                 id: Some(MENU_ID),
-                bold: false,
+                font: a3_files::rch::PLAIN_FONT,
                 ink: [0; 3],
             };
             dialog.controls.push(menu);
@@ -242,7 +230,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
             align: Align::Left,
             text: String::new(),
             id: Some(BAR_ID),
-            bold: false,
+            font: a3_files::rch::PLAIN_FONT,
             ink: [0; 3],
         });
     }

@@ -7,7 +7,7 @@ use image::{Rgba, RgbaImage};
 use a3_files::bitmap_font::BitmapFont;
 use a3_files::rch::{Align, Control};
 
-use crate::classic::{Paint, TEXT_HOVER};
+use crate::classic::{Paint, TEXT_HOVER, centred};
 use crate::pointer::{Geometry, Target};
 
 #[derive(Clone, Default, Debug)]
@@ -20,7 +20,7 @@ pub struct StaticState {
 
 impl StaticState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
-        let Some(font) = paint.font() else { return };
+        let Some(font) = paint.font_of(paint.control.font) else { return };
         let pointed = paint.pointed(Target::Control(paint.index));
         let [r, g, b] = paint.control.ink;
         let color = if pointed { TEXT_HOVER } else { Rgba([r, g, b, 255]) };
@@ -52,14 +52,14 @@ fn draw_static(
     let r = control.rect;
     let (x, y) = (r.min.x as i32, r.min.y as i32);
     if r.height() >= 2.0 * font.height() as f32 {
-        font.draw_wrapped(frame, x, y, r.width() as u32, text, color, control.bold);
+        font.draw_wrapped(frame, x, y, r.width() as u32, text, color, false);
         return;
     }
-    let width = font.width(text, control.bold) as i32;
+    let width = font.width(text, false) as i32;
     let left = match control.align {
         Align::Left => x,
-        Align::Centre => x + (r.width() as i32 - width) / 2,
+        Align::Centre => centred(x, r.width() as i32, width),
         Align::Right => r.max.x as i32 - width,
     };
-    font.draw(frame, left, y, text, color, control.bold);
+    font.draw(frame, left, y, text, color, false);
 }

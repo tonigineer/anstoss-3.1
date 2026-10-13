@@ -6,7 +6,7 @@ use image::RgbaImage;
 
 use a3_files::rch::{Control, Dialog, Kind};
 
-use crate::classic::{Paint, TEXT, TEXT_HOVER, paste};
+use crate::classic::{Paint, TEXT, TEXT_HOVER, centred, paste};
 use crate::pointer::Target;
 
 /// Graphic ids of the OK and cancel buttons' normal images.
@@ -45,7 +45,7 @@ impl ButtonState {
         }
         if let (true, Some(font)) = (labelled, paint.font()) {
             let text = &paint.control.text;
-            let left = r.min.x as i32 + (r.width() as i32 - font.width(text, false) as i32) / 2;
+            let left = centred(r.min.x as i32, r.width() as i32, font.width(text, false) as i32);
             let top = r.min.y as i32 + (r.height() as i32 - font.height() as i32) / 2;
             font.draw(frame, left, top, text, if pointed { TEXT_HOVER } else { TEXT }, false);
         }

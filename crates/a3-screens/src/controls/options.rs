@@ -8,7 +8,7 @@ use image::{Rgba, RgbaImage, imageops};
 
 use a3_files::rch::{Control, Item, Kind};
 
-use crate::classic::{Paint, TEXT, TEXT_HOVER};
+use crate::classic::{Paint, TEXT, TEXT_HOVER, centred};
 use crate::pointer::{Geometry, Target};
 
 /// The radio bullets painted into the backgrounds are Windows radio buttons,
@@ -98,20 +98,22 @@ impl OptionsState {
             } else {
                 // A label may break into lines where it says so.
                 let lines: Vec<&str> = label.split('\n').collect();
+                // Centred in whole pixels, as the game centres (`FUN_0079d255`).
                 let height = cell * lines.len() as f32;
                 let top = r.min.y
                     + it.rect.min.y
                     + if it.text_at.y == 0.0 {
-                        (it.rect.height() - height) / 2.0
+                        ((it.rect.height() - height) / 2.0).floor()
                     } else {
                         it.text_at.y
                     };
                 for (i, line) in lines.iter().enumerate() {
-                    let width = font.width(line, false) as f32;
-                    let room = it.rect.width() - it.text_at.x;
-                    let left = r.min.x + it.rect.min.x + it.text_at.x + (room - width) / 2.0;
+                    let width = font.width(line, false) as i32;
+                    let room = (it.rect.width() - it.text_at.x) as i32;
+                    let left =
+                        centred((r.min.x + it.rect.min.x + it.text_at.x) as i32, room, width);
                     let top = (top + cell * i as f32).round() as i32;
-                    font.draw(frame, left.round() as i32, top, line, color, false);
+                    font.draw(frame, left, top, line, color, false);
                 }
             }
         }

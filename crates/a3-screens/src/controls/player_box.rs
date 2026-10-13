@@ -5,7 +5,7 @@ use a3_files::rch::Control;
 use bevy_math::{Rect, Vec2};
 use image::{Rgba, RgbaImage, imageops};
 
-use crate::classic::{Paint, TEXT};
+use crate::classic::{Paint, TEXT, centred};
 
 /// The box: blue with a player in it, yellow without.
 pub const FILLED: u16 = 1253;
@@ -61,7 +61,7 @@ impl PlayerBox {
         // The text keeps a pixel clear of either side.
         let (inner, width) = (x + 1, r.width() as u32 - 2);
         let centred = |frame: &mut RgbaImage, top: i32, line: &str, color: Rgba<u8>| {
-            let left = inner + (width as i32 - font.width(line, false) as i32) / 2;
+            let left = centred(inner, width as i32, font.width(line, false) as i32);
             font.draw_clipped(frame, left, top, line, color, false, x + r.width() as i32 - 1);
         };
         if !self.filled {
@@ -96,8 +96,8 @@ pub(crate) fn graphics(player: Option<&PlayerBox>) -> (Vec<u16>, bool) {
 pub fn fit_ink(fit: i32) -> [u8; 3] {
     match fit {
         10.. => [255, 255, 255],
-        8..=9 => [96, 255, 96],
-        6..=7 => [150, 210, 255],
-        _ => [255, 72, 72],
+        8..=9 => [0, 255, 0],
+        6..=7 => [0, 0, 255],
+        _ => [255, 0, 0],
     }
 }

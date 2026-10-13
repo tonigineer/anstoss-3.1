@@ -44,6 +44,9 @@ const MOST_TURNS: usize = 20;
 /// How long the probe may take to answer before the game counts as gone —
 /// a game that crashed stops in Wine's debugger, probe and all.
 const ANSWER: Duration = Duration::from_secs(60);
+/// Frames the original shows a page of its own in, which the replica shows
+/// as the page: the player info (`CSpielerinfo`) around its four pages.
+const FRAMES: [u16; 1] = [214];
 /// The game's day, counted from the start of the first season (16 bits).
 const DAY: u32 = 0xb5cbd4;
 /// Keys: to the end of a field, and back over a character.
@@ -237,7 +240,13 @@ impl<'a> Original<'a> {
             })
             .collect();
         let belongs = |parent: u64| up.iter().any(|(other, _, _)| other.at == parent);
-        Ok(up.iter().rev().find(|&&(_, parent, modal)| modal || !belongs(parent)).map(|u| u.0))
+        let top = up.iter().rev().find(|&&(_, parent, modal)| modal || !belongs(parent));
+        // A frame shows as its page.
+        let page = |frame: &Up| up.iter().rev().find(|&&(_, parent, _)| parent == frame.at);
+        Ok(top.map(|&(top, _, _)| match page(&top) {
+            Some(&(page, _, _)) if FRAMES.contains(&top.id) => page,
+            _ => top,
+        }))
     }
 
     /// Waits until a dialog has stayed on top for a moment, and returns it.

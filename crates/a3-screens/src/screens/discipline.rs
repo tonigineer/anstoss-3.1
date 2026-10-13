@@ -7,12 +7,10 @@
 
 use std::collections::HashMap;
 
-use bevy_math::{Rect, Vec2};
-
 use a3_core::cycle::Request;
 use a3_core::discipline::{self, Club, Fined, PLAYER_UNIT, TEAM_UNIT};
 use a3_core::mood::LAST_REAL_ID;
-use a3_files::rch::{Align, Control, Dialog, Kind};
+use a3_files::rch::Dialog;
 
 use super::popups::{NOTICE, QUESTION, ball};
 use super::{Args, Cx, Outcome, Reply, Screen, control, ok_or_cancel, set};
@@ -60,14 +58,10 @@ const SUSPENDED_ANGRY: u16 = 5323;
 
 /// The caption a popup draws at its top, its title.
 const CAPTION_ID: u16 = 9924;
-const CAPTION_MARGIN: f32 = 5.0;
-const CAPTION_TOP: f32 = 3.0;
-const CAPTION_BOTTOM: f32 = 19.0;
 
 /// Puts the titles of the popups this module shows, the small notices' and
 /// the week planner's in their captions.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
-    let screen = Rect::new(0.0, 0.0, 640.0, 480.0);
     let ids = [
         BONUS,
         FINE,
@@ -83,19 +77,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     ];
     for id in ids {
         let Some(dialog) = dialogs.get_mut(&id) else { continue };
-        let frame = dialog.frame.unwrap_or(screen);
-        let caption = Control {
-            kind: Kind::Static,
-            rect: Rect::from_corners(
-                frame.min + Vec2::new(CAPTION_MARGIN, CAPTION_TOP),
-                Vec2::new(frame.max.x - CAPTION_MARGIN, frame.min.y + CAPTION_BOTTOM),
-            ),
-            align: Align::Left,
-            text: dialog.title.clone(),
-            id: Some(CAPTION_ID),
-            bold: true,
-            ink: [0; 3],
-        };
+        let caption = super::caption(dialog.frame, CAPTION_ID, dialog.title.clone());
         dialog.controls.insert(0, caption);
     }
 }

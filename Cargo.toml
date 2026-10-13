@@ -14,7 +14,7 @@ bevy = { version = "0.20", default-features = false, features = ["ui", "bevy_aud
 bevy_math = { version = "0.20", default-features = false, features = ["std"] }
 # Only the app reads the clock; the game's logic gets it without.
 chrono = { version = "0.4.40", default-features = false }
-image = { version = "0.25", default-features = false, features = ["jpeg", "bmp", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "bmp", "png", "tga"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 # Bevy is unbearably slow at opt-level 0; optimise dependencies even in dev builds.

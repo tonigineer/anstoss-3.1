@@ -4,8 +4,9 @@
 //! An archive is a chain of blocks. Each starts with a 16-byte header — magic,
 //! entry count, the size reserved for the header and index, the size of it in
 //! use — and its index, one entry per file: offset, size, flags, name length,
-//! name. The files' data follows the reserved space, and the next block
-//! follows the data. Names are NUL-padded to a multiple of four and XOR-ed
+//! name. The files' data follows the reserved space, at offsets from the
+//! start of the archive and not always one right after the other; the next
+//! block follows the end of the last file. Names are NUL-padded to a multiple of four and XOR-ed
 //! with the repeating key `EF CD AB 89`.
 //!
 //! Graphics are stored as plain JPEG/BMP/TGA. Larger files, like the music,
@@ -53,11 +54,11 @@ impl Archive {
                 .ok_or_else(|| invalid("index ends inside the header"))?;
             let mut index = vec![0; used];
             file.read_exact(&mut index)?;
-            let data = read_index(&index, count, &mut entries)?;
             if reserved < HEADER_LEN as u64 {
                 return Err(invalid("block smaller than its header"));
             }
-            block += reserved + data;
+            let end = read_index(&index, count, &mut entries)?;
+            block = end.max(block + reserved);
         }
         Ok(Self { file, entries })
     }
@@ -84,13 +85,15 @@ impl Archive {
 }
 
 /// Adds a block's index entries; returns the size of the block's data.
+/// Reads a block's index into `entries`, a later block's files in place of
+/// an earlier one's of the same name; where its last file ends.
 fn read_index(
     index: &[u8],
     count: usize,
     entries: &mut HashMap<String, (u32, u32)>,
 ) -> io::Result<u64> {
     let mut pos = 0;
-    let mut data = 0;
+    let mut end = 0;
     for _ in 0..count {
         let (offset, size) = (u32_at(index, pos)?, u32_at(index, pos + 4)?);
         let name_len = u32_at(index, pos + 12)? as usize;
@@ -108,10 +111,10 @@ fn read_index(
             .collect();
         if offset != MISSING {
             entries.insert(normalise(&name), (offset, size));
-            data += u64::from(size);
+            end = end.max(u64::from(offset) + u64::from(size));
         }
     }
-    Ok(data)
+    Ok(end)
 }
 
 /// A packed file, unpacked; `None` if `data` is not packed.
@@ -265,6 +268,47 @@ mod tests {
         let mut out = Vec::new();
         inflate(&chunk, 8, &mut out).unwrap();
         assert_eq!(out, b"abababab");
+    }
+
+    /// A block of an archive starting at `start`: its header and index,
+    /// then its files, each `at` bytes after the reserved room.
+    fn block(start: u32, reserved: u32, files: &[(&str, u32, &[u8])]) -> Vec<u8> {
+        let mut index = Vec::new();
+        for &(name, at, data) in files {
+            let mut raw = name.as_bytes().to_vec();
+            raw.resize(name.len().next_multiple_of(4) + 4, 0);
+            let raw: Vec<u8> = raw.iter().zip(NAME_KEY.iter().cycle()).map(|(b, k)| b ^ k).collect();
+            index.extend((start + reserved + at).to_le_bytes());
+            index.extend((data.len() as u32).to_le_bytes());
+            index.extend(0u32.to_le_bytes());
+            index.extend((raw.len() as u32).to_le_bytes());
+            index.extend(raw);
+        }
+        let mut block = b"BAUM".to_vec();
+        block.extend((files.len() as u32).to_le_bytes());
+        block.extend(reserved.to_le_bytes());
+        block.extend((HEADER_LEN as u32 + index.len() as u32).to_le_bytes());
+        block.extend(index);
+        block.resize(reserved as usize, 0);
+        for &(_, at, data) in files {
+            block.resize((reserved + at) as usize, 0);
+            block.extend(data);
+        }
+        block
+    }
+
+    #[test]
+    fn the_next_block_follows_the_last_file() {
+        // The first block's two files leave a gap between them, so the
+        // second block starts later than the sum of their sizes says.
+        let first = block(0, 128, &[("a.bmp", 0, b"AAAA"), ("b.bmp", 8, b"BBBB")]);
+        let second = block(first.len() as u32, 128, &[("c.bmp", 0, b"CCCC")]);
+        let path = std::env::temp_dir().join(format!("a3-blocks-{}.cpr", std::process::id()));
+        std::fs::write(&path, [first, second].concat()).unwrap();
+        let mut archive = Archive::open(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(archive.read("b.bmp").unwrap(), b"BBBB");
+        assert_eq!(archive.read("C.BMP").unwrap(), b"CCCC");
     }
 
     #[test]

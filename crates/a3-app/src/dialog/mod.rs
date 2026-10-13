@@ -254,9 +254,13 @@ fn open(
         look.offer(remastered);
     }
     let picture = a3_screens::classic::picture(&game, dialog);
-    let wide = remastered.then(|| match dialog.frame {
-        Some(frame) => wide_popup(&game, under.as_deref(), &underlay, frame, &picture),
-        None => backdrop::load(id, &picture),
+    let wide = remastered.then(|| {
+        // The remastered look frames popups its own way.
+        let art = a3_screens::classic::art(&game, dialog);
+        match dialog.frame {
+            Some(frame) => wide_popup(&game, under.as_deref(), &underlay, frame, &art),
+            None => backdrop::load(id, &art),
+        }
     });
     let background = match dialog.frame {
         Some(frame) => classic_popup(under.as_deref(), &images, frame, &picture),

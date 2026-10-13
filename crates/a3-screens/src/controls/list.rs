@@ -2,7 +2,7 @@
 //! scrollbar while there are more rows than fit.
 
 use bevy_math::{Rect, Vec2};
-use image::{Rgba, RgbaImage};
+use image::{Rgba, RgbaImage, imageops};
 
 use a3_files::rch::{Align, Control};
 
@@ -145,9 +145,15 @@ impl ListState {
         }
         let Some(font) = paint.font() else { return };
         let right = if scrolls { right - SCROLLBAR_WIDTH as i32 } else { right };
-        let shown = self.rows.iter().skip(self.scroll).take(visible_rows(control));
+        // The rows are drawn on the list's own area, which cuts off the
+        // last one where the list ends.
+        let (width, height) = (r.width() as u32, r.height() as u32);
+        let mut area = imageops::crop_imm(frame, x as u32, y as u32, width, height).to_image();
+        let (left, right) = (0, right - x);
+        let shown = self.rows.iter().skip(self.scroll).take(shown_rows(control));
         for (row, line) in shown.enumerate() {
-            let top = y + 1 + (row as f32 * ROW_HEIGHT) as i32;
+            let frame = &mut area;
+            let (x, top) = (left, 1 + (row as f32 * ROW_HEIGHT) as i32);
             let selected = self.selected == Some(self.scroll + row)
                 || self.marked.get(self.scroll + row).copied().unwrap_or(false);
             let ink = self.inks.get(self.scroll + row).copied().flatten();
@@ -169,12 +175,19 @@ impl ListState {
                 }
             }
         }
+        imageops::replace(frame, &area, x.into(), y.into());
     }
 }
 
 /// The rows a list has room for.
 pub fn visible_rows(control: &Control) -> usize {
     ((control.rect.height() - 2.0) / ROW_HEIGHT).floor().max(0.0) as usize
+}
+
+/// The rows a list shows: every one that starts inside it, as the game
+/// draws them all and the list's window cuts them off (`CMyListBox`).
+pub fn shown_rows(control: &Control) -> usize {
+    ((control.rect.height() - 1.0) / ROW_HEIGHT).ceil().max(0.0) as usize
 }
 
 /// Where a list's scrollbar puts its up and down arrows, in classic pixels.
@@ -194,9 +207,9 @@ pub(crate) fn targets(
     out: &mut Vec<(Target, Rect)>,
 ) {
     let r = control.rect;
-    for row in 0..visible_rows(control) {
+    for row in 0..shown_rows(control) {
         let y = r.min.y + 1.0 + row as f32 * ROW_HEIGHT;
-        let rect = Rect::new(r.min.x, y, r.max.x, y + ROW_HEIGHT);
+        let rect = Rect::new(r.min.x, y, r.max.x, (y + ROW_HEIGHT).min(r.max.y));
         out.push((Target::Row { control: index, row }, geometry.map(rect)));
     }
     let (up, down) = geometry.scroll(control);

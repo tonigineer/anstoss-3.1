@@ -15,14 +15,13 @@ mod season;
 
 use std::collections::HashMap;
 
-use bevy_math::{Rect, Vec2};
 use chrono::{Datelike, NaiveDate};
 
 use a3_core::lineup;
 use a3_core::records::{Player as Record, Records};
 use a3_core::season::{ClubState, Fitness, Season, Status};
 use a3_core::world::Player;
-use a3_files::rch::{Align, Control, Dialog, Kind};
+use a3_files::rch::Dialog;
 
 use super::{Args, Cx, Outcome, Reply, Screen, control, ok_or_cancel, set};
 use crate::controls::ControlState;
@@ -63,21 +62,12 @@ const LAST_REAL_ID: u16 = 17_000;
 
 /// The caption, at the top: the page's title.
 const CAPTION_ID: u16 = 9923;
-const CAPTION_RECT: Rect = Rect { min: Vec2::new(5.0, 3.0), max: Vec2::new(635.0, 19.0) };
 
 /// Puts each page's title in its caption.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     for page in PAGES_IN_ORDER {
         let Some(dialog) = dialogs.get_mut(&page) else { continue };
-        let caption = Control {
-            kind: Kind::Static,
-            rect: CAPTION_RECT,
-            align: Align::Left,
-            text: dialog.title.clone(),
-            id: Some(CAPTION_ID),
-            bold: true,
-            ink: [0; 3],
-        };
+        let caption = super::caption(dialog.frame, CAPTION_ID, dialog.title.clone());
         dialog.controls.insert(0, caption);
     }
 }

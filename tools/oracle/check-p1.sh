@@ -80,14 +80,15 @@ else
 fi
 
 # 4. The line-up of the save as the original shows it, and as the replica
-#    does; they differ where their fonts do (smoothing, the caption's place).
+#    does; they differ where the replica crosses out what does nothing yet,
+#    and in what it does not show yet (the set-piece takers' icons).
 only "$out/Probe1.an3"
 A3PROBE_SRAND=1 "$here/tools/oracle/run.sh" bash -c "'$here/target/debug/anstoss3-menu' --original '$here/tools/oracle/scripts/lineup.txt' && python3 '$here/tools/probe/client.py' 'shot $out/lineup-original.png'" > "$out/lineup-original.log" 2>&1
 ANSTOSS3_DIR="$oracle/game" "$here/target/debug/anstoss3-menu" --script "$here/crates/a3-screens/scripts/load.txt" --shot "$out/lineup-replica.png" > "$out/lineup-replica.log" 2>&1
 if [ -f "$out/lineup-original.png" ] && [ -f "$out/lineup-replica.png" ]; then
     share=$(magick compare -metric AE "$out/lineup-original.png" "$out/lineup-replica.png" null: 2>&1 | sed 's/.*(\(.*\)).*/\1/')
     if awk "BEGIN {exit !($share < 0.05)}"; then
-        line ok "4 like the original: the line-up differs in $(awk "BEGIN {printf \"%.1f\", $share * 100}")% of its pixels (fonts)"
+        line ok "4 like the original: the line-up differs in $(awk "BEGIN {printf \"%.1f\", $share * 100}")% of its pixels (crossed out)"
     else
         line FAIL "4 like the original: $(awk "BEGIN {printf \"%.1f\", $share * 100}")% of the pixels differ; compare $out/lineup-*.png"
     fi

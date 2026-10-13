@@ -6,11 +6,9 @@
 
 use std::collections::HashMap;
 
-use bevy_math::{Rect, Vec2};
-
 use a3_core::autolineup;
 use a3_core::cycle::dialogs::NOTICE;
-use a3_files::rch::{Align, Control, Dialog, Kind};
+use a3_files::rch::{Align, Dialog};
 
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, ok_or_cancel, set};
 use crate::controls::ControlState;
@@ -27,7 +25,6 @@ const AUTO_FREE: u16 = 5338;
 const AUTO_OLD: u16 = 6355;
 /// The caption, in the frame: the dialog's title.
 const CAPTION_ID: u16 = 9922;
-const CAPTION_RECT: Rect = Rect { min: Vec2::new(5.0, 3.0), max: Vec2::new(505.0, 19.0) };
 /// No more than eleven are always picked: text 4282.
 const ELEVEN_ALWAYS: u16 = 4282;
 const MOST_ALWAYS: usize = 11;
@@ -37,16 +34,7 @@ const TABS: [f32; 3] = [0.0, 99.0, 145.0];
 /// Puts the dialog's caption in its frame.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     let Some(dialog) = dialogs.get_mut(&SPECIAL) else { return };
-    let origin = dialog.frame.map_or(Vec2::ZERO, |f| f.min);
-    let caption = Control {
-        kind: Kind::Static,
-        rect: Rect::from_corners(origin + CAPTION_RECT.min, origin + CAPTION_RECT.max),
-        align: Align::Left,
-        text: dialog.title.clone(),
-        id: Some(CAPTION_ID),
-        bold: true,
-        ink: [0; 3],
-    };
+    let caption = super::caption(dialog.frame, CAPTION_ID, dialog.title.clone());
     dialog.controls.insert(0, caption);
 }
 

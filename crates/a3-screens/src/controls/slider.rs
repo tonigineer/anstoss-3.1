@@ -30,22 +30,28 @@ pub(crate) const ARROWS: [&str; 2] = ["Pfeile/PfeilL1.bmp", "Pfeile/PfeilR1.bmp"
 const END: u32 = 3;
 const RIGHT_END: u32 = 0x1ba;
 
-/// Where the handle sits, in classic pixels.
+/// Where the handle sits, in classic pixels: as far along the track as the
+/// value is in its range, in whole pixels rounded down, as the game puts it.
 pub fn handle(control: &Control, value: &Value) -> Rect {
     let r = control.rect;
     let (min, max) = value.range;
-    let track = r.width() - 2.0 * SLIDER_ARROW - SLIDER_HANDLE;
-    let share = if max > min { (value.value - min) as f32 / (max - min) as f32 } else { 0.0 };
-    let left = r.min.x + SLIDER_ARROW + (track * share).round();
+    let track = (r.width() - 2.0 * SLIDER_ARROW - SLIDER_HANDLE) as i64;
+    let along = if max > min {
+        (i64::from(value.value - min) * track).div_euclid(i64::from(max - min))
+    } else {
+        0
+    };
+    let left = r.min.x + SLIDER_ARROW + along as f32;
     Rect::new(left, r.min.y, left + SLIDER_HANDLE, r.max.y)
 }
 
-/// The value whose handle position is nearest to a handle at `left`.
+/// The value of a handle at `left`, rounded down as the game reckons it.
 pub fn value_at(control: &Control, value: &Value, left: f32) -> i32 {
     let (min, max) = value.range;
-    let track = control.rect.width() - 2.0 * SLIDER_ARROW - SLIDER_HANDLE;
-    let share = (left - control.rect.min.x - SLIDER_ARROW) / track.max(1.0);
-    (min + (share * (max - min) as f32).round() as i32).clamp(min, max.max(min))
+    let track = ((control.rect.width() - 2.0 * SLIDER_ARROW - SLIDER_HANDLE) as i64).max(1);
+    let along = (left - control.rect.min.x - SLIDER_ARROW) as i64;
+    let value = i64::from(min) + (i64::from(max - min) * along).div_euclid(track);
+    (value as i32).clamp(min, max.max(min))
 }
 
 /// Where a press on the track, `along` its length from 0 to 1, puts the

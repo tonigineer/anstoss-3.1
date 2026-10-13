@@ -27,7 +27,7 @@ const LIST_HEIGHT: i32 = 102;
 /// The scrollbar's strip and its arrows.
 const BAR: i32 = 20;
 /// Where the texts start: in the field, in a row.
-const FIELD_TEXT: (i32, i32) = (2, 4);
+const FIELD_TEXT: i32 = 2;
 const ROW_TEXT: i32 = 3;
 const LIST: Rgba<u8> = Rgba([220, 216, 225, 255]);
 const STRIP: Rgba<u8> = Rgba([225, 216, 220, 255]);
@@ -112,7 +112,9 @@ impl ComboState {
         if let (Some(font), Some(text)) =
             (paint.font(), self.selected.and_then(|s| self.items.get(s)))
         {
-            font.draw(frame, x + FIELD_TEXT.0, y + FIELD_TEXT.1, text, TEXT, false);
+            // Centred top to bottom in whole pixels.
+            let top = y + (r.height() as i32 - font.height() as i32) / 2;
+            font.draw(frame, x + FIELD_TEXT, top, text, TEXT, false);
         }
     }
 

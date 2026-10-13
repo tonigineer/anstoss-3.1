@@ -123,6 +123,9 @@ impl Host {
             return Change::Same;
         }
         let Some(dialog) = game.dialogs.get(&self.view().id) else { return Change::Same };
+        if crate::screens::is_corner_button(dialog, target) {
+            return Change::Same;
+        }
         if !self.view_mut().press(dialog, target) {
             return Change::Same;
         }
@@ -213,6 +216,7 @@ impl Host {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let mut cx = Cx { game, dialog, state: &mut state };
         self.screens[screen].open(&mut cx, &mut view, request.args);
+        crate::screens::cross_corner_buttons(&mut view, dialog);
         Some((screen, view))
     }
 

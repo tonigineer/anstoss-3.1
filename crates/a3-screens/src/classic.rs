@@ -3,25 +3,22 @@
 //! function of the dialog, its view and the pictures loaded for it.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::sync::Arc;
 
 use bevy_math::Vec2;
 use image::{Rgba, RgbaImage, imageops};
 use tracing::warn;
 
 use a3_files::bitmap_font::BitmapFont;
-use a3_files::rch::{Align, Control, Dialog};
+use a3_files::rch::{Align, Control, Dialog, PLAIN_FONT};
 
 use crate::controls::bitmap::Picture;
 use crate::controls::{bar, combo, slider};
+use crate::fonts::Fonts;
 use crate::game::{Game, transparent_black};
 use crate::pointer::Target;
 use crate::view::View;
 
-/// Wine's MS Sans Serif for 96 dpi and code page 1252.
-const MS_SANS_SERIF: &str = "/usr/share/wine/fonts/sserife.fon";
-/// 8 pt at 96 dpi, the size of Windows dialogs.
-const CELL_HEIGHT: u32 = 13;
 /// The grey of Windows dialogs, behind a dialog without a picture.
 pub const PLAIN: Rgba<u8> = Rgba([224, 222, 226, 255]);
 pub(crate) const TEXT: Rgba<u8> = Rgba([0, 0, 0, 255]);
@@ -45,12 +42,17 @@ pub fn is_scene(id: u16) -> bool {
 
 /// A dialog's own picture, or the plain grey of Windows dialogs if it has
 /// none that can be read.
-pub fn picture(game: &Game, dialog: &Dialog) -> RgbaImage {
-    let mut picture = game.graphic(dialog.background).unwrap_or_else(|err| {
+pub fn art(game: &Game, dialog: &Dialog) -> RgbaImage {
+    game.graphic(dialog.background).unwrap_or_else(|err| {
         warn!("background {}: {err}", dialog.background);
         RgbaImage::from_pixel(640, 480, PLAIN)
-    });
-    // A popup has a black edge over the rim of its picture.
+    })
+}
+
+/// A dialog's picture as the classic look shows it: a popup's with a black
+/// edge over its rim.
+pub fn picture(game: &Game, dialog: &Dialog) -> RgbaImage {
+    let mut picture = art(game, dialog);
     if dialog.frame.is_some() {
         let (w, h) = (picture.width() as i32, picture.height() as i32);
         fill(&mut picture, 0, 0, w, POPUP_EDGE, TEXT);
@@ -65,7 +67,7 @@ pub fn picture(game: &Game, dialog: &Dialog) -> RgbaImage {
 /// with, loaded as it opens.
 pub struct Classic {
     background: RgbaImage,
-    font: Option<BitmapFont>,
+    fonts: Arc<Fonts>,
     /// Button, option, animation and icon images by graphic id.
     images: HashMap<u16, RgbaImage>,
     /// Images the game loads by name: the slider handle, scrollbar arrows.
@@ -79,9 +81,7 @@ impl Classic {
     /// `background`: the dialog's picture, or for a popup the screen under
     /// it with its picture on top.
     pub fn new(game: &Game, dialog: &Dialog, view: &View, background: RgbaImage) -> Self {
-        let font = BitmapFont::load(Path::new(MS_SANS_SERIF), CELL_HEIGHT)
-            .inspect_err(|err| warn!("{MS_SANS_SERIF}: {err}; the classic look has no text"))
-            .ok();
+        let fonts = game.fonts();
         let mut images = HashMap::new();
         for (control, shown) in dialog.controls.iter().zip(&view.controls) {
             let (ids, sprite) = shown.state.graphics(control);
@@ -102,7 +102,7 @@ impl Classic {
                 Err(err) => warn!("{name}: {err}"),
             }
         }
-        let mut classic = Self { background, font, images, widgets, bitmaps: HashMap::new() };
+        let mut classic = Self { background, fonts, images, widgets, bitmaps: HashMap::new() };
         classic.update(game, view);
         classic
     }
@@ -155,7 +155,7 @@ impl Classic {
                 combo.draw_list(&mut frame, &paint);
             }
         }
-        if let (Some((control, item)), Some(font)) = (view.tip, &self.font) {
+        if let (Some((control, item)), Some(font)) = (view.tip, self.fonts.get(PLAIN_FONT)) {
             let text = view.controls.get(control).and_then(|c| c.state.as_bar()?.tips.get(item));
             if let (Some(text), Some(c)) = (text, dialog.controls.get(control)) {
                 bar::draw_tip(&mut frame, font, bar::symbol(c, item), text);
@@ -178,8 +178,14 @@ pub(crate) struct Paint<'a> {
 }
 
 impl Paint<'_> {
+    /// The dialog font.
     pub fn font(&self) -> Option<&BitmapFont> {
-        self.classic.font.as_ref()
+        self.classic.fonts.get(PLAIN_FONT)
+    }
+
+    /// Font `number` of the dialog file.
+    pub fn font_of(&self, number: u8) -> Option<&BitmapFont> {
+        self.classic.fonts.get(number)
     }
 
     pub fn image(&self, id: u16) -> Option<&RgbaImage> {
@@ -224,6 +230,13 @@ fn cross(frame: &mut RgbaImage, at: bevy_math::Rect) {
     }
 }
 
+/// Where a text `text` pixels wide starts centred in `width` from `left`,
+/// as the game centres it: on the middle of the room, half the text to the
+/// left of it, each half rounded down (`FUN_0079d255`, `sgl_DrawText`).
+pub(crate) fn centred(left: i32, width: i32, text: i32) -> i32 {
+    left + width / 2 - (text >> 1)
+}
+
 pub(crate) fn paste(frame: &mut RgbaImage, picture: &RgbaImage, at: Vec2) {
     imageops::overlay(frame, picture, at.x as i64, at.y as i64);
 }
@@ -256,7 +269,8 @@ pub(crate) fn columns<'a>(
         let spare = |width: f32| width as i32 - font.width(cell, false) as i32;
         match aligns.get(i).copied().flatten() {
             Some((Align::Centre, width)) => {
-                font.draw(frame, left + spare(width) / 2, y, cell, color, false)
+                let at = centred(left, width as i32, font.width(cell, false) as i32);
+                font.draw(frame, at, y, cell, color, false)
             }
             Some((Align::Right, width)) => {
                 font.draw(frame, left + spare(width), y, cell, color, false)
