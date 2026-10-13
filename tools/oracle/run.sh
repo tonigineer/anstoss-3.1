@@ -7,9 +7,9 @@
 # xorg-server-xvfb), launches the game copy of tools/oracle/setup.sh with the
 # probe injected, waits until the probe answers and runs COMMAND in the
 # current directory (by default: waits for the game to end). Then it ends the
-# game and passes COMMAND's exit code on. The probe's and Wine's logs go to
-# runs/ of the oracle, with the trace of random draws (draws.bin);
-# `tools/probe/client.py "shot FILE"` saves the screen.
+# game and passes COMMAND's exit code on, or 75 if the game crashed. The
+# probe's and Wine's logs go to runs/ of the oracle, with the trace of random
+# draws (draws.bin); `tools/probe/client.py "shot FILE"` saves the screen.
 #
 # Without a window manager the game's window stays where the game puts it, so
 # its picture is the same from run to run.
@@ -58,7 +58,23 @@ probe() { python3 "$here/tools/probe/client.py" "$@"; }
 A3PROBE_WAIT=30 probe ping > /dev/null || { echo "the probe does not answer" >&2; exit 1; }
 status=0
 if [ $# -gt 0 ]; then
-    "$@" || status=$?
+    "$@" &
+    command=$!
+    # A game that crashes stops in Wine's debugger, probe and all: end it
+    # then, so that COMMAND ends too, and exit with 75 (EX_TEMPFAIL). Now and
+    # then the game crashes at the start — its mode picker (FUN_004316a2)
+    # reads past the list of display modes when none is 640 wide.
+    crashed=""
+    while kill -0 "$command" 2> /dev/null; do
+        if [ -z "$crashed" ] && grep -q '^wine: Unhandled' "$runs/wine.log"; then
+            grep -m1 '^wine: Unhandled' "$runs/wine.log" >&2
+            crashed=1
+            "$wineserver" -k 2> /dev/null || true
+        fi
+        sleep 1
+    done
+    wait "$command" || status=$?
+    [ -z "$crashed" ] || status=75
     probe quit > /dev/null 2>&1 || true
 else
     wait "$game" || status=$?

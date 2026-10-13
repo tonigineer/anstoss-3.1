@@ -1,0 +1,32 @@
+# Loads the first save of the list and plays to day 42 — from the autosave
+# of day 35 of the new game of crates/a3-screens/scripts/new-game.txt, seven
+# days. For the original only: the replica cannot load saves yet.
+once 9 choose 4771 1; ok
+on 424 row 5144 0; ok
+# Ending a turn asks for confirmation.
+on 384 press 4741
+# The original's season start and its news of the week: negotiations,
+# settings, draws, effects, the transfer list and who left it, the
+# appointments, cup bonuses (for the next round too), events (short, long or
+# with a value), the cup matches and an alert.
+on 422 ok
+on 419 ok
+on 420 ok
+on 421 ok
+on 287 ok
+on 321 ok
+on 25 ok
+on 341 ok
+on 120 ok
+on 51 ok
+on 392 ok
+on 435 ok
+on 96 ok
+on 161 ok
+on 380 press 4731
+# Week after week, each takes a turn and whistles it off.
+on 381 wait
+on 147 click bar 18
+on 302 click bar 18
+on 2 wait
+until day 42

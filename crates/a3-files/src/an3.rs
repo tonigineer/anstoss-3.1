@@ -40,6 +40,10 @@ const OLDEST: u16 = 50;
 /// at 0xae6e30, seconds of `clock()` (`FUN_00788410`). Two runs of the same
 /// game, with the same random numbers, differ in them.
 pub const REAL_TIME: &[&str] = &["0xae6e34"];
+/// A block the writer fills from a stack buffer it never sets (`local_bc` of
+/// `FUN_006ed31e`) and the loader reads into one it never uses: whatever
+/// earlier calls left on the stack, not state.
+pub const LEFTOVERS: &[&str] = &["local_b8"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
@@ -677,6 +681,28 @@ mod tests {
             read += 1;
         }
         assert!(read > 0, "no saves in {}", dir.display());
+    }
+
+    /// The dumps `tools/oracle/check.sh` has the original write.
+    #[test]
+    #[ignore = "reads the oracle's dumps from $ANSTOSS3_ORACLE (tools/oracle/check.sh)"]
+    fn the_oracles_dumps_decode() {
+        let oracle =
+            std::path::PathBuf::from(std::env::var_os("ANSTOSS3_ORACLE").expect("ANSTOSS3_ORACLE"));
+        let mut dirs = vec![oracle.join("runs/check")];
+        let mut read = 0;
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "an3") {
+                    Save::read(&path).unwrap();
+                    read += 1;
+                }
+            }
+        }
+        assert!(read > 0, "no dumps under {}", oracle.display());
     }
 
     #[test]

@@ -40,6 +40,9 @@ const POLL: Duration = Duration::from_millis(100);
 const MOST: Duration = Duration::from_secs(300);
 /// How often the same dialog may be acted on without moving on.
 const MOST_TURNS: usize = 20;
+/// How long the probe may take to answer before the game counts as gone —
+/// a game that crashed stops in Wine's debugger, probe and all.
+const ANSWER: Duration = Duration::from_secs(60);
 /// The game's day, counted from the start of the first season (16 bits).
 const DAY: u32 = 0xb5cbd4;
 /// Keys: to the end of a field, and back over a character.
@@ -58,6 +61,7 @@ impl Probe {
     pub fn connect(port: u16) -> Result<Self, Error> {
         let stream = TcpStream::connect(("127.0.0.1", port))
             .map_err(|err| Error::Probe(format!("cannot connect on port {port}: {err}")))?;
+        stream.set_read_timeout(Some(ANSWER)).map_err(gone)?;
         let replies = BufReader::new(stream.try_clone().map_err(gone)?);
         Ok(Self { replies, stream })
     }
