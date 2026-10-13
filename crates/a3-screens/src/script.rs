@@ -80,6 +80,8 @@ pub(crate) enum Action {
     /// Drags a control (a player's box) or a list's row onto another, or off
     /// them all.
     Drag(Spot, Option<Spot>),
+    /// A right click on a control or a list's row.
+    RightClick(Spot),
     Wait,
 }
 
@@ -229,6 +231,10 @@ fn parse_action(action: &str) -> Option<Action> {
         ["spin", spinner, "up"] => Action::Spin(id(spinner)?, true),
         ["spin", spinner, "down"] => Action::Spin(id(spinner)?, false),
         ["slide", slider, value] => Action::Slide(id(slider)?, value.parse().ok()?),
+        ["rclick", ref rest @ ..] => match spot(rest)? {
+            (spot, []) => Action::RightClick(spot),
+            _ => return None,
+        },
         ["drag", ref rest @ ..] => {
             let (from, rest) = spot(rest)?;
             match rest {
@@ -419,14 +425,21 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::Spin(id, up) => Target::Spin { control: find(id)?, up },
         Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
         Action::Drag(from, to) => {
-            let grip = |spot: Spot| match spot {
-                Spot::Control(id) => Ok(Grip::Control(find(id)?)),
-                Spot::Row(id, row) => Ok(Grip::Row { control: find(id)?, row }),
-            };
+            let grip = |spot: Spot| grip(controls, dialog, spot);
             Target::Drop { from: grip(from)?, to: to.map(grip).transpose()? }
         }
+        Action::RightClick(spot) => Target::Menu(grip(controls, dialog, spot)?),
         Action::Type(id, _) => Target::Edit(find(id)?),
         Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
+    })
+}
+
+/// What a spot of a script takes hold of in `controls`.
+fn grip(controls: &Dialog, dialog: u16, spot: Spot) -> Result<Grip, Error> {
+    let find = |id: u16| control(controls, id).ok_or(Error::NoControl { dialog, control: id });
+    Ok(match spot {
+        Spot::Control(id) => Grip::Control(find(id)?),
+        Spot::Row(id, row) => Grip::Row { control: find(id)?, row },
     })
 }
 
@@ -652,6 +665,32 @@ mod tests {
             let cohesion = a3_core::cohesion::of(&game.rules.pitch, club, season.date());
             assert_eq!(cohesion, expected, "after {actions:?}");
         }
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_player_info_shows_what_the_originals_does() {
+        let game = game();
+        let Some(row) = game.save_games().iter().position(|s| s.name == "Probe1") else {
+            eprintln!("no Probe1 among the saves; the oracle's copy has it");
+            return;
+        };
+        let load = LOAD.replace("row 5144 0", &format!("row 5144 {row}"));
+        let script =
+            format!("{}\nnow rclick 2510; choose 9950 0\nuntil dialog 399", load.trim_end());
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&399];
+        let text = |id: u16| view.text(crate::screens::control(dialog, id).unwrap()).to_owned();
+        // As the original showed the gate's keeper (P0's check.sh).
+        assert_eq!(text(4825), "Max Schmitt");
+        assert_eq!(text(4826), "19 Jahre (18.1.2006)");
+        assert_eq!(text(4834), "144.000 €");
+        assert_eq!(text(4843), "1.36 Mio €");
+        assert_eq!(text(4844), "Vertrag bis 30.6.2028 (noch drei Jahre).");
+        assert_eq!(text(4878), "Er ist gesund.");
+        assert_eq!([text(4971), text(4972)], ["Geldgeier", "Skandalnudel"]);
     }
 
     #[test]

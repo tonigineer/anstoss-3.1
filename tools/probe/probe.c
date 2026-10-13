@@ -14,6 +14,7 @@
  *   click X Y            ok             clicks the left button at X, Y of the
  *                                       game's 640×480 screen, as the mouse
  *                                       would (SendInput)
+ *   rclick X Y           ok             the same with the right button
  *   drag X1 Y1 X2 Y2     ok             drags with the left button held from
  *                                       X1, Y1 to X2, Y2 of the game's screen
  *   key VK               ok             presses and releases a virtual key
@@ -169,7 +170,7 @@ static void inject(INPUT *inputs, int count)
 	}
 }
 
-static void click(int x, int y, char *reply, size_t size)
+static void click(int x, int y, BOOL right, char *reply, size_t size)
 {
 	HWND window = main_window();
 	POINT at = {x, y};
@@ -182,8 +183,8 @@ static void click(int x, int y, char *reply, size_t size)
 	inputs[0].mi.dx = (at.x * 65535 + width / 2) / (width - 1);
 	inputs[0].mi.dy = (at.y * 65535 + height / 2) / (height - 1);
 	inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-	inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-	inputs[2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+	inputs[1].mi.dwFlags = right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
+	inputs[2].mi.dwFlags = right ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
 	inject(inputs, 3);
 	snprintf(reply, size, "ok");
 }
@@ -434,12 +435,12 @@ static BOOL answer(char *line, char *reply, size_t size)
 		}
 	} else if (!strcmp(word, "windows")) {
 		list_windows(reply, size);
-	} else if (!strcmp(word, "click")) {
+	} else if (!strcmp(word, "click") || !strcmp(word, "rclick")) {
 		char *x = take(&cursor, FALSE), *y = take(&cursor, FALSE);
 		if (!x || !y)
-			snprintf(reply, size, "error click X Y");
+			snprintf(reply, size, "error %s X Y", word);
 		else
-			click(atoi(x), atoi(y), reply, size);
+			click(atoi(x), atoi(y), word[0] == 'r', reply, size);
 	} else if (!strcmp(word, "drag")) {
 		char *x1 = take(&cursor, FALSE), *y1 = take(&cursor, FALSE);
 		char *x2 = take(&cursor, FALSE), *y2 = take(&cursor, FALSE);

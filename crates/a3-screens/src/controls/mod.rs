@@ -10,6 +10,7 @@ pub mod check;
 pub mod edit;
 pub mod header;
 pub mod list;
+pub mod menu;
 pub mod options;
 pub mod player_box;
 pub mod slider;
@@ -32,6 +33,7 @@ use self::check::CheckState;
 use self::edit::EditState;
 use self::header::HeaderState;
 use self::list::ListState;
+use self::menu::MenuState;
 use self::options::OptionsState;
 use self::player_box::PlayerBox;
 use self::spin::Value;
@@ -61,6 +63,7 @@ pub enum ControlState {
     /// What a player's box shows, once the flow has filled it.
     Player(Option<PlayerBox>),
     Check(CheckState),
+    Menu(MenuState),
     Bar(BarState),
     Other,
 }
@@ -83,6 +86,7 @@ impl ControlView {
             Kind::Options { items, .. } => ControlState::Options(OptionsState::new(items)),
             Kind::Player => ControlState::Player(None),
             Kind::Check => ControlState::Check(CheckState { checked: false, text: text() }),
+            Kind::Menu => ControlState::Menu(MenuState::default()),
             Kind::Bar { .. } => ControlState::Bar(BarState::default()),
             Kind::Other => ControlState::Other,
         };
@@ -187,6 +191,7 @@ impl ControlState {
             Self::Options(o) => o.draw(frame, paint),
             Self::Player(Some(p)) => p.draw(frame, paint),
             Self::Check(c) => c.draw(frame, paint),
+            Self::Menu(m) => m.draw(frame, paint),
             Self::Bar(b) => b.draw(frame, paint),
             Self::Spin(_) | Self::Player(None) | Self::Other => {}
         }
@@ -211,6 +216,7 @@ impl ControlState {
             Self::Options(o) => o.targets(index, control, geometry, out),
             Self::Bar(b) => b.targets(index, control, geometry, out),
             Self::Check(c) => c.targets(index, control, geometry, out),
+            Self::Menu(m) => m.targets(index, control, geometry, out),
             // A player's box can be dragged to another place.
             Self::Player(Some(player)) => {
                 out.push((Target::Control(index), geometry.map(player.rect(control))))

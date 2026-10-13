@@ -135,8 +135,22 @@ record! {
     /// A player (0x354 bytes at `DAT_00c02550` + id × 0x354), filled from the
     /// data files by `FUN_0068c903`.
     Player, 0x354 - HEADER, base HEADER;
-    /// The year the contract runs to.
+    /// The club he plays for next season, if he signed with another: its
+    /// league and number (0 none).
+    0x14c => next_club, set_next_club: [u8; 2];
+    /// His contract: salary in thousands a year, the bonuses for playing
+    /// and for a goal in hundreds, a fixed transfer fee in ten thousands.
+    0x150 => salary, set_salary: u16;
+    0x152 => appearance_bonus, set_appearance_bonus: u16;
+    0x154 => goal_bonus, set_goal_bonus: u16;
+    0x156 => fixed_fee, set_fixed_fee: u16;
+    /// The year the contract runs to, in the low twelve bits.
     0x15c => contract, set_contract: u16;
+    /// The contract's terms: the leagues it holds for (low two bits), on
+    /// loan (0x100), not to play in the European cups (0x10), extended
+    /// itself (0x80), options for club (0x2000) and player (0x1000), a
+    /// regular place (0x4000).
+    0x15e => terms, set_terms: u16;
     /// His enemies and friends in the squad, by id, 0 none.
     0x208 => enemies, set_enemies: [u16; 2];
     0x20c => friends, set_friends: [u16; 2];
@@ -146,9 +160,13 @@ record! {
     0x168 => birth_day, set_birth_day: u8;
     0x169 => birth_month, set_birth_month: u8;
     0x16a => birth_year, set_birth_year: u16;
+    /// Bits: the fans love him (0x10000) or hate him (0x400).
+    0x1b0 => flags, set_flags: u32;
     /// Bit 31: the nickname is shown; bit 11: his condition counts five
     /// less in the automatic line-ups.
     0x1b4 => shown, set_shown: u32;
+    /// What he has earned so far.
+    0x1b8 => earned, set_earned: i32;
     /// The player's index in the array.
     0x1bc => id, set_id: u16;
     /// Names, as indices into the name pool.
@@ -160,6 +178,8 @@ record! {
     0x1c6 => bad, set_bad: u16;
     /// Bits of character and skill.
     0x1c8 => traits, set_traits: [u16; 2];
+    /// More bits the market value counts five each for.
+    0x1cc => qualities, set_qualities: u16;
     /// Condition and freshness, in hundredths.
     0x1ce => condition, set_condition: i16;
     0x1d0 => freshness, set_freshness: [i16; 3];
@@ -169,6 +189,14 @@ record! {
     0x1da => injured_to, set_injured_to: [u16; 2];
     /// Not zero: "angeschlagen", knocked about.
     0x1de => knocked, set_knocked: u8;
+    /// Matches of the competitions of the kinds 12 to 15 this season.
+    0x266 => kind_12_matches, set_kind_12_matches: u8;
+    /// Bit 7: he ends his career.
+    0x26f => retiring, set_retiring: u8;
+    /// His strong foot (bits 2 and 3: 1 right, 2 left, 3 both), how the
+    /// fans see him (low bits: 2 loved, 3 hated), counts as home-grown
+    /// (0x10).
+    0x282 => manner, set_manner: u8;
     /// Matches played this season: in the league, and in the competitions
     /// of the kinds 3–4, 5–10 and 12–15 (the line-up's object +0x54, +0x59,
     /// +0x5f, +0x61).
@@ -184,12 +212,22 @@ record! {
     /// Bits 13 to 15: he plays with a knock, at 0.9 of his strength
     /// (`FUN_006a144e`).
     0x218 => knocks, set_knocks: u16;
+    /// His face: the parts of the portrait.
+    0x21a => face, set_face: [u8; 2];
     /// 1 to 12.
     0x21c => strength, set_strength: u8;
     /// The main position, then two side positions, 0 none (1 the keeper).
     0x21d => positions, set_positions: [u8; 3];
+    /// His club: its league and number (league 0 none).
+    0x220 => club, set_club: [u8; 2];
+    /// Talent: 0 huge to 4 none.
+    0x222 => talent, set_talent: i8;
     0x223 => shirt, set_shirt: u8;
+    /// His nations, the second 0 none.
     0x225 => nation, set_nation: u8;
+    0x226 => second_nation, set_second_nation: u8;
+    /// The kind of his injury or illness (from 70 an illness).
+    0x228 => injury_kind, set_injury_kind: u8;
     /// Matches suspended in the low six bits; bit 7: for how long is not
     /// known yet.
     0x229 => suspension, set_suspension: u8;
@@ -412,6 +450,9 @@ record! {
     0xb5cbe0 => day_of_year, set_day_of_year: u16;
     /// Days in this year.
     0xb5cca4 => year_days, set_year_days: u16;
+    /// A player for each position whose market value counts a fifth more,
+    /// by id.
+    0xb5dfd0 => stars, set_stars: [u16; 11];
     /// Where the game cycle goes on after loading (`FUN_006da3a9`): 998
     /// inside the week, the half weeks at a week's turn.
     0xb5d172 => resume, set_resume: u16;

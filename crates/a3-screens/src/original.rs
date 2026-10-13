@@ -293,6 +293,12 @@ impl<'a> Original<'a> {
             Grip::Control(i) => Target::Control(i),
             Grip::Row { control, row } => Target::Row { control, row },
         };
+        if let Target::Menu(at) = target {
+            let at = rect(grip(at))?.center();
+            self.probe.ask(format!("rclick {} {}", at.x as i32, at.y as i32).as_bytes())?;
+            sleep(PAUSE);
+            return Ok(());
+        }
         if let Target::Drop { from, to } = target {
             // Off the boxes is on the list, which takes a player out as
             // well; a free spot of the pitch would move the box instead.

@@ -23,6 +23,8 @@ pub struct Game {
     texts: HashMap<u16, String>,
     graphics: HashMap<u16, String>,
     archive: Mutex<Archive>,
+    /// The flags' archive, `Archives/flaggen.cpr` (`klein/Flag14.bmp` …).
+    flags: Option<Mutex<Archive>>,
 }
 
 pub struct SaveGame {
@@ -49,9 +51,16 @@ impl Game {
             dir: dir.to_owned(),
             dialogs: rch::load_dialogs(&dir.join("deb/MeineDialoge.rch"))?,
             data: Arc::new(Data::load(dir)?),
-            texts: rch::load_texts(&dir.join("deb/ListeDerTexte.rh"))?,
+            // The dialog file's string table, as the game reads it, over
+            // the header the texts were written in.
+            texts: {
+                let mut texts = rch::load_texts(&dir.join("deb/ListeDerTexte.rh"))?;
+                texts.extend(rch::load_string_table(&dir.join("deb/MeineDialoge.rch"))?);
+                texts
+            },
             graphics: rch::load_graphics(&dir.join("deb/ListeDerGrafik.rh"))?,
             archive: Mutex::new(Archive::open(&dir.join("Archives/grafik.cpr"))?),
+            flags: Archive::open(&dir.join("Archives/flaggen.cpr")).ok().map(Mutex::new),
         })
     }
 
@@ -142,7 +151,12 @@ impl Game {
 
     /// A graphic from the archive by its path.
     pub fn picture(&self, path: &str) -> Result<RgbaImage, Box<dyn Error>> {
-        let bytes = self.archive.lock().unwrap().read(path)?;
+        let found = self.archive.lock().unwrap().read(path);
+        let bytes = match (found, &self.flags) {
+            (Ok(bytes), _) => bytes,
+            (Err(_), Some(flags)) => flags.lock().unwrap().read(path)?,
+            (Err(err), None) => return Err(err.into()),
+        };
         Ok(image::load_from_memory(&bytes)?.to_rgba8())
     }
 

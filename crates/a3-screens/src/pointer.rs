@@ -35,6 +35,8 @@ pub enum Target {
         from: Grip,
         to: Option<Grip>,
     },
+    /// A right click on a box or a row: the menu of what it holds.
+    Menu(Grip),
     Option {
         control: usize,
         item: usize,

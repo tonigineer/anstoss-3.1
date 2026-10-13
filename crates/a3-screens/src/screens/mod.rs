@@ -9,6 +9,7 @@ pub mod formations;
 pub mod hub;
 pub mod jobs;
 pub mod office;
+pub mod playerinfo;
 pub mod popups;
 pub mod special;
 pub mod start;
@@ -100,6 +101,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(hub::MenuBar::default()),
         Box::new(formations::Formations::default()),
         Box::new(special::Special),
+        Box::new(playerinfo::PlayerInfo::default()),
         Box::new(office::Office),
     ]
 }
@@ -113,6 +115,7 @@ pub fn compose(game: &mut Game) {
     hub::compose(&mut game.dialogs, &game.data.rules);
     formations::compose(&mut game.dialogs, &game.data.rules);
     special::compose(&mut game.dialogs);
+    playerinfo::compose(&mut game.dialogs);
 }
 
 /// The index of the dialog's control with `id`.

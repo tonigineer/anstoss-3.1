@@ -83,6 +83,9 @@ pub enum Kind {
     },
     /// A box to tick, with its label beside it.
     Check,
+    /// A menu that opens where a right click falls, which the screens put
+    /// in; the game's `CPopupMenue`.
+    Menu,
     /// A player's box on the pitch or the bench of the line-up, the game's
     /// `CMannStatic`, which draws itself.
     Player,
@@ -346,6 +349,30 @@ pub fn load_texts(path: &Path) -> io::Result<HashMap<u16, String>> {
         if let Some(german) = lines.peek().and_then(|l| l.strip_prefix("//")) {
             texts.insert(id, german.to_owned());
         }
+    }
+    Ok(texts)
+}
+
+/// The texts the game shows, as it reads them at run time: the string table
+/// of the dialog file, between its table of dialogs and the first dialog —
+/// a u16 id and a NUL-terminated string each, padded to an even place. It
+/// has the euros of the update where `ListeDerTexte.rh` still has marks.
+pub fn load_string_table(path: &Path) -> io::Result<HashMap<u16, String>> {
+    let data = std::fs::read(path)?;
+    if !data.starts_with(b"V10\0") {
+        return Err(invalid("not a V10 dialog file"));
+    }
+    let count = u32_at(&data, 4)? as usize;
+    let start = 0x10 + 8 * count;
+    let end =
+        (0..count).filter_map(|i| u32_at(&data, 0x10 + 8 * i).ok()).min().unwrap_or(0) as usize;
+    let mut texts = HashMap::new();
+    let mut pos = start;
+    while pos + 2 < end {
+        let Some(id) = u16_at(&data, pos) else { break };
+        let Some((text, after)) = cstr(&data, pos + 2) else { break };
+        texts.insert(id, text);
+        pos = after.next_multiple_of(2);
     }
     Ok(texts)
 }

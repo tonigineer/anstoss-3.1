@@ -455,6 +455,13 @@ fn press(
     mut pending: ResMut<Pending>,
 ) {
     let Ok(&Hotspot { target, zoom, dialog }) = hotspots.get(press.entity) else { return };
+    // The right button opens the menu of what it is on.
+    if press.button == PointerButton::Secondary && dialog == view.id {
+        if let Some(grip) = Grip::of(target) {
+            pending.0.push((Target::Menu(grip), 1));
+        }
+        return;
+    }
     if press.button != PointerButton::Primary || dialog != view.id {
         return;
     }

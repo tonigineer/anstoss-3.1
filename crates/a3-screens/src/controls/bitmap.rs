@@ -15,12 +15,21 @@ const CHART_INK: Rgba<u8> = Rgba([255, 0, 0, 255]);
 pub struct BitmapState {
     /// What it shows.
     pub picture: Option<Picture>,
+    /// Whether it stands on the control's bottom edge, as a bar does: the
+    /// picture is cut to its height.
+    pub bottom: bool,
 }
 
 impl BitmapState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         if let Some(picture) = self.picture.as_ref().and_then(|p| paint.bitmap(p)) {
-            paste(frame, picture, paint.control.rect.min);
+            let r = paint.control.rect;
+            let at = if self.bottom {
+                bevy_math::Vec2::new(r.min.x, r.max.y - picture.height() as f32)
+            } else {
+                r.min
+            };
+            paste(frame, picture, at);
         }
     }
 }
@@ -39,6 +48,8 @@ pub struct Picture {
 pub enum PictureSource {
     Graphic(u16),
     File(String),
+    /// A file of the graphics archive, by its path there.
+    Archive(String),
     /// A red line through values from 0 to 100, one every few pixels, in a
     /// clear picture of the given size.
     Chart {
@@ -61,6 +72,7 @@ impl Picture {
         let whole = match &self.source {
             PictureSource::Graphic(id) => game.graphic(*id)?,
             PictureSource::File(path) => image::load_from_memory(&game.file(path)?)?.to_rgba8(),
+            PictureSource::Archive(path) => game.picture(path)?,
             PictureSource::Chart { values, size, step } => chart(values, *size, *step),
         };
         let part = match self.part {

@@ -130,6 +130,7 @@ impl View {
             Target::Option { control, item } => match self.controls.get_mut(control) {
                 Some(ControlView { state: ControlState::Options(o), .. }) => o.press(item),
                 Some(ControlView { state: ControlState::Bar(b), .. }) => b.item_on(item),
+                Some(ControlView { state: ControlState::Menu(m), .. }) => m.at.is_some(),
                 _ => false,
             },
             Target::Row { control, row } => self.list_mut(control).is_some_and(|l| l.press(row)),
@@ -157,7 +158,7 @@ impl View {
                 true
             }
             Target::SliderTrack(_) => false,
-            Target::Control(_) | Target::Drop { .. } => true,
+            Target::Control(_) | Target::Drop { .. } | Target::Menu(_) => true,
             Target::Check(control) => {
                 if let Some(ControlView { state: ControlState::Check(check), .. }) =
                     self.controls.get_mut(control)

@@ -98,6 +98,10 @@ pub struct Rules {
     pub bar_symbols: Vec<u16>,
     pub bar_tips: Vec<u32>,
     pub bar_without_club: Vec<bool>,
+    /// What players are worth.
+    pub value: crate::value::ValueTables,
+    /// What the screens call a player's things.
+    pub words: crate::words::Words,
 }
 
 impl Rules {
@@ -129,6 +133,8 @@ impl Rules {
                 .into_iter()
                 .map(|off| off != 0)
                 .collect(),
+            value: crate::value::ValueTables::load(exe)?,
+            words: crate::words::Words::load(exe)?,
         })
     }
 

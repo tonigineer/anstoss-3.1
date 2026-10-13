@@ -138,6 +138,8 @@ fn fitness(record: &records::Player) -> Fitness {
 
 /// Bits of a player's record for knocks he plays with.
 const KNOCKS: u16 = 0xe000;
+/// The contract's year, in the low twelve bits.
+const CONTRACT_YEAR: u16 = 0xfff;
 /// Bit 7: the length of a long absence is not known yet.
 const UNKNOWN: u8 = 0x80;
 /// The automatic line-ups' bits: always pick him, never.
@@ -156,7 +158,9 @@ fn status(records: &Records, record: &records::Player) -> Status {
         suspended: record.suspension(),
         away: days_to(globals, record.away_to()),
         away_kind: record.away_kind(),
-        contract: Some(i32::from(record.contract()) - i32::from(globals.start_year())),
+        contract: Some(
+            i32::from(record.contract() & CONTRACT_YEAR) - i32::from(globals.start_year()),
+        ),
         knocked: record.knocked() != 0,
         dumbbell: record.dumbbell() == 1,
         always: record.picks() & ALWAYS != 0,

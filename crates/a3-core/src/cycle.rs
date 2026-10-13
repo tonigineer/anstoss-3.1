@@ -97,6 +97,8 @@ pub enum Args {
     Text(u16),
     /// A job offer, by its tab.
     Offer(usize),
+    /// A player of the current club, by his place in its squad.
+    Player(usize),
 }
 
 /// How a screen was left.

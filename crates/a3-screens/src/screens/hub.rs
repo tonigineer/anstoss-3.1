@@ -25,8 +25,9 @@ use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
-use super::special;
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, set};
+use super::{playerinfo, special};
+use crate::controls::ControlState;
 use crate::controls::player_box::PlayerBox;
 use crate::game::Game;
 use crate::pointer::{Grip, Target};
@@ -58,6 +59,12 @@ const NO_TRAINING: u16 = 3238;
 
 /// Ids for the controls the game makes itself.
 const CAPTION_ID: u16 = 9920;
+/// The menu of a player: "Spielerinfo", "Einzelgespräch", a blank line,
+/// "Prämie", "Geldstrafe" (the commands 0, 2, 9, 3, 4 of the table at
+/// 0x884a38, their texts at 0x8a4508).
+const MENU_ID: u16 = 9950;
+const MENU_ENTRIES: [u16; 5] = [4036, 4045, 4046, 4066, 4067];
+const INFO_ENTRY: usize = 0;
 const BAR_ID: u16 = 9930;
 /// What the bar takes the place of: the OK button and, on the line-up, the
 /// second row of column titles, which the game moves away and hides.
@@ -183,6 +190,19 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
                 control.rect = Rect::from_corners(at, at + BOX_SIZE);
             }
         }
+        if id == LINEUP {
+            // The menu a right click on a player opens, over everything.
+            let menu = Control {
+                kind: Kind::Menu,
+                rect: Rect::new(0.0, 0.0, 0.0, 0.0),
+                align: Align::Left,
+                text: String::new(),
+                id: Some(MENU_ID),
+                bold: false,
+                ink: [0; 3],
+            };
+            dialog.controls.push(menu);
+        }
         let items = rules
             .bar_symbols
             .iter()
@@ -209,6 +229,8 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
 pub struct MenuBar {
     /// The popup the line-up opened, whose answer it waits for.
     popup: Option<u16>,
+    /// The player whose menu is open.
+    menu_player: Option<usize>,
 }
 
 impl Screen for MenuBar {
@@ -266,6 +288,34 @@ impl Screen for MenuBar {
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        // An open menu takes the next click: on an entry, or anywhere else
+        // to close it.
+        if let Some(player) = self.menu_player.take() {
+            let menu = control(cx.dialog, MENU_ID);
+            if let Some(ControlState::Menu(m)) = menu.map(|m| &mut view.controls[m].state) {
+                m.at = None;
+            }
+            if let Target::Option { control: c, item } = target
+                && Some(c) == menu
+            {
+                if item == INFO_ENTRY {
+                    self.popup = Some(playerinfo::CURRENT);
+                    return Outcome::Popup(Request::with(
+                        playerinfo::CURRENT,
+                        Args::Player(player),
+                    ));
+                }
+                let entry = MENU_ENTRIES.get(item).map_or("", |&t| cx.game.text(t));
+                info!("{entry} ({player}): not built yet");
+            }
+            return Outcome::Stay;
+        }
+        if let Target::Menu(grip) = target {
+            if view.id == LINEUP {
+                self.menu_player = open_menu(cx, view, grip);
+            }
+            return Outcome::Stay;
+        }
         if let Target::Drop { from, to } = target {
             if view.id == LINEUP {
                 drop_player(cx, view, from, to);
@@ -380,16 +430,34 @@ fn stand_in(cx: &mut Cx, view: &mut View, formation: usize) {
     }
 }
 
-/// A player dragged on the line-up and let go of: moved as the game moves
-/// him, and the line-up shown again.
-fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
-    let (game, dialog) = (cx.game, cx.dialog);
-    let state = &mut *cx.state;
-    let Some(season) = state.season.as_mut() else { return };
-    let Some(club) = season.manager().and_then(|m| m.club) else { return };
-    let Some(club_state) = season.clubs.get_mut(&club) else { return };
-    let order = list_order(&club_state.lineup, club_state.players.len());
-    let place = |grip: Grip| match grip {
+/// Opens the menu of the player a right click fell on, there; the player.
+fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip) -> Option<usize> {
+    let club = club_state(cx)?;
+    let player = match place_of(cx.dialog, view, club, grip)? {
+        Place::Field(i) => club.lineup.field[i]?,
+        Place::Bench(i) => club.lineup.bench[i]?,
+        Place::Player(p) => p,
+    };
+    let target = match grip {
+        Grip::Control(c) => Target::Control(c),
+        Grip::Row { control, row } => Target::Row { control, row },
+    };
+    let (_, rect) = crate::pointer::targets(cx.dialog, view, &crate::pointer::Pixels)
+        .into_iter()
+        .find(|(t, _)| *t == target)?;
+    let entries = MENU_ENTRIES.iter().map(|&t| cx.game.text(t).to_owned()).collect();
+    let menu = control(cx.dialog, MENU_ID)?;
+    if let ControlState::Menu(m) = &mut view.controls[menu].state {
+        m.at = Some(rect.center());
+        m.entries = entries;
+    }
+    Some(player)
+}
+
+/// Where on the line-up a grip is: a spot, a place on the bench, or a
+/// player of the list.
+fn place_of(dialog: &Dialog, view: &View, club: &ClubState, grip: Grip) -> Option<Place> {
+    match grip {
         Grip::Control(c) => {
             let id = dialog.controls.get(c)?.id?;
             if (FIELD_BOXES..FIELD_BOXES + FIELD as u16).contains(&id) {
@@ -403,9 +471,21 @@ fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
         Grip::Row { control, row } => {
             (dialog.controls.get(control)?.id? == SQUAD).then_some(())?;
             let scroll = view.list(control).map_or(0, |l| l.scroll);
+            let order = list_order(&club.lineup, club.players.len());
             order.get(scroll + row).map(|&p| Place::Player(p))
         }
-    };
+    }
+}
+
+/// A player dragged on the line-up and let go of: moved as the game moves
+/// him, and the line-up shown again.
+fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
+    let (game, dialog) = (cx.game, cx.dialog);
+    let state = &mut *cx.state;
+    let Some(season) = state.season.as_mut() else { return };
+    let Some(club) = season.manager().and_then(|m| m.club) else { return };
+    let Some(club_state) = season.clubs.get_mut(&club) else { return };
+    let place = |grip: Grip| place_of(dialog, view, club_state, grip);
     let Some(from) = place(from) else { return };
     let to = to.and_then(place);
     if club_state.lineup.drop(from, to) {
@@ -418,7 +498,7 @@ fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
 }
 
 /// The squad as the list shows it: the eleven, the bench, then the rest.
-fn list_order(lineup: &Lineup, players: usize) -> Vec<usize> {
+pub(crate) fn list_order(lineup: &Lineup, players: usize) -> Vec<usize> {
     let squad: Vec<usize> = lineup.squad().collect();
     squad.iter().copied().chain((0..players).filter(|p| !squad.contains(p))).collect()
 }
