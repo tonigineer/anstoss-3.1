@@ -61,7 +61,7 @@ impl Screen for Details {
         let state = &cx.state;
         fill_in(view, cx.dialog, state.setup.current + 1, &state.player.name());
         set_chosen(view, cx.dialog, state.player.difficulty);
-        show_birthday(view, cx.dialog, state.player.birthday);
+        show_birthday(view, cx.dialog, state.player.birthday, cx.game.world.start_year);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -73,7 +73,7 @@ impl Screen for Details {
                 if let Some(part) = BIRTHDAY_SPINS.iter().position(|&s| s == id) {
                     player.birthday[part] += if up { 1 } else { -1 };
                     player.birthday = valid_date(player.birthday);
-                    show_birthday(view, cx.dialog, player.birthday);
+                    show_birthday(view, cx.dialog, player.birthday, cx.game.world.start_year);
                 }
                 Outcome::Stay
             }

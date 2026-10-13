@@ -20,8 +20,6 @@ use crate::lineup::{self, Lineup, Tables};
 use crate::random::Random;
 use crate::world::{GOALKEEPER, Player, STRIKER, World};
 
-/// The year a new game starts in.
-pub const START_YEAR: i32 = 1998;
 /// A new manager's board starts at 65 to 68 %, plus half the level and three
 /// times what the club's file says of its board, up to 100 %.
 const CONFIDENCE_BASE: i32 = 65;
@@ -329,7 +327,7 @@ impl Season {
             })
             .collect();
         let mut season = Self {
-            year: START_YEAR,
+            year: world.start_year,
             day: 0,
             managers,
             current: 0,

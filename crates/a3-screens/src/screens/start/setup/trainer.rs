@@ -23,9 +23,9 @@ const ABILITY_VALUES: [u16; 8] = [4695, 4696, 4697, 4698, 4699, 4700, 5611, 6205
 const ABILITY_SPINS: [u16; 8] = [4702, 4703, 4704, 4705, 4706, 4707, 6033, 6206];
 /// Abilities run from 0 to 15.
 const ABILITY_MAX: i32 = 15;
-/// The year a new game starts in; trainers are at least 18 then.
-const START_YEAR: i32 = 1998;
+/// Trainers are born from 1900 on and at least this old when the game starts.
 const OLDEST_BIRTH_YEAR: i32 = 1900;
+const YOUNGEST_AGE: i32 = 18;
 
 /// Texts of the game, by id in `ListeDerTexte.rh`.
 const ONE_POINT_OVER: u16 = 3817;
@@ -95,7 +95,7 @@ impl Screen for Birthday {
         if let Some(trainer) = setup.trainer_mut() {
             trainer.birthday = DEFAULT_BIRTHDAY;
             trainer.position = DEFAULT_POSITION;
-            show_birthday(view, cx.dialog, trainer.birthday);
+            show_birthday(view, cx.dialog, trainer.birthday, cx.game.world.start_year);
             if let Some(i) = control(cx.dialog, POSITION) {
                 view.set_chosen(i, trainer.position);
             }
@@ -110,7 +110,8 @@ impl Screen for Birthday {
         let setup = &mut cx.state.setup;
         match target {
             Target::Spin { .. } => {
-                show_birthday(view, cx.dialog, BIRTHDAY_SPINS.map(|id| spin(view, id)));
+                let date = BIRTHDAY_SPINS.map(|id| spin(view, id));
+                show_birthday(view, cx.dialog, date, cx.game.world.start_year);
                 if let Some(trainer) = setup.trainer_mut() {
                     // The day may have been pulled back into a shorter month.
                     trainer.birthday = BIRTHDAY_SPINS.map(|id| spin(view, id));
@@ -162,13 +163,16 @@ fn show_abilities(view: &mut View, dialog: &Dialog, game: &Game, setup: &Setup) 
 }
 
 /// Day, month and year, with their spinners' ranges: a trainer is born from
-/// 1900 on and at least 18 when the game starts, on a day the month has.
+/// 1900 on and at least 18 when the game starts in `start_year`, on a day the
+/// month has.
 pub(in crate::screens::start) fn show_birthday(
     view: &mut View,
     dialog: &Dialog,
     [day, month, year]: [i32; 3],
+    start_year: i32,
 ) {
-    let ranges = [(1, days_in_month(month, year)), (1, 12), (OLDEST_BIRTH_YEAR, START_YEAR - 18)];
+    let ranges =
+        [(1, days_in_month(month, year)), (1, 12), (OLDEST_BIRTH_YEAR, start_year - YOUNGEST_AGE)];
     // A shorter month pulls the day back.
     let date = [day.min(ranges[0].1), month, year];
     for part in 0..3 {

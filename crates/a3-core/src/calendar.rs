@@ -126,6 +126,23 @@ mod tests {
         assert_eq!(date(1998, 48), NaiveDate::from_ymd_opt(1998, 8, 23).unwrap());
     }
 
+    /// The original with the 2025/26 data, under the probe: its dump of day 0
+    /// is dated 7.7.2025, that of day 42 18.8.2025.
+    #[test]
+    fn the_2025_season_starts_on_the_seventh_of_july() {
+        assert_eq!(season_start(2025), NaiveDate::from_ymd_opt(2025, 7, 7).unwrap());
+        assert_eq!(date(2025, 42), NaiveDate::from_ymd_opt(2025, 8, 18).unwrap());
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_start_year_comes_from_the_data() {
+        let dir = std::path::PathBuf::from(std::env::var_os("ANSTOSS3_DIR").expect("ANSTOSS3_DIR"));
+        let world = World::load(&dir.join("Data.a3")).unwrap();
+        // The 2025/26 update; the original data says 1999.
+        assert_eq!(world.start_year, 2025);
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_bundesliga_starts_on_day_48() {

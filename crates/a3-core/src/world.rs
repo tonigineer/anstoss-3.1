@@ -26,10 +26,14 @@ pub const MAIN_SLOTS: [usize; 5] = [0, 1, 2, 3, 4];
 /// Every main country's own leagues are played, up to this many; of the
 /// other chosen countries only the first.
 const MAIN_LEAGUES: usize = 6;
-/// From the year 2000 Germany plays only its first four leagues. The game
-/// starts in 1998, so a new game has all six.
-const START_YEAR: u16 = 1998;
+/// From the year 2000 Germany plays only its first four leagues.
+const FOUR_GERMAN_LEAGUES: i32 = 2000;
 const GERMANY_SLOT: usize = 0;
+/// The year a new game starts in, unless `Kleinig.sav` says otherwise: the
+/// game sets it, then reads the first value of `MISC` after its section
+/// `UEFA` over it (`FUN_00685c70`, `FUN_00685926`) — 1999 in the original
+/// data, 2025 in the 2025/26 update.
+const DEFAULT_START_YEAR: i32 = 1998;
 /// Austria and Scotland play every pairing four times: their league files
 /// hold two rounds, and the game plays them twice.
 const FOUR_ROUNDS: [u16; 2] = [47, 57];
@@ -128,6 +132,8 @@ pub struct World {
     pub countries: Vec<Option<Country>>,
     /// Nations whose clubs `Internat.sav` brings in for the European cups.
     internationals: Vec<u16>,
+    /// The year a new game starts in.
+    pub start_year: i32,
 }
 
 pub struct Country {
@@ -205,7 +211,12 @@ impl World {
             .filter_map(|land| land.child("VEREIN")?.number(0))
             .map(|code| code as u16)
             .collect();
-        Ok(Self { nations, countries, internationals })
+        let start_year = find(dir, "Kleinig.sav")
+            .and_then(|path| Section::read(&path))
+            .ok()
+            .and_then(|kleinig| kleinig.child("MISC")?.number(0))
+            .map_or(DEFAULT_START_YEAR, |year| year as i32);
+        Ok(Self { nations, countries, internationals, start_year })
     }
 
     pub fn nation(&self, code: u16) -> &str {
@@ -226,7 +237,7 @@ impl World {
         let Some(country) = self.country(slot) else { return &[] };
         let count = match slot {
             _ if slot != main => 1,
-            GERMANY_SLOT if START_YEAR >= 2000 => 4,
+            GERMANY_SLOT if self.start_year >= FOUR_GERMAN_LEAGUES => 4,
             _ => MAIN_LEAGUES,
         };
         &country.leagues[..count.min(country.leagues.len())]
