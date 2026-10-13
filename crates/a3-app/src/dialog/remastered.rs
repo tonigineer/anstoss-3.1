@@ -291,6 +291,7 @@ pub(super) fn spawn(
             ZIndex(0),
             Pickable::IGNORE,
             ChildOf(stage),
+            Root,
         ))
         .id();
     commands.spawn((
@@ -1602,7 +1603,7 @@ fn spawn_player(
     at: Rect,
     player: &PlayerBox,
     fonts: &Fonts,
-) {
+) -> Entity {
     let (top, bottom) =
         if player.filled { (BOX_TOP, BOX_BOTTOM) } else { (EMPTY_TOP, EMPTY_BOTTOM) };
     let card = commands
@@ -1635,7 +1636,7 @@ fn spawn_player(
             Pickable::IGNORE,
             ChildOf(card),
         ));
-        return;
+        return card;
     }
     let [red, green, blue] = fit_ink(player.fit);
     commands.spawn((
@@ -1687,6 +1688,58 @@ fn spawn_player(
         Pickable::IGNORE,
         ChildOf(line),
     ));
+    card
+}
+
+/// The remastered look's root, which everything it shows hangs from.
+#[derive(Component)]
+pub(super) struct Root;
+
+/// The card of the player being dragged, which goes with the pointer: made
+/// as the drag starts, moved after.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn drag_card(
+    mut commands: Commands,
+    view: Res<OpenDialog>,
+    layout: Option<Res<Layout>>,
+    game: Res<Game>,
+    fonts: Res<Fonts>,
+    mut images: ResMut<Assets<Image>>,
+    roots: Query<Entity, With<Root>>,
+    mut nodes: Query<&mut Node>,
+    mut card: Local<Option<(a3_screens::pointer::Grip, Entity)>>,
+) {
+    if !view.is_changed() {
+        return;
+    }
+    let dialog = game.dialogs.get(&view.id);
+    let dragged = dialog.and_then(|d| Some((view.dragging?.grip, view.dragged_box(d)?, d)));
+    let drawn = layout.as_ref().is_some_and(|l| l.id == view.id);
+    let Some((grip, (size, player), dialog)) = dragged.filter(|_| drawn) else {
+        if let Some((_, entity)) = card.take() {
+            commands.entity(entity).try_despawn();
+        }
+        return;
+    };
+    let layout = layout.expect("a layout");
+    let at = layout.map(player.rect(&dialog.controls[size]));
+    match *card {
+        Some((held, entity)) if held == grip => {
+            if let Ok(mut node) = nodes.get_mut(entity) {
+                node.left = px(at.min.x);
+                node.top = px(at.min.y);
+            }
+        }
+        _ => {
+            if let Some((_, entity)) = card.take() {
+                commands.entity(entity).try_despawn();
+            }
+            let Some(root) = roots.iter().next() else { return };
+            let entity = spawn_player(&mut commands, &mut images, &game, root, at, &player, &fonts);
+            commands.entity(entity).insert(ZIndex(10));
+            *card = Some((grip, entity));
+        }
+    }
 }
 
 /// The menu bar: a dark strip across the bottom of the canvas with the

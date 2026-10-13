@@ -26,7 +26,7 @@ use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, set};
-use super::{discipline, planner, playerinfo, special};
+use super::{discipline, mark_inert, planner, playerinfo, special};
 use crate::controls::ControlState;
 use crate::controls::player_box::PlayerBox;
 use crate::game::Game;
@@ -172,6 +172,12 @@ const HOME: u16 = 3664;
 const AWAY: u16 = 3665;
 /// The dressing room's options.
 const DRESSING_OPTIONS: u16 = 4035;
+/// "Spiel beenden" of the game options, and what it asks first
+/// (`FUN_005b1286`); the question is told apart from the whistle's by this
+/// stand-in for its popup.
+const QUIT_ITEM: usize = 4;
+const QUIT_REALLY: u16 = 2690;
+const QUIT_QUESTION: u16 = u16::MAX;
 
 /// Puts the main screens together: the bar along the bottom, the title in
 /// the frame, and on the line-up the boxes where the first formation and the
@@ -304,6 +310,18 @@ impl Screen for MenuBar {
         {
             show_lineup(view, dialog, game, season, state, cx.state.records.as_ref());
         }
+        // Crossed out: what does nothing yet.
+        let works = |target: Target| {
+            let Target::Option { control: c, item } = target else { return false };
+            match dialog.controls[c].id {
+                Some(BAR_ID) => matches!(item, LINEUP_SYMBOL | DRESSING_SYMBOL | WHISTLE),
+                Some(SPECIAL) => true,
+                Some(DUTIES) => item == FORMATION_ITEM,
+                Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
+                _ => false,
+            }
+        };
+        mark_inert(view, dialog, works);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -388,6 +406,13 @@ impl Screen for MenuBar {
             change_lineup(cx, view, |tables, club, _| autolineup::bench(tables, club));
             return Outcome::Stay;
         }
+        if view.id == DRESSING_ROOM
+            && cx.dialog.controls[c].id == Some(DRESSING_OPTIONS)
+            && item == QUIT_ITEM
+        {
+            self.popup = Some(QUIT_QUESTION);
+            return Outcome::Popup(Request::with(QUESTION, Args::Text(QUIT_REALLY)));
+        }
         if cx.dialog.controls[c].id != Some(BAR_ID) {
             if let Kind::Options { items, .. } = &cx.dialog.controls[c].kind {
                 let label = items.get(item).map_or("", |i| i.text.as_str()).replace("\\n", " ");
@@ -447,6 +472,7 @@ impl Screen for MenuBar {
                 change_lineup(cx, view, |_, _, _| {});
                 Outcome::Stay
             }
+            (Some(QUIT_QUESTION), Reply::Ok) => Outcome::Close(Reply::Quit),
             (None, Reply::Ok) => Outcome::Close(Reply::Ok),
             _ => Outcome::Stay,
         }
@@ -633,7 +659,9 @@ fn show_lineup(
         state.rows.clear();
         state.inks.clear();
         state.row_icons.clear();
+        state.row_boxes.clear();
         for p in order {
+            state.row_boxes.push(Some(filled(p, players[p].positions[0])));
             let player = &players[p];
             let [main, second, third] = player.positions;
             let sides = match (second, third) {
@@ -877,6 +905,14 @@ mod tests {
         let mut view = View::new(LINEUP, dialog);
         let mut cx = Cx { game: &game, dialog, state: &mut state };
         MenuBar::default().open(&mut cx, &mut view, Args::None);
+        // Crossed out: the bar's symbols that lead nowhere yet, not the
+        // line-up's, the dressing room's or the whistle.
+        let bar = control(dialog, BAR_ID).unwrap();
+        let crossed = |item| view.inert.contains(&Target::Option { control: bar, item });
+        assert!(crossed(1) && !crossed(LINEUP_SYMBOL));
+        assert!(!crossed(DRESSING_SYMBOL) && !crossed(WHISTLE));
+        // The rest of the test looks at the picture without the crosses.
+        view.inert.clear();
         let background = classic::picture(&game, dialog);
         let classic = Classic::new(&game, dialog, &view, background.clone());
         let frame = classic.draw(dialog, &view, false, 0.0);

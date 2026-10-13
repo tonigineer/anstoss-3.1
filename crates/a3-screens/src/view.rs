@@ -3,6 +3,7 @@
 //! draw from it, which is what lets them be switched mid-dialog.
 
 use a3_files::rch::{Dialog, Kind};
+use bevy_math::Vec2;
 
 use crate::controls::anim::AnimState;
 use crate::controls::bar::BarState;
@@ -16,8 +17,9 @@ use crate::controls::paint::PaintState;
 use crate::controls::player_box::PlayerBox;
 use crate::controls::spin::Value;
 use crate::controls::{ControlState, ControlView};
-use crate::pointer::Target;
+use crate::pointer::{Grip, Target};
 
+#[derive(Clone)]
 pub struct View {
     pub id: u16,
     /// One per control of the dialog, in the same order.
@@ -29,6 +31,17 @@ pub struct View {
     pub pressed: Option<Target>,
     /// The item whose tooltip shows: control and item.
     pub tip: Option<(usize, usize)>,
+    /// What the screen does nothing with yet; the looks cross it out.
+    pub inert: Vec<Target>,
+    /// A player's box or row held by the pointer, and where the pointer is.
+    pub dragging: Option<Dragging>,
+}
+
+/// What the pointer drags, and where it is, in classic pixels.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Dragging {
+    pub grip: Grip,
+    pub at: Vec2,
 }
 
 macro_rules! by_index {
@@ -46,9 +59,37 @@ macro_rules! by_index {
 }
 
 impl View {
+    /// The box of the player being dragged, standing under the pointer,
+    /// with a control of a box's size to draw it as.
+    pub fn dragged_box(&self, dialog: &Dialog) -> Option<(usize, PlayerBox)> {
+        let dragging = self.dragging?;
+        let shown = match dragging.grip {
+            Grip::Control(c) => self.controls.get(c)?.state.as_player()?.clone(),
+            Grip::Row { control, row } => {
+                let list = self.list(control)?;
+                list.row_boxes.get(list.scroll + row)?.clone()?
+            }
+        };
+        if !shown.filled {
+            return None;
+        }
+        let size = dialog.controls.iter().position(|c| matches!(c.kind, Kind::Player))?;
+        let half = dialog.controls[size].rect.size() / 2.0;
+        Some((size, PlayerBox { at: Some(dragging.at - half), ..shown }))
+    }
+
     pub fn new(id: u16, dialog: &Dialog) -> Self {
         let controls = dialog.controls.iter().map(ControlView::new).collect();
-        Self { id, controls, focus: None, hovered: None, pressed: None, tip: None }
+        Self {
+            id,
+            controls,
+            focus: None,
+            hovered: None,
+            pressed: None,
+            tip: None,
+            inert: Vec::new(),
+            dragging: None,
+        }
     }
 
     // A control's state by its index, if it is of that kind.

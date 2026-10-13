@@ -124,6 +124,8 @@ pub enum Reply {
     Choice(usize),
     /// On to another of the main screens, by its dialog id.
     Goto(u16),
+    /// The game is to end: the program closes.
+    Quit,
 }
 
 /// The screens' end of the line to the cycle: its requests, and where the
@@ -151,7 +153,8 @@ pub fn spawn(
     Link { requests: from_cycle, replies: to_cycle }
 }
 
-/// Nobody is there to answer the cycle's requests any more.
+/// The game is over: quit, or nobody is there to answer the cycle's
+/// requests any more.
 struct Gone;
 
 struct Cycle {
@@ -403,6 +406,8 @@ impl Cycle {
         loop {
             match self.ask(Request::new(screen))? {
                 Reply::Goto(next) => screen = next,
+                // "Spiel beenden": the cycle ends, and with it the program.
+                Reply::Quit => return Err(Gone),
                 _ => return Ok(()),
             }
         }

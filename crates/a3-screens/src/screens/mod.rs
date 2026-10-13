@@ -136,6 +136,17 @@ pub(crate) fn indices(dialog: &Dialog, kind: impl Fn(&Kind) -> bool) -> Vec<usiz
     (0..dialog.controls.len()).filter(|&i| kind(&dialog.controls[i].kind)).collect()
 }
 
+/// Marks the dialog's buttons and options that do nothing yet — all those
+/// `works` does not answer for — for the looks to cross out.
+pub(crate) fn mark_inert(view: &mut View, dialog: &Dialog, works: impl Fn(Target) -> bool) {
+    let targets = crate::pointer::targets(dialog, view, &crate::pointer::Pixels);
+    view.inert = targets
+        .into_iter()
+        .map(|(target, _)| target)
+        .filter(|&t| matches!(t, Target::Button(_) | Target::Option { .. }) && !works(t))
+        .collect();
+}
+
 /// Sets the text of the dialog's control with `id`.
 pub(crate) fn set(view: &mut View, dialog: &Dialog, id: u16, text: String) {
     if let Some(i) = control(dialog, id) {

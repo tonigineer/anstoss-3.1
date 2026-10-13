@@ -6,6 +6,7 @@ use image::{Rgba, RgbaImage};
 
 use a3_files::rch::{Align, Control};
 
+use super::player_box::{self, PlayerBox};
 use crate::classic::{
     HANDLE, Paint, SCROLL_DOWN, SCROLL_UP, TEXT, TEXT_HOVER, columns, fill, paste,
 };
@@ -42,6 +43,8 @@ pub struct ListState {
     pub row_icons: Vec<Vec<(f32, u16)>>,
     /// Rows marked as chosen besides the selected one, drawn as it is.
     pub marked: Vec<bool>,
+    /// The box a row's player shows while he is dragged from the list.
+    pub row_boxes: Vec<Option<PlayerBox>>,
 }
 
 impl Default for ListState {
@@ -55,6 +58,7 @@ impl Default for ListState {
             inks: Vec::new(),
             row_icons: Vec::new(),
             marked: Vec::new(),
+            row_boxes: Vec::new(),
         }
     }
 }
@@ -114,7 +118,9 @@ impl ListState {
     }
 
     pub(crate) fn graphics(&self) -> (Vec<u16>, bool) {
-        (self.row_icons.iter().flatten().map(|&(_, id)| id).collect(), false)
+        let icons = self.row_icons.iter().flatten().map(|&(_, id)| id);
+        let boxes = self.row_boxes.iter().flatten().flat_map(|b| player_box::graphics(Some(b)).0);
+        (icons.chain(boxes).collect(), false)
     }
 
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {

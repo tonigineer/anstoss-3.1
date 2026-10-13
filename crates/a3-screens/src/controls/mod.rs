@@ -74,6 +74,16 @@ pub enum ControlState {
     Other,
 }
 
+impl ControlState {
+    /// A player's box, if the control is one and shows a player or a spot.
+    pub fn as_player(&self) -> Option<&PlayerBox> {
+        match self {
+            Self::Player(player) => player.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 impl ControlView {
     pub fn new(control: &Control) -> Self {
         let text = || control.text.clone();

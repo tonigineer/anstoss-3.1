@@ -173,6 +173,8 @@ impl Screen for Week {
         let Some(season) = &cx.state.season else { return };
         self.start = season.day;
         show_week(view, cx.dialog, cx.game, season);
+        // The week runs by itself; none of its buttons does anything yet.
+        super::mark_inert(view, cx.dialog, |_| false);
     }
 
     /// A day has run: its tile lights up, the panels move on.

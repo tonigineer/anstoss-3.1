@@ -36,7 +36,7 @@ use a3_screens::screens::hub;
 use a3_screens::view::View;
 
 use crate::Game;
-use crate::look::{CANVAS, Look, SharpMaterial, canvas_rect, spawn_stage};
+use crate::look::{CANVAS, Look, SharpMaterial, canvas_rect, smooth_image, spawn_stage};
 use crate::{Fonts, Screen};
 
 /// Animations move on to their next frame every 200 ms, as the game sets
@@ -80,6 +80,7 @@ pub fn plugin(app: &mut App) {
                 remastered::refresh.run_if(remastered::drawn),
                 remastered::show_bitmaps.run_if(remastered::drawn),
                 remastered::animate_flags.run_if(remastered::drawn),
+                remastered::drag_card,
             )
                 .chain()
                 .run_if(resource_exists::<OpenDialog>)
@@ -179,6 +180,9 @@ struct Held {
     timer: f32,
     drag: Option<(usize, f32, f32)>,
     grip: Option<Grip>,
+    /// Where the pointer took hold of the box or row, in classic pixels, at
+    /// how many canvas pixels to a classic one.
+    grab: Option<(Vec2, f32)>,
 }
 
 /// How long the pointer has rested on what it points at, for its tooltip.
@@ -283,10 +287,11 @@ fn open(
         &mut images,
         &mut materials,
     );
-    spawn_hotspots(&mut commands, stage, dialog, view, &layout::Classic, false, &look);
+    let cross = images.add(cross());
+    spawn_hotspots(&mut commands, stage, dialog, view, &layout::Classic, false, &look, &cross);
     match layout {
         Some(layout) => {
-            spawn_hotspots(&mut commands, stage, dialog, view, &layout, true, &look);
+            spawn_hotspots(&mut commands, stage, dialog, view, &layout, true, &look, &cross);
             commands.insert_resource(layout);
         }
         None => commands.remove_resource::<layout::Layout>(),
@@ -369,7 +374,24 @@ fn wide_popup(
     wide
 }
 
+/// A red cross over what does nothing yet, stretched to its size.
+fn cross() -> Image {
+    const SIZE: u32 = 64;
+    const HALF_WIDTH: f32 = 2.5;
+    let mut cross = image::RgbaImage::new(SIZE, SIZE);
+    for (x, y, pixel) in cross.enumerate_pixels_mut() {
+        let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+        let off = (x - y).abs().min((x + y - SIZE as f32).abs()) / std::f32::consts::SQRT_2;
+        if off <= HALF_WIDTH {
+            *pixel = image::Rgba([220, 20, 20, 200]);
+        }
+    }
+    smooth_image(cross)
+}
+
 /// The hotspots of one look; only the current look's answer the pointer.
+/// What does nothing yet is crossed out.
+#[allow(clippy::too_many_arguments)]
 fn spawn_hotspots(
     commands: &mut Commands,
     stage: Entity,
@@ -378,6 +400,7 @@ fn spawn_hotspots(
     geometry: &dyn a3_screens::pointer::Geometry,
     remastered: bool,
     look: &Look,
+    cross: &Handle<Image>,
 ) {
     let display =
         if look.showing_remastered() == remastered { Display::Flex } else { Display::None };
@@ -396,7 +419,21 @@ fn spawn_hotspots(
             .observe(point_away)
             .observe(press)
             .observe(click)
-            .observe(drag);
+            .observe(drag)
+            .with_children(|spot| {
+                // The classic look draws its own crosses.
+                if remastered && view.inert.contains(&target) {
+                    spot.spawn((
+                        ImageNode::new(cross.clone()),
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ));
+                }
+            });
     }
 }
 
@@ -502,6 +539,17 @@ fn press(
                 *held = Held { repeat: Some(target), timer: REPEAT_DELAY, ..default() };
             }
             held.grip = Grip::of(target);
+            if held.grip.is_some() {
+                let dialog = game.dialogs.get(&view.id);
+                let rect = dialog.and_then(|d| {
+                    targets(d, &view, &a3_screens::pointer::Pixels)
+                        .into_iter()
+                        .find_map(|(t, r)| (t == target).then_some(r))
+                });
+                let hit =
+                    press.hit.position.map_or(Vec2::splat(0.5), |p| Vec2::new(p.x, p.y) + 0.5);
+                held.grab = rect.map(|r| (r.min + hit * r.size(), zoom));
+            }
         }
     }
 }
@@ -559,15 +607,24 @@ fn load_sounds(mut commands: Commands, game: Res<Game>, mut audio: ResMut<Assets
     commands.insert_resource(Sounds { click: load(CLICK), whistle: load(WHISTLE) });
 }
 
-/// A slider handle follows the pointer that took hold of it.
+/// A slider handle follows the pointer that took hold of it, and so does a
+/// player's box or row being dragged.
 fn drag(
     drag: On<PointerDrag>,
     game: Res<Game>,
-    view: Res<OpenDialog>,
+    mut view: ResMut<OpenDialog>,
     held: Res<Held>,
     scale: Res<UiScale>,
     mut pending: ResMut<Pending>,
 ) {
+    if let (Some(grip), Some((grab, zoom))) = (held.grip, held.grab) {
+        let at = grab + Vec2::new(drag.distance.x, drag.distance.y) / (scale.0 * zoom);
+        let dragging = Some(a3_screens::view::Dragging { grip, at });
+        if view.dragging != dragging {
+            view.dragging = dragging;
+        }
+        return;
+    }
     let Some((control, start, zoom)) = held.drag else { return };
     let Some(c) = game.dialogs.get(&view.id).map(|d| &d.controls[control]) else { return };
     let Some(shown) = view.value(control) else { return };
@@ -601,6 +658,9 @@ fn release(
     }
     if released && view.pressed.is_some() {
         view.pressed = None;
+    }
+    if released && view.dragging.is_some() {
+        view.dragging = None;
     }
 }
 

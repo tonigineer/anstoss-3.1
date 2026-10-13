@@ -765,6 +765,47 @@ mod tests {
         assert_eq!((booked.kind, booked.flag, booked.player), (0x19, 1, 3204));
     }
 
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn spiel_beenden_ends_the_game() {
+        let game = game();
+        // The dressing room's game options: "Spiel beenden", and yes.
+        let then = "now click bar 17\nuntil dialog 302\nnow choose 4035 4\nuntil dialog 384\n\
+                    now press 4741\nuntil end";
+        // `until end` holds only once the game cycle has ended: after the
+        // question, the dressing room it closes with.
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let screens: Vec<&str> =
+            runner.log.iter().filter_map(|l| l.strip_prefix("screen ")).collect();
+        assert_eq!(screens[screens.len() - 3..], ["302", "384", "302"]);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_dragged_player_goes_with_the_pointer() {
+        let game = game();
+        let Some(runner) = on_save(&game, "Probe1", "") else { return };
+        let dialog = &game.dialogs[&147];
+        let mut view = runner.host.view().clone();
+        let list = crate::screens::control(dialog, 2509).unwrap();
+        let at = bevy_math::Vec2::new(300.0, 120.0);
+        let draw = |view: &crate::view::View| {
+            let background = crate::classic::picture(&game, dialog);
+            crate::classic::Classic::new(&game, dialog, view, background)
+                .draw(dialog, view, false, 0.0)
+        };
+        let before = draw(&view);
+        view.dragging = Some(crate::view::Dragging {
+            grip: crate::pointer::Grip::Row { control: list, row: 3 },
+            at,
+        });
+        let after = draw(&view);
+        // The box's picture lies under the pointer, and nowhere else changed.
+        let changed = |x: u32, y: u32| before.get_pixel(x, y) != after.get_pixel(x, y);
+        assert!(changed(at.x as u32, at.y as u32));
+        assert!(!changed(at.x as u32 + 80, at.y as u32));
+    }
+
     /// A page, a control of it, and the text it shows.
     type Shown = (u16, u16, &'static str);
 

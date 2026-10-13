@@ -68,6 +68,10 @@ impl Screen for Office {
         if let Some(season) = &cx.state.season {
             show_office(view, cx.dialog, cx.game, season);
         }
+        // Only the door leads anywhere yet.
+        let dialog = cx.dialog;
+        let works = |t: Target| matches!(t, Target::Button(b) if dialog.controls[b].id == Some(OFFICE_DOOR));
+        super::mark_inert(view, dialog, works);
     }
 
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {

@@ -123,6 +123,20 @@ impl Classic {
             let paint = Paint { classic: self, view, index, control, caret, phase, scene };
             shown.state.draw(&mut frame, &paint);
         }
+        // The player held by the pointer goes with it.
+        if let Some((size, dragged)) = view.dragged_box(dialog) {
+            let control = &dialog.controls[size];
+            let paint = Paint { classic: self, view, index: size, control, caret, phase, scene };
+            dragged.draw(&mut frame, &paint);
+        }
+        // What does nothing yet is crossed out.
+        if !view.inert.is_empty() {
+            for (target, at) in crate::pointer::targets(dialog, view, &crate::pointer::Pixels) {
+                if view.inert.contains(&target) {
+                    cross(&mut frame, at);
+                }
+            }
+        }
         // A dropped list lies over everything.
         for (index, (control, shown)) in dialog.controls.iter().zip(&view.controls).enumerate() {
             if let (false, Some(combo)) = (shown.hidden, shown.state.as_combo()) {
@@ -172,6 +186,30 @@ impl Paint<'_> {
     /// Whether the pointer is on `target`.
     pub fn pointed(&self, target: Target) -> bool {
         self.view.hovered == Some(target)
+    }
+}
+
+/// A red cross from corner to corner of a rectangle, three pixels thick.
+fn cross(frame: &mut RgbaImage, at: bevy_math::Rect) {
+    const INK: Rgba<u8> = Rgba([220, 20, 20, 255]);
+    const HALF_WIDTH: f32 = 1.5;
+    let (w, h) = (at.width(), at.height());
+    if w < 1.0 || h < 1.0 {
+        return;
+    }
+    let length = (w * w + h * h).sqrt();
+    let (x0, y0) = (at.min.x.max(0.0) as u32, at.min.y.max(0.0) as u32);
+    let (x1, y1) = ((at.max.x as u32).min(frame.width()), (at.max.y as u32).min(frame.height()));
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let (dx, dy) = (x as f32 + 0.5 - at.min.x, y as f32 + 0.5 - at.min.y);
+            // Distances to the two diagonals.
+            let down = (dx * h - dy * w).abs() / length;
+            let up = (dx * h + dy * w - w * h).abs() / length;
+            if down.min(up) <= HALF_WIDTH {
+                frame.put_pixel(x, y, INK);
+            }
+        }
     }
 }
 
