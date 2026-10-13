@@ -137,10 +137,17 @@ record! {
     Player, 0x354 - HEADER, base HEADER;
     /// The year the contract runs to.
     0x15c => contract, set_contract: u16;
+    /// His enemies and friends in the squad, by id, 0 none.
+    0x208 => enemies, set_enemies: [u16; 2];
+    0x20c => friends, set_friends: [u16; 2];
+    /// How many stations his career has (at most 15); the last one's date
+    /// tells how long he has been at the club.
+    0x212 => career_count, set_career_count: i16;
     0x168 => birth_day, set_birth_day: u8;
     0x169 => birth_month, set_birth_month: u8;
     0x16a => birth_year, set_birth_year: u16;
-    /// Bit 31: the nickname is shown.
+    /// Bit 31: the nickname is shown; bit 11: his condition counts five
+    /// less in the automatic line-ups.
     0x1b4 => shown, set_shown: u32;
     /// The player's index in the array.
     0x1bc => id, set_id: u16;
@@ -162,6 +169,13 @@ record! {
     0x1da => injured_to, set_injured_to: [u16; 2];
     /// Not zero: "angeschlagen", knocked about.
     0x1de => knocked, set_knocked: u8;
+    /// Matches played this season: in the league, and in the competitions
+    /// of the kinds 3–4, 5–10 and 12–15 (the line-up's object +0x54, +0x59,
+    /// +0x5f, +0x61).
+    0x253 => league_matches, set_league_matches: u8;
+    /// Two counts the cohesion takes from the league matches (meaning not
+    /// traced yet).
+    0x254 => league_less, set_league_less: [u8; 2];
     /// Away from the club, with the national team, and for long (a year
     /// and a day of the year each).
     0x1e4 => away_to, set_away_to: [u16; 2];
@@ -184,6 +198,8 @@ record! {
     0x26b => away_kind, set_away_kind: u8;
     /// Bit 7: the long absence's length is not known yet.
     0x26e => long_unknown, set_long_unknown: u8;
+    /// Bit 5: the automatic line-ups always pick him; bit 4: never.
+    0x271 => picks, set_picks: u8;
     /// 100 is neither happy nor unhappy.
     0x296 => morale, set_morale: u8;
     /// 1: the line-up list marks him with the dumbbell (what for is not
@@ -194,7 +210,19 @@ record! {
     0x353 => mood, set_mood: i8;
 }
 
+/// A player's career: stations of 0x14 bytes, the date first (u8 day, u8
+/// month, u16 year).
+const CAREER_AT: usize = 0x20;
+const CAREER_STATION: usize = 0x14;
+
 impl Player {
+    /// When his last station began: the day he came to his club.
+    pub fn joined(&self) -> Option<(u8, u8, u16)> {
+        let count = usize::try_from(self.career_count()).ok().filter(|&n| n > 0)?;
+        let at = CAREER_AT + (count - 1) * CAREER_STATION;
+        Some((self.get(at), self.get(at + 1), self.get(at + 2)))
+    }
+
     pub fn birthday(&self) -> Option<NaiveDate> {
         let (day, month, year) = (self.birth_day(), self.birth_month(), self.birth_year());
         NaiveDate::from_ymd_opt(year.into(), month.into(), day.into())
@@ -211,6 +239,11 @@ record! {
     /// A club's team (0x990 bytes at `DAT_01a72ff8` + index × 0x990), from
     /// which the game fills its club objects (`FUN_0063b75a`).
     Team, 0x990 - HEADER, base HEADER;
+    /// The co-trainer, 0 none (the club object's +0x84).
+    0xa2 => co_trainer, set_co_trainer: i16;
+    /// A human club's manager: his slot and one, whose extra data the club
+    /// has ([`Extra`]); 0 none.
+    0xb5 => human, set_human: u8;
     /// What the team counts for in goal, defence, midfield and attack, in
     /// tenths, as the game last reckoned it (the club object's +0x94 …
     /// +0x9a): the line-up's comparison shows the opponent's.
@@ -252,6 +285,37 @@ impl Team {
     }
 }
 
+/// What a human club keeps besides its team record, one for each human
+/// slot (0x2940 bytes at `DAT_00a58078` + slot × 0x2940; `FUN_0063b75a`
+/// copies parts into the club object).
+const EXTRA_AT: u32 = 0xa58078;
+
+record! {
+    /// A human club's extra data.
+    Extra, 0x2940 - HEADER, base HEADER;
+    /// Training sessions of four kinds so far, which cohesion counts (the
+    /// club object's +0xcf0, +0xcfe, +0xd18, +0xd1a: the kinds 13, 20, 33
+    /// and 34 of `FUN_00749508`).
+    0x356 => sessions_13, set_sessions_13: i16;
+    0x364 => sessions_20, set_sessions_20: i16;
+    0x37e => sessions_33, set_sessions_33: i16;
+    0x380 => sessions_34, set_sessions_34: i16;
+    /// A count cohesion takes twice (`FUN_0069d5a7`; meaning not traced).
+    0x2564 => together, set_together: i16;
+}
+
+impl Extra {
+    /// What the training sessions add to cohesion, before the game halves
+    /// what is above 30.
+    pub fn training(&self) -> i32 {
+        [self.sessions_13(), self.sessions_20(), self.sessions_33(), self.sessions_34()]
+            .into_iter()
+            .map(i32::from)
+            .sum::<i32>()
+            + 2 * i32::from(self.together())
+    }
+}
+
 /// Human managers, in their slots.
 pub const MANAGERS: usize = 4;
 const MANAGER_AT: u32 = 0xa62578;
@@ -269,6 +333,10 @@ record! {
     0x2e => birth_day, set_birth_day: u8;
     0x2f => birth_month, set_birth_month: u8;
     0x30 => birth_year, set_birth_year: u16;
+    /// When he signed with his club: day, month, year.
+    0x17c => signed_day, set_signed_day: u8;
+    0x17d => signed_month, set_signed_month: u8;
+    0x17e => signed_year, set_signed_year: u16;
     /// The board's confidence in percent, and what it has on top
     /// (`FUN_007701b2` adds them up).
     0x184 => confidence, set_confidence: i16;
@@ -378,6 +446,8 @@ pub struct Records {
     pub managers: Vec<Manager>,
     pub globals: Globals,
     pub countries: Countries,
+    /// The human clubs' extra data, by slot.
+    pub extras: Vec<Extra>,
     /// The pool of names the players' names point into.
     pub names: Vec<String>,
     save: Save,
@@ -403,10 +473,13 @@ impl Records {
         let managers = (0..MANAGERS)
             .map(|n| Manager::new(block(format!("{MANAGER_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
+        let extras = (0..MANAGERS)
+            .map(|n| Extra::new(block(format!("{EXTRA_AT:#x}[{n}]"))?))
+            .collect::<io::Result<_>>()?;
         let globals = Globals::new(block(format!("{GLOBALS_AT:#x}"))?)?;
         let countries = Countries::new(block(format!("{COUNTRIES_AT:#x}"))?)?;
         let names = block("names".to_owned())?.split(|&b| b == 0).map(cp1252).collect();
-        Ok(Self { players, teams, managers, globals, countries, names, save })
+        Ok(Self { players, teams, managers, globals, countries, extras, names, save })
     }
 
     /// The save with the records written back into their blocks.
@@ -424,6 +497,9 @@ impl Records {
         }
         for (n, manager) in self.managers.iter().enumerate() {
             put(format!("{MANAGER_AT:#x}[{n}]"), 0, manager.bytes());
+        }
+        for (n, extra) in self.extras.iter().enumerate() {
+            put(format!("{EXTRA_AT:#x}[{n}]"), 0, extra.bytes());
         }
         put(format!("{GLOBALS_AT:#x}"), 0, self.globals.bytes());
         put(format!("{COUNTRIES_AT:#x}"), 0, self.countries.bytes());

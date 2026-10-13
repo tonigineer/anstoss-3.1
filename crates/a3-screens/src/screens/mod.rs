@@ -10,6 +10,7 @@ pub mod hub;
 pub mod jobs;
 pub mod office;
 pub mod popups;
+pub mod special;
 pub mod start;
 
 pub use a3_core::cycle::{Args, Reply, Request};
@@ -96,8 +97,9 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(popups::Notice),
         Box::new(calendar::Wait::default()),
         Box::new(calendar::Week::default()),
-        Box::new(hub::MenuBar),
+        Box::new(hub::MenuBar::default()),
         Box::new(formations::Formations::default()),
+        Box::new(special::Special),
         Box::new(office::Office),
     ]
 }
@@ -110,6 +112,7 @@ pub fn compose(game: &mut Game) {
     office::compose(&mut game.dialogs);
     hub::compose(&mut game.dialogs, &game.data.rules);
     formations::compose(&mut game.dialogs, &game.data.rules);
+    special::compose(&mut game.dialogs);
 }
 
 /// The index of the dialog's control with `id`.

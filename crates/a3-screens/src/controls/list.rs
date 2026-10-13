@@ -40,6 +40,8 @@ pub struct ListState {
     /// shows: where from the list's left edge, and which graphic.
     pub inks: Vec<Option<[u8; 3]>>,
     pub row_icons: Vec<Vec<(f32, u16)>>,
+    /// Rows marked as chosen besides the selected one, drawn as it is.
+    pub marked: Vec<bool>,
 }
 
 impl Default for ListState {
@@ -52,6 +54,7 @@ impl Default for ListState {
             aligns: Vec::new(),
             inks: Vec::new(),
             row_icons: Vec::new(),
+            marked: Vec::new(),
         }
     }
 }
@@ -139,7 +142,8 @@ impl ListState {
         let shown = self.rows.iter().skip(self.scroll).take(visible_rows(control));
         for (row, line) in shown.enumerate() {
             let top = y + 1 + (row as f32 * ROW_HEIGHT) as i32;
-            let selected = self.selected == Some(self.scroll + row);
+            let selected = self.selected == Some(self.scroll + row)
+                || self.marked.get(self.scroll + row).copied().unwrap_or(false);
             let ink = self.inks.get(self.scroll + row).copied().flatten();
             let color = if selected {
                 fill(frame, x, top, right - x, ROW_HEIGHT as i32, SELECTED_ROW);

@@ -6,6 +6,7 @@ pub mod anim;
 pub mod bar;
 pub mod bitmap;
 pub mod button;
+pub mod check;
 pub mod edit;
 pub mod header;
 pub mod list;
@@ -27,6 +28,7 @@ use self::anim::AnimState;
 use self::bar::BarState;
 use self::bitmap::BitmapState;
 use self::button::ButtonState;
+use self::check::CheckState;
 use self::edit::EditState;
 use self::header::HeaderState;
 use self::list::ListState;
@@ -58,6 +60,7 @@ pub enum ControlState {
     Options(OptionsState),
     /// What a player's box shows, once the flow has filled it.
     Player(Option<PlayerBox>),
+    Check(CheckState),
     Bar(BarState),
     Other,
 }
@@ -79,6 +82,7 @@ impl ControlView {
             Kind::Edit { .. } => ControlState::Edit(EditState { text: text() }),
             Kind::Options { items, .. } => ControlState::Options(OptionsState::new(items)),
             Kind::Player => ControlState::Player(None),
+            Kind::Check => ControlState::Check(CheckState { checked: false, text: text() }),
             Kind::Bar { .. } => ControlState::Bar(BarState::default()),
             Kind::Other => ControlState::Other,
         };
@@ -182,6 +186,7 @@ impl ControlState {
             Self::Edit(e) => e.draw(frame, paint),
             Self::Options(o) => o.draw(frame, paint),
             Self::Player(Some(p)) => p.draw(frame, paint),
+            Self::Check(c) => c.draw(frame, paint),
             Self::Bar(b) => b.draw(frame, paint),
             Self::Spin(_) | Self::Player(None) | Self::Other => {}
         }
@@ -205,6 +210,7 @@ impl ControlState {
             Self::Edit(_) => out.push((Target::Edit(index), geometry.rect(control))),
             Self::Options(o) => o.targets(index, control, geometry, out),
             Self::Bar(b) => b.targets(index, control, geometry, out),
+            Self::Check(c) => c.targets(index, control, geometry, out),
             // A player's box can be dragged to another place.
             Self::Player(Some(player)) => {
                 out.push((Target::Control(index), geometry.map(player.rect(control))))

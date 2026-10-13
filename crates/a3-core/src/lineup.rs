@@ -49,6 +49,12 @@ const ABILITY_ICONS_AT: u32 = 0x89f918;
 const ABILITY_ICONS: usize = 50;
 const FIELD_ABILITIES: usize = 16;
 const KEEPER_ABILITIES: usize = 9;
+/// What abilities and character add when the game ranks a player for its
+/// automatic line-ups (`FUN_006a1642`): a value by bit and by column for a
+/// field player's abilities, a keeper's, and the two words of character.
+const BONUSES_AT: [u32; 4] = [0x8a50d8, 0x8a5138, 0x8a5198, 0x8a51f8];
+const BONUS_BITS: usize = 16;
+const KEEPER_BITS: usize = 9;
 /// How much of his strength a player brings on another kind of position
 /// than his main one, in tenths: by main position, then the other kind.
 const FIT_AT: u32 = 0x8a4ec0;
@@ -72,17 +78,13 @@ pub const NEUTRAL_MOOD: i32 = 10;
 /// The game's morale of a player, from which his strength counts fully.
 pub const FULL_MORALE: i32 = 100;
 const MORALE_TOP: i32 = 110;
-/// How well a team plays together: in a new game every player has been at
-/// his club a year, which gives a base; a player on his main position adds,
-/// one on a foreign position takes away. At most 200.
-pub const COHESION_BASE: i32 = 20;
-const COHESION_STEP: i32 = 2;
-const COHESION_MOST: i32 = 200;
 
 /// The game's tables for the pitch.
 pub struct Tables {
     /// Each formation's name and the spots of its eleven.
     pub formations: Vec<Formation>,
+    /// The bonuses of [`BONUSES_AT`], by bit.
+    bonuses: [Vec<[i16; 3]>; 4],
     areas: Vec<[u8; 5]>,
     area_kinds: Vec<u8>,
     across: Vec<i16>,
@@ -114,8 +116,14 @@ impl Tables {
         }
         let areas = exe.bytes(AREAS_AT, 5 * AREAS)?;
         let parts = exe.bytes(PARTS_AT, PART_ROW * DOWN)?;
+        let mut bonuses: [Vec<[i16; 3]>; 4] = Default::default();
+        for (table, &at) in bonuses.iter_mut().zip(&BONUSES_AT) {
+            let values = exe.u16s(at, 3 * BONUS_BITS)?;
+            *table = values.chunks(3).map(|v| [v[0] as i16, v[1] as i16, v[2] as i16]).collect();
+        }
         Ok(Self {
             formations,
+            bonuses,
             areas: areas.chunks(5).map(|a| [a[0], a[1], a[2], a[3], a[4]]).collect(),
             area_kinds: exe.bytes(AREA_KINDS_AT, AREAS)?.to_vec(),
             across,
@@ -239,6 +247,35 @@ impl Tables {
         Lineup { spots, field, bench }
     }
 
+    /// What a player's abilities and character add to his rank, in one of
+    /// three columns (`FUN_006a1642`): a keeper's own abilities, or a field
+    /// player's, then both words of his character.
+    pub fn bonus(&self, player: &Player, column: usize) -> i32 {
+        let [field, keeper, first, second] = &self.bonuses;
+        let add = |table: &[[i16; 3]], bits: u16, count: usize| -> i32 {
+            (0..count).filter(|&b| bits & (1 << b) != 0).map(|b| i32::from(table[b][column])).sum()
+        };
+        // The data files' character, which the record keeps halved.
+        let [a, b] = player.traits.map(|t| (t >> 1) as u16);
+        let abilities = if player.positions[0] == GOALKEEPER {
+            add(keeper, player.abilities[0], KEEPER_BITS)
+        } else {
+            add(field, player.abilities[0], BONUS_BITS)
+        };
+        abilities + add(first, a, BONUS_BITS) + add(second, b, BONUS_BITS)
+    }
+
+    /// How "Auto." ranks a player for a position: his strength there and
+    /// what his abilities and character add (`FUN_006a181e`).
+    pub fn rank(&self, player: &Player, fitness: Fitness, position: u8) -> i32 {
+        self.strength_at(player, fitness, position) + self.bonus(player, 0)
+    }
+
+    /// The kind of position the area under a spot makes (`FUN_00696cc5`).
+    pub fn kind_under(&self, spot: (i16, i16)) -> u8 {
+        self.kind_at(spot)
+    }
+
     /// What the line-up counts for in goal, defence, midfield and attack,
     /// in tenths of strength.
     pub fn parts(&self, lineup: &Lineup, players: &[Player], fitness: &[Fitness]) -> [i32; PARTS] {
@@ -253,28 +290,6 @@ impl Tables {
             }
         }
         parts.map(|p| p / 100)
-    }
-
-    /// How well the line-up plays together, from 0 to 200, on top of a base
-    /// — `COHESION_BASE` in a new game (`FUN_0069774b`).
-    pub fn cohesion(&self, base: i32, lineup: &Lineup, players: &[Player]) -> i32 {
-        (base + self.cohesion_shift(lineup, players)).clamp(0, COHESION_MOST)
-    }
-
-    /// What the eleven add to a team's cohesion: a player on his main
-    /// position adds, one on a foreign position takes away.
-    pub fn cohesion_shift(&self, lineup: &Lineup, players: &[Player]) -> i32 {
-        let mut shift = 0;
-        for (spot, player) in lineup.on_field() {
-            let Some(p) = players.get(player) else { continue };
-            let kind = self.kind_at(spot);
-            if p.positions[0] == kind {
-                shift += COHESION_STEP;
-            } else if p.positions[1] != kind && p.positions[2] != kind {
-                shift -= COHESION_STEP;
-            }
-        }
-        shift
     }
 }
 
@@ -401,7 +416,10 @@ impl Lineup {
 
 /// A player's form, from 0 to 20: how fit and fresh he is, around his mood.
 pub fn form(fitness: Fitness) -> i32 {
-    let condition = fitness.condition / 100;
+    let mut condition = fitness.condition / 100;
+    if fitness.worn {
+        condition = (condition - 5).max(0);
+    }
     let fresh = (fitness.freshness.iter().sum::<i32>() / 100).clamp(0, 100);
     let (low, high) = FORM_RANGE;
     let fit = ((condition + fresh) / 2).clamp(low, high);

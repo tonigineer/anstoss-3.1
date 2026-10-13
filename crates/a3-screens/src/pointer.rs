@@ -52,6 +52,8 @@ pub enum Target {
     },
     /// A static or animation the flow made clickable.
     Control(usize),
+    /// A check box, ticked or not by a click.
+    Check(usize),
     /// An arrow at the end of a slider.
     SliderStep {
         control: usize,

@@ -225,15 +225,15 @@ pub struct ClubState {
     pub formation: usize,
     pub tickets: i64,
     pub ticket_target: i64,
-    /// What the team's cohesion stands on before its eleven count: the
-    /// base of a new game, or what a save's cohesion leaves after its
-    /// line-up's share — the original reckons it from how long the best
-    /// sixteen have been at the club (`FUN_0069774b`).
-    pub cohesion_base: i32,
+    /// What the club's training and its manager's time there add to its
+    /// cohesion ([`crate::cohesion`]): nothing at the start of a new game.
+    pub cohesion_bonus: i32,
     /// Every player's condition, freshness, morale and mood.
     pub fitness: Vec<Fitness>,
     /// Every player's trend and absences, as far as the save tells them.
     pub status: Vec<Status>,
+    /// Whether the club has a co-trainer, who can line the team up.
+    pub co_trainer: bool,
     /// What the team counts for in goal, defence, midfield and attack, as
     /// the save has it; `None` while it is reckoned from the line-up.
     pub strengths: Option<[i32; lineup::PARTS]>,
@@ -253,6 +253,8 @@ pub struct Fitness {
     pub mood: i32,
     /// He plays with a knock, at 0.9 of his strength.
     pub knock: bool,
+    /// His condition counts five less in his form (`FUN_00457e00`).
+    pub worn: bool,
 }
 
 /// What the line-up's list tells of a player besides his fitness, as the
@@ -278,6 +280,19 @@ pub struct Status {
     /// Knocked about ("angeschlagen"), and marked with the dumbbell.
     pub knocked: bool,
     pub dumbbell: bool,
+    /// Whether the automatic line-ups always pick him, or never.
+    pub always: bool,
+    pub never: bool,
+    /// League matches this season, and two counts cohesion takes from
+    /// them (meaning not traced yet).
+    pub matches: u8,
+    pub matches_less: [u8; 2],
+    /// His id in the save, 0 in a new game; his friends' and enemies' ids.
+    pub id: u16,
+    pub friends: [u16; 2],
+    pub enemies: [u16; 2],
+    /// When he came to the club.
+    pub joined: Option<NaiveDate>,
 }
 
 impl ClubState {
@@ -296,9 +311,10 @@ impl ClubState {
             formation: 0,
             tickets: 0,
             ticket_target,
-            cohesion_base: lineup::COHESION_BASE,
+            cohesion_bonus: 0,
             fitness,
             status: Vec::new(),
+            co_trainer: false,
             strengths: None,
             week,
         }
@@ -314,6 +330,7 @@ impl Fitness {
             morale: FULL_MORALE,
             mood: NEUTRAL_MOOD,
             knock: false,
+            worn: false,
         }
     }
 }
@@ -495,7 +512,11 @@ impl Season {
         target = target.min(club.capacity * TICKET_SHARE / 100).max(0);
         // A new manager starts with the first formation.
         let lineup = rules.pitch.line_up(&club.players, 0);
-        let state = ClubState::new(club.players.clone(), lineup, fitness, target);
+        let mut state = ClubState::new(club.players.clone(), lineup, fitness, target);
+        // Everyone joined the club the day the game began, as its first
+        // calculation records it.
+        let joined = Status { joined: Some(calendar::date(self.year, 0)), ..Status::default() };
+        state.status = vec![joined; club.players.len()];
         self.clubs.insert((slot, index), state);
     }
 

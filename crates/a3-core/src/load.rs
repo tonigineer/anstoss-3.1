@@ -4,8 +4,11 @@
 //! not give yet starts as a new game starts it.
 
 use std::cmp::Ordering;
+
+use chrono::NaiveDate;
 use std::collections::BTreeMap;
 
+use crate::cohesion;
 use crate::data::Data;
 use crate::lineup::{BENCH, FIELD, Lineup};
 use crate::random::Random;
@@ -89,12 +92,22 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
     let bench: [Option<usize>; BENCH] = team.bench().map(place);
     let lineup = Lineup { spots, field, bench };
     let state = ClubState::new(players, lineup, fitness, team.ticket_target().into());
-    let shift = data.rules.pitch.cohesion_shift(&state.lineup, &state.players);
-    let cohesion_base = i32::from(team.cohesion()) - shift;
+    // A human club's training and its manager's time there.
+    let human = usize::from(team.human()).checked_sub(1);
+    let training = human.and_then(|slot| records.extras.get(slot)).map_or(0, |e| e.training());
+    let signed = human.and_then(|slot| records.managers.get(slot)).and_then(|m| {
+        NaiveDate::from_ymd_opt(
+            m.signed_year().into(),
+            m.signed_month().into(),
+            m.signed_day().into(),
+        )
+    });
+    let cohesion_bonus = cohesion::bonus(training, signed, records.globals.start_year().into());
     let strengths = Some(team.strengths().map(i32::from));
     let formation = usize::from(team.formation());
     let tickets = team.tickets().into();
-    ClubState { cohesion_base, status, strengths, formation, tickets, ..state }
+    let co_trainer = team.co_trainer() != 0;
+    ClubState { cohesion_bonus, status, strengths, formation, tickets, co_trainer, ..state }
 }
 
 /// A player record as the world has the players of the data files.
@@ -119,6 +132,7 @@ fn fitness(record: &records::Player) -> Fitness {
         morale: record.morale().into(),
         mood: record.mood().into(),
         knock: record.knocks() & KNOCKS != 0,
+        worn: record.shown() & WORN != 0,
     }
 }
 
@@ -126,6 +140,11 @@ fn fitness(record: &records::Player) -> Fitness {
 const KNOCKS: u16 = 0xe000;
 /// Bit 7: the length of a long absence is not known yet.
 const UNKNOWN: u8 = 0x80;
+/// The automatic line-ups' bits: always pick him, never.
+const ALWAYS: u8 = 0x20;
+const NEVER: u8 = 0x10;
+/// His condition counts five less in them.
+const WORN: u32 = 0x800;
 
 fn status(records: &Records, record: &records::Player) -> Status {
     let globals = &records.globals;
@@ -140,6 +159,16 @@ fn status(records: &Records, record: &records::Player) -> Status {
         contract: Some(i32::from(record.contract()) - i32::from(globals.start_year())),
         knocked: record.knocked() != 0,
         dumbbell: record.dumbbell() == 1,
+        always: record.picks() & ALWAYS != 0,
+        never: record.picks() & NEVER != 0,
+        matches: record.league_matches(),
+        matches_less: record.league_less(),
+        id: record.id(),
+        friends: record.friends(),
+        enemies: record.enemies(),
+        joined: record.joined().and_then(|(day, month, year)| {
+            NaiveDate::from_ymd_opt(year.into(), month.into(), day.into())
+        }),
     }
 }
 

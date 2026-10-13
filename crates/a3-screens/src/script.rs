@@ -403,7 +403,13 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::Ok => Target::Button(button(OK_IMAGE)?),
         Action::Cancel => Target::Button(button(CANCEL_IMAGE)?),
         Action::Press(id) => Target::Button(find(id)?),
-        Action::Click(id) => Target::Control(find(id)?),
+        Action::Click(id) => {
+            let control = find(id)?;
+            match controls.controls[control].kind {
+                Kind::Check => Target::Check(control),
+                _ => Target::Control(control),
+            }
+        }
         Action::Bar(item) => {
             let bar = controls.controls.iter().position(|c| matches!(c.kind, Kind::Bar { .. }));
             Target::Option { control: bar.ok_or(Error::NoControl { dialog, control: 0 })?, item }
@@ -588,6 +594,64 @@ mod tests {
         assert_eq!(manager.formations[3].0, "4-4-2");
         assert_eq!(club.formation, 3);
         assert_eq!(club.lineup.spots, manager.formations[3].1);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_special_variant_puts_up_players_on_their_own_positions() {
+        let game = game();
+        let script = format!(
+            "{}\nnow choose 2572 0\nuntil dialog 386\nnow choose 5330 7\nuntil dialog 147",
+            LOAD.trim_end()
+        );
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+        let pitch = &game.rules.pitch;
+        let lineup = &club.lineup;
+        for (spot, player) in lineup.on_field() {
+            assert_eq!(club.players[player].positions[0], pitch.kind_under(spot));
+        }
+        let squad: Vec<usize> = lineup.squad().collect();
+        let mut unique = squad.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), squad.len(), "nobody twice");
+        let first = lineup.bench[0].unwrap();
+        assert_eq!(club.players[first].positions[0], a3_core::world::GOALKEEPER);
+    }
+
+    /// The cohesion the original showed for the gate's save (P0's check.sh)
+    /// after each of these, on the line-up (`tools/oracle`, 13.10.2026).
+    const COHESION_OF_THE_ORIGINAL: [(&str, i32); 5] = [
+        ("", 14),
+        ("now drag 2510 2511; drag 2512 2521; drag 2520 off; drag 2509 row 9 2527", 2),
+        ("now choose 5266 1\nuntil dialog 244\nnow choose 3386 3; press 1\nuntil dialog 147", 6),
+        ("now choose 2572 0\nuntil dialog 386\nnow choose 5330 1\nuntil dialog 147", 21),
+        ("now choose 2572 0\nuntil dialog 386\nnow choose 5330 7\nuntil dialog 147", 21),
+    ];
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_line_ups_cohesion_is_the_originals() {
+        let game = game();
+        let Some(row) = game.save_games().iter().position(|s| s.name == "Probe1") else {
+            eprintln!("no Probe1 among the saves; the oracle's copy has it");
+            return;
+        };
+        for (actions, expected) in COHESION_OF_THE_ORIGINAL {
+            let load = LOAD.replace("row 5144 0", &format!("row 5144 {row}"));
+            let script = format!("{}\n{actions}", load.trim_end());
+            let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+            result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+            let state = runner.host.state();
+            let season = state.season.as_ref().unwrap();
+            let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+            let cohesion = a3_core::cohesion::of(&game.rules.pitch, club, season.date());
+            assert_eq!(cohesion, expected, "after {actions:?}");
+        }
     }
 
     #[test]

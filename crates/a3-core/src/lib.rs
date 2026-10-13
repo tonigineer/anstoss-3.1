@@ -3,7 +3,9 @@
 //! offers and line-ups, the random numbers they draw, and the game cycle
 //! that asks for the screens (see [`cycle`]).
 
+pub mod autolineup;
 pub mod calendar;
+pub mod cohesion;
 pub mod cycle;
 pub mod data;
 pub mod jobs;

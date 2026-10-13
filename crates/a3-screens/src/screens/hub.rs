@@ -20,16 +20,18 @@ use a3_core::season::{BAR_SYMBOLS, ClubState, Rules, Season, Status};
 use a3_core::world::Player;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
-use a3_core::cycle::dialogs::QUESTION;
 pub use a3_core::cycle::dialogs::{DRESSING_ROOM, LINEUP};
+use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
+use super::special;
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, set};
 use crate::controls::player_box::PlayerBox;
 use crate::game::Game;
 use crate::pointer::{Grip, Target};
 use crate::view::View;
+use a3_core::autolineup;
 
 /// The bar runs along the bottom of the screen; its symbols are as wide as
 /// it is high.
@@ -77,6 +79,10 @@ const SQUAD: u16 = 2509;
 const TITLES: u16 = 5514;
 const SPECIAL: u16 = 2572;
 const DUTIES: u16 = 5266;
+/// The line-up's two buttons: the special variants, and "Auto.".
+const SPECIAL_ITEM: usize = 0;
+/// No co-trainer to line the team up: text 3131.
+const NO_CO_TRAINER: u16 = 3131;
 /// The segment of the duties that opens the formations.
 const FORMATION_ITEM: usize = 1;
 /// The squad list's columns as the game sets them: where each starts, and
@@ -199,7 +205,11 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
 
 /// The line-up and the dressing room, with the menu bar; its symbols lead
 /// to the other main screens, its whistle ends the turn.
-pub struct MenuBar;
+#[derive(Default)]
+pub struct MenuBar {
+    /// The popup the line-up opened, whose answer it waits for.
+    popup: Option<u16>,
+}
 
 impl Screen for MenuBar {
     fn ids(&self) -> &[u16] {
@@ -264,7 +274,16 @@ impl Screen for MenuBar {
         }
         let Target::Option { control: c, item } = target else { return Outcome::Stay };
         if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == FORMATION_ITEM {
+            self.popup = Some(FORMATIONS);
             return Outcome::Popup(Request::new(FORMATIONS));
+        }
+        if view.id == LINEUP && cx.dialog.controls[c].id == Some(SPECIAL) {
+            if item == SPECIAL_ITEM {
+                self.popup = Some(special::SPECIAL);
+                return Outcome::Popup(Request::new(special::SPECIAL));
+            }
+            change_lineup(cx, view, |tables, club, _| autolineup::bench(tables, club));
+            return Outcome::Stay;
         }
         if cx.dialog.controls[c].id != Some(BAR_ID) {
             if let Kind::Options { items, .. } = &cx.dialog.controls[c].kind {
@@ -291,14 +310,55 @@ impl Screen for MenuBar {
 
     /// Yes to ending the turn without training set; a formation chosen.
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
-        match reply {
-            Reply::Ok => Outcome::Close(Reply::Ok),
-            Reply::Choice(formation) => {
+        match (self.popup.take(), reply) {
+            (Some(FORMATIONS), Reply::Choice(formation)) => {
                 stand_in(cx, view, formation);
                 Outcome::Stay
             }
+            (Some(special::SPECIAL), Reply::Choice(variant)) => {
+                let has_co_trainer = club_state(cx).is_some_and(|c| c.co_trainer);
+                if autolineup::CO_TRAINER.contains(&variant) && !has_co_trainer {
+                    // Its OK only takes the notice in.
+                    self.popup = Some(NOTICE);
+                    return Outcome::Popup(Request::with(NOTICE, Args::Text(NO_CO_TRAINER)));
+                }
+                let mut put_up = true;
+                change_lineup(cx, view, |tables, club, today| {
+                    put_up = autolineup::variant(tables, club, variant, today);
+                });
+                if !put_up {
+                    info!("variant {variant}: not built yet");
+                }
+                Outcome::Stay
+            }
+            (None, Reply::Ok) => Outcome::Close(Reply::Ok),
             _ => Outcome::Stay,
         }
+    }
+}
+
+/// The current manager's club as the season follows it.
+fn club_state<'a>(cx: &'a Cx) -> Option<&'a ClubState> {
+    let season = cx.state.season.as_ref()?;
+    season.clubs.get(&season.manager()?.club?)
+}
+
+/// Changes the current manager's line-up and shows it again.
+fn change_lineup(
+    cx: &mut Cx,
+    view: &mut View,
+    change: impl FnOnce(&lineup::Tables, &mut ClubState, chrono::NaiveDate),
+) {
+    let (game, dialog) = (cx.game, cx.dialog);
+    let state = &mut *cx.state;
+    let Some(season) = state.season.as_mut() else { return };
+    let today = season.date();
+    let Some(club) = season.manager().and_then(|m| m.club) else { return };
+    let Some(club_state) = season.clubs.get_mut(&club) else { return };
+    change(&game.rules.pitch, club_state, today);
+    let (season, records) = (state.season.as_ref().expect("the season"), state.records.as_ref());
+    if let Some(club_state) = season.clubs.get(&club) {
+        show_lineup(view, dialog, game, season, club_state, records);
     }
 }
 
@@ -572,7 +632,7 @@ fn show_comparison(
     let Some(own) = season.manager().and_then(|m| m.club) else { return };
     let club = |(slot, c): (usize, usize)| game.world.country(slot).and_then(|k| k.clubs.get(c));
     let own_name = club(own).map_or("", |c| c.name.as_str());
-    let cohesion = pitch.cohesion(state.cohesion_base, &state.lineup, players);
+    let cohesion = a3_core::cohesion::of(pitch, state, season.date());
     set(view, dialog, COHESION, tenths(cohesion));
     // The own side as its line-up stands; the opponent's as the game last
     // reckoned it, where the save has it (`FUN_0050c9c0`).
@@ -669,7 +729,7 @@ mod tests {
         let dialog = &game.dialogs[&LINEUP];
         let mut view = View::new(LINEUP, dialog);
         let mut cx = Cx { game: &game, dialog, state: &mut state };
-        MenuBar.open(&mut cx, &mut view, Args::None);
+        MenuBar::default().open(&mut cx, &mut view, Args::None);
         let background = classic::picture(&game, dialog);
         let classic = Classic::new(&game, dialog, &view, background.clone());
         let frame = classic.draw(dialog, &view, false, 0.0);

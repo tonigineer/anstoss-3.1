@@ -21,6 +21,9 @@ use crate::sav::cp1252;
 
 #[derive(Clone)]
 pub struct Dialog {
+    /// Its German title, which a popup shows in its caption; some are
+    /// templates the game fills in itself.
+    pub title: String,
     pub background: u16,
     pub controls: Vec<Control>,
     /// A dialog smaller than the screen is a popup over the screen it was
@@ -78,6 +81,8 @@ pub enum Kind {
         image: u16,
         items: Vec<Item>,
     },
+    /// A box to tick, with its label beside it.
+    Check,
     /// A player's box on the pitch or the bench of the line-up, the game's
     /// `CMannStatic`, which draws itself.
     Player,
@@ -134,8 +139,12 @@ pub fn load_dialogs(path: &Path) -> io::Result<HashMap<u16, Dialog>> {
     Ok(dialogs)
 }
 
+/// Where a dialog record's German title starts.
+const TITLE: usize = 0x1e;
+
 fn parse_dialog(record: &[u8]) -> Option<Dialog> {
     let size = Vec2::new(u32_at(record, 0x10).ok()? as f32, u32_at(record, 0x14).ok()? as f32);
+    let title = cstr(record, TITLE).map_or_else(String::new, |(title, _)| title);
     let name = find(record, b"IDD_")?;
     let mut pos = name + record[name..].iter().position(|&b| b == 0)? + 1;
     pos = skip_padding(record, pos);
@@ -163,7 +172,7 @@ fn parse_dialog(record: &[u8]) -> Option<Dialog> {
                 Rect::from_corners(control.rect.min + frame.min, control.rect.max + frame.min);
         }
     }
-    Some(Dialog { background, controls, frame })
+    Some(Dialog { title, background, controls, frame })
 }
 
 fn is_control_start(bytes: &[u8]) -> bool {
@@ -203,6 +212,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         9 => Kind::Header,
         10 => Kind::Edit { max_len: usize::from(u16s(4)?).clamp(1, 64) },
         11 => Kind::Options { image: u16s(1)?, items: parse_items(extra, usize::from(u16s(0)?)) },
+        13 => Kind::Check,
         _ => Kind::Other,
     };
     let align = match style & 3 {

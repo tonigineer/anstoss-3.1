@@ -158,6 +158,14 @@ impl View {
             }
             Target::SliderTrack(_) => false,
             Target::Control(_) | Target::Drop { .. } => true,
+            Target::Check(control) => {
+                if let Some(ControlView { state: ControlState::Check(check), .. }) =
+                    self.controls.get_mut(control)
+                {
+                    check.checked = !check.checked;
+                }
+                true
+            }
         }
     }
 
