@@ -75,14 +75,14 @@ const MORALE_TOP: i32 = 110;
 /// How well a team plays together: in a new game every player has been at
 /// his club a year, which gives a base; a player on his main position adds,
 /// one on a foreign position takes away. At most 200.
-const COHESION_BASE: i32 = 20;
+pub const COHESION_BASE: i32 = 20;
 const COHESION_STEP: i32 = 2;
 const COHESION_MOST: i32 = 200;
 
 /// The game's tables for the pitch.
 pub struct Tables {
     /// Each formation's name and the spots of its eleven.
-    pub formations: Vec<(String, [(i16, i16); FIELD])>,
+    pub formations: Vec<Formation>,
     areas: Vec<[u8; 5]>,
     area_kinds: Vec<u8>,
     across: Vec<i16>,
@@ -255,20 +255,56 @@ impl Tables {
         parts.map(|p| p / 100)
     }
 
-    /// How well the line-up plays together, from 0 to 200.
-    pub fn cohesion(&self, lineup: &Lineup, players: &[Player]) -> i32 {
-        let mut cohesion = COHESION_BASE;
+    /// How well the line-up plays together, from 0 to 200, on top of a base
+    /// — `COHESION_BASE` in a new game (`FUN_0069774b`).
+    pub fn cohesion(&self, base: i32, lineup: &Lineup, players: &[Player]) -> i32 {
+        (base + self.cohesion_shift(lineup, players)).clamp(0, COHESION_MOST)
+    }
+
+    /// What the eleven add to a team's cohesion: a player on his main
+    /// position adds, one on a foreign position takes away.
+    pub fn cohesion_shift(&self, lineup: &Lineup, players: &[Player]) -> i32 {
+        let mut shift = 0;
         for (spot, player) in lineup.on_field() {
             let Some(p) = players.get(player) else { continue };
             let kind = self.kind_at(spot);
             if p.positions[0] == kind {
-                cohesion += COHESION_STEP;
+                shift += COHESION_STEP;
             } else if p.positions[1] != kind && p.positions[2] != kind {
-                cohesion -= COHESION_STEP;
+                shift -= COHESION_STEP;
             }
         }
-        cohesion.clamp(0, COHESION_MOST)
+        shift
     }
+}
+
+/// A formation: its name and the spots of its eleven, in pitch pixels.
+pub type Formation = (String, [(i16, i16); FIELD]);
+
+/// Every manager has this many formations to choose from: the game's own,
+/// and the rest like its first, without a name.
+pub const FORMATIONS_OF_A_MANAGER: usize = 9;
+
+impl Tables {
+    /// A new manager's formations.
+    pub fn new_formations(&self) -> Vec<Formation> {
+        let mut formations = self.formations.clone();
+        let first = formations.first().map(|f| (String::new(), f.1));
+        while formations.len() < FORMATIONS_OF_A_MANAGER {
+            formations.extend(first.clone());
+        }
+        formations
+    }
+}
+
+/// A place on the line-up screen a player is dragged from or let go of on:
+/// a spot of the eleven, a place on the bench, or — in the squad's list — the
+/// player himself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Place {
+    Field(usize),
+    Bench(usize),
+    Player(usize),
 }
 
 /// Where a club's players stand.
@@ -283,6 +319,67 @@ pub struct Lineup {
 }
 
 impl Lineup {
+    /// A player dragged from one place and let go of on another, or off the
+    /// boxes, as the line-up screen moves him (`FUN_0050de6f`): two boxes
+    /// swap their players — on the pitch, on the bench or one of each; a
+    /// player of the list takes a box, leaving his own place and sending
+    /// the box's player back to the list; a player let go of off the boxes,
+    /// or on the list, leaves the line-up. An empty place on the bench
+    /// cannot be picked up; an empty spot on the pitch can, and the player
+    /// it is let go of on moves into it. Whether anything changed.
+    pub fn drop(&mut self, from: Place, to: Option<Place>) -> bool {
+        let before = (self.field, self.bench);
+        match (from, to) {
+            (Place::Bench(b), _) if self.bench.get(b).is_none_or(Option::is_none) => {}
+            (Place::Player(p), Some(to @ (Place::Field(_) | Place::Bench(_)))) => {
+                self.remove(p);
+                if let Some(place) = self.place_mut(to) {
+                    *place = Some(p);
+                }
+            }
+            (
+                from @ (Place::Field(_) | Place::Bench(_)),
+                Some(to @ (Place::Field(_) | Place::Bench(_))),
+            ) => {
+                let (Some(a), Some(b)) = (self.get(from), self.get(to)) else { return false };
+                *self.place_mut(from).expect("a place of the line-up") = b;
+                *self.place_mut(to).expect("a place of the line-up") = a;
+            }
+            (from @ (Place::Field(_) | Place::Bench(_)), _) => {
+                if let Some(place) = self.place_mut(from) {
+                    *place = None;
+                }
+            }
+            (Place::Player(_), _) => {}
+        }
+        before != (self.field, self.bench)
+    }
+
+    /// Takes a player out of the eleven and off the bench.
+    pub fn remove(&mut self, player: usize) {
+        for place in self.field.iter_mut().chain(&mut self.bench) {
+            if *place == Some(player) {
+                *place = None;
+            }
+        }
+    }
+
+    fn get(&self, place: Place) -> Option<Option<usize>> {
+        match place {
+            Place::Field(i) => self.field.get(i).copied(),
+            Place::Bench(i) => self.bench.get(i).copied(),
+            Place::Player(_) => None,
+        }
+    }
+
+    fn place_mut(&mut self, place: Place) -> Option<&mut Option<usize>> {
+        match place {
+            Place::Field(i) => self.field.get_mut(i),
+            Place::Bench(i) => self.bench.get_mut(i),
+            Place::Player(_) => None,
+        }
+    }
+
     /// The players on the pitch with their spots.
     pub fn on_field(&self) -> impl Iterator<Item = ((i16, i16), usize)> + '_ {
         self.spots.iter().zip(&self.field).filter_map(|(&spot, &p)| Some((spot, p?)))

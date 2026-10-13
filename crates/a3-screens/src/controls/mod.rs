@@ -205,7 +205,11 @@ impl ControlState {
             Self::Edit(_) => out.push((Target::Edit(index), geometry.rect(control))),
             Self::Options(o) => o.targets(index, control, geometry, out),
             Self::Bar(b) => b.targets(index, control, geometry, out),
-            Self::Header(_) | Self::Bitmap(_) | Self::Player(_) | Self::Other => {}
+            // A player's box can be dragged to another place.
+            Self::Player(Some(player)) => {
+                out.push((Target::Control(index), geometry.map(player.rect(control))))
+            }
+            Self::Header(_) | Self::Bitmap(_) | Self::Player(None) | Self::Other => {}
         }
     }
 }

@@ -63,8 +63,9 @@ pub const DAY_TILE_TOPS: [f32; 7] = [26.0, 89.0, 152.0, 215.0, 278.0, 341.0, 404
 /// starts the season fair.
 const WEATHER: u16 = 1512;
 const FAIR: u16 = 10;
-/// The week screen shows the next match within this many days.
-const FIXTURE_AHEAD: usize = 63;
+/// The week screen and the line-up's comparison show the next match within
+/// this many days (`FUN_0062bfc9`).
+pub(super) const FIXTURE_AHEAD: usize = 63;
 
 /// The wait screen stands at least this long, as saving takes the game.
 const WAIT_SECS: f32 = 1.2;
@@ -118,6 +119,7 @@ pub(crate) fn bitmap(at: Vec2, size: f32, id: u16) -> Control {
         text: String::new(),
         id: Some(id),
         bold: false,
+        ink: [0; 3],
     }
 }
 

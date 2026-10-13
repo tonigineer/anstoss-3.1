@@ -1,0 +1,21 @@
+# Loads the first save of the list and stops on the line-up of its first
+# manager's turn — for the original, which answers the news of the week on
+# the way (see from-save.txt).
+once 9 choose 4771 1; ok
+on 424 row 5144 0; ok
+on 422 ok
+on 419 ok
+on 420 ok
+on 421 ok
+on 287 ok
+on 321 ok
+on 25 ok
+on 341 ok
+on 120 ok
+on 51 ok
+on 392 ok
+on 435 ok
+on 96 ok
+on 161 ok
+on 380 press 4731
+until dialog 147

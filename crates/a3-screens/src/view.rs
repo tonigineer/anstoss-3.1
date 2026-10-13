@@ -157,7 +157,7 @@ impl View {
                 true
             }
             Target::SliderTrack(_) => false,
-            Target::Control(_) => true,
+            Target::Control(_) | Target::Drop { .. } => true,
         }
     }
 

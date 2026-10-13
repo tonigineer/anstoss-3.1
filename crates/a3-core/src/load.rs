@@ -37,6 +37,7 @@ pub fn season(records: &Records, data: &Data, random: Random) -> Season {
                 confidence: m.shown_confidence(),
                 offers: Vec::new(),
                 menu: 0,
+                formations: m.formations(),
             }
         })
         .collect();
@@ -71,17 +72,29 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
     let fitness = squad.iter().map(|(_, record)| fitness(record)).collect();
     let status = squad.iter().map(|(_, record)| status(records, record)).collect();
     let place = |id: u16| squad.iter().position(|&(other, _)| other == id);
+    // Where the team keeps its eleven — the formation's spots, or where
+    // the manager moved them; a team that keeps none stands in its
+    // formation.
     let formations = &data.rules.pitch.formations;
-    let spots = formations
-        .get(usize::from(team.formation()))
-        .or(formations.first())
-        .map_or([(0, 0); FIELD], |f| f.1);
+    let saved = team.spots().map(|[x, y]| (x, y));
+    let spots = if saved.iter().any(|&spot| spot != (0, 0)) {
+        saved
+    } else {
+        formations
+            .get(usize::from(team.formation()))
+            .or(formations.first())
+            .map_or([(0, 0); FIELD], |f| f.1)
+    };
     let field: [Option<usize>; FIELD] = team.lineup().map(place);
     let bench: [Option<usize>; BENCH] = team.bench().map(place);
     let lineup = Lineup { spots, field, bench };
     let state = ClubState::new(players, lineup, fitness, team.ticket_target().into());
-    let cohesion = Some(team.cohesion().into());
-    ClubState { cohesion, status, tickets: team.tickets().into(), ..state }
+    let shift = data.rules.pitch.cohesion_shift(&state.lineup, &state.players);
+    let cohesion_base = i32::from(team.cohesion()) - shift;
+    let strengths = Some(team.strengths().map(i32::from));
+    let formation = usize::from(team.formation());
+    let tickets = team.tickets().into();
+    ClubState { cohesion_base, status, strengths, formation, tickets, ..state }
 }
 
 /// A player record as the world has the players of the data files.
@@ -123,7 +136,10 @@ fn status(records: &Records, record: &records::Player) -> Status {
         injured: days_to(globals, record.injured_to()),
         suspended: record.suspension(),
         away: days_to(globals, record.away_to()),
+        away_kind: record.away_kind(),
         contract: Some(i32::from(record.contract()) - i32::from(globals.start_year())),
+        knocked: record.knocked() != 0,
+        dumbbell: record.dumbbell() == 1,
     }
 }
 

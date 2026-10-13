@@ -5,6 +5,7 @@
 //! screen below it. The [`crate::host`] keeps them open.
 
 pub mod calendar;
+pub mod formations;
 pub mod hub;
 pub mod jobs;
 pub mod office;
@@ -96,6 +97,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(calendar::Wait::default()),
         Box::new(calendar::Week::default()),
         Box::new(hub::MenuBar),
+        Box::new(formations::Formations::default()),
         Box::new(office::Office),
     ]
 }
@@ -107,6 +109,7 @@ pub fn compose(game: &mut Game) {
     calendar::compose(&mut game.dialogs);
     office::compose(&mut game.dialogs);
     hub::compose(&mut game.dialogs, &game.data.rules);
+    formations::compose(&mut game.dialogs, &game.data.rules);
 }
 
 /// The index of the dialog's control with `id`.

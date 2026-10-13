@@ -221,16 +221,22 @@ pub struct ClubState {
     /// The squad: the world's for a new game, the save's for a loaded one.
     pub players: Vec<Player>,
     pub lineup: Lineup,
+    /// Which of the manager's formations the line-up stands in.
+    pub formation: usize,
     pub tickets: i64,
     pub ticket_target: i64,
-    /// How well the team plays together, as the save has it (0 to 200, the
-    /// original's `FUN_0069774b` keeps it up to date); `None` while the
-    /// replica reckons it from the line-up, as for a new game.
-    pub cohesion: Option<i32>,
+    /// What the team's cohesion stands on before its eleven count: the
+    /// base of a new game, or what a save's cohesion leaves after its
+    /// line-up's share — the original reckons it from how long the best
+    /// sixteen have been at the club (`FUN_0069774b`).
+    pub cohesion_base: i32,
     /// Every player's condition, freshness, morale and mood.
     pub fitness: Vec<Fitness>,
     /// Every player's trend and absences, as far as the save tells them.
     pub status: Vec<Status>,
+    /// What the team counts for in goal, defence, midfield and attack, as
+    /// the save has it; `None` while it is reckoned from the line-up.
+    pub strengths: Option<[i32; lineup::PARTS]>,
     /// The week so far: the team's condition and freshness at its start and
     /// after each day.
     pub week: Vec<(i32, i32)>,
@@ -263,10 +269,15 @@ pub struct Status {
     pub injured: i32,
     /// Matches suspended in the low six bits; bit 7: how many is not known.
     pub suspended: u8,
-    /// Days away from the club.
+    /// Days away from the club, and why, in the low four bits; bit 4 marks
+    /// him on the line-up list.
     pub away: i32,
+    pub away_kind: u8,
     /// Years his contract still runs.
     pub contract: Option<i32>,
+    /// Knocked about ("angeschlagen"), and marked with the dumbbell.
+    pub knocked: bool,
+    pub dumbbell: bool,
 }
 
 impl ClubState {
@@ -282,11 +293,13 @@ impl ClubState {
         Self {
             players,
             lineup,
+            formation: 0,
             tickets: 0,
             ticket_target,
-            cohesion: None,
+            cohesion_base: lineup::COHESION_BASE,
             fitness,
             status: Vec::new(),
+            strengths: None,
             week,
         }
     }
@@ -324,6 +337,8 @@ pub struct Manager {
     /// with the menu bar (0, the default), from the office (1) or a text
     /// menu (2).
     pub menu: u8,
+    /// The formations he chooses from.
+    pub formations: Vec<lineup::Formation>,
 }
 
 /// A club's next match.
@@ -394,6 +409,7 @@ impl Season {
                     confidence,
                     offers: Vec::new(),
                     menu: 0,
+                    formations: rules.pitch.new_formations(),
                 }
             })
             .collect();

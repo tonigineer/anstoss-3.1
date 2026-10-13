@@ -38,6 +38,9 @@ pub struct Control {
     pub id: Option<u16>,
     /// Statics drawn in the emphasised dialog font.
     pub bold: bool,
+    /// The colour of a static's text, red, green and blue; black for the
+    /// other controls.
+    pub ink: [u8; 3],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -207,8 +210,14 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         2 => Align::Right,
         _ => Align::Left,
     };
-    // Statics carry a font number after their name; 5 is the emphasised one.
-    let bold = matches!(kind, Kind::Static) && u16s(2) == Some(5);
+    // Statics carry their colour (a COLORREF) and a font number after their
+    // name; 5 is the emphasised font.
+    let is_static = matches!(kind, Kind::Static);
+    let bold = is_static && u16s(2) == Some(5);
+    let ink = match extra.get(..3) {
+        Some(&[r, g, b]) if is_static => [r, g, b],
+        _ => [0; 3],
+    };
     Some(Control {
         kind,
         rect: Rect::new(x as f32, y as f32, (x + w) as f32, (y + h) as f32),
@@ -216,6 +225,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         text,
         id: (id != u16::MAX).then_some(id),
         bold,
+        ink,
     })
 }
 
@@ -223,8 +233,8 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
 /// bytes of flags and its German and English label; the group's own data in
 /// front of them varies, so items are found by their labels and checked by
 /// the rectangle in front. Items without labels, like tabs the game names
-/// itself, are read in order instead: after a header of 24 bytes, padded to
-/// four bytes each.
+/// itself, are read in order instead: after a header of 24 bytes, each with
+/// two more bytes after its labels, padded to an even place.
 fn parse_items(extra: &[u8], count: usize) -> Vec<Item> {
     let labelled = parse_items_by_label(extra, count);
     if labelled.len() < count {
@@ -276,7 +286,8 @@ fn parse_items_in_order(extra: &[u8], count: usize) -> Vec<Item> {
             break;
         }
         items.push(Item { rect, text });
-        pos = after.next_multiple_of(4);
+        // Two more bytes, and padding to an even place.
+        pos = (after + 2).next_multiple_of(2);
     }
     items
 }

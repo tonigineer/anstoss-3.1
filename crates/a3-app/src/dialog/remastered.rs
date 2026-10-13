@@ -433,6 +433,7 @@ pub(super) fn spawn(
             }
             Kind::Player => {
                 if let ControlState::Player(Some(player)) = state {
+                    let at = layout.map(player.rect(control));
                     spawn_player(commands, images, game, root, at, player, fonts);
                 }
             }
@@ -947,7 +948,8 @@ fn spawn_list(
             .map(|(column, &tab)| {
                 let left = tab * layout.zoom() + 12.0;
                 match state.aligns.get(column).copied().flatten() {
-                    // Centred or to the right in a width of its own.
+                    // To the left, centred or to the right in a width of its
+                    // own.
                     Some((align, width)) => {
                         let place = commands
                             .spawn((
@@ -956,10 +958,10 @@ fn spawn_list(
                                     left: px(left),
                                     width: px(width * layout.zoom()),
                                     height: Val::Percent(100.0),
-                                    justify_content: if align == Align::Right {
-                                        JustifyContent::FlexEnd
-                                    } else {
-                                        JustifyContent::Center
+                                    justify_content: match align {
+                                        Align::Right => JustifyContent::FlexEnd,
+                                        Align::Left => JustifyContent::FlexStart,
+                                        Align::Centre => JustifyContent::Center,
                                     },
                                     align_items: AlignItems::Center,
                                     ..default()

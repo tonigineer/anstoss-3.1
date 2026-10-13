@@ -14,6 +14,8 @@
  *   click X Y            ok             clicks the left button at X, Y of the
  *                                       game's 640×480 screen, as the mouse
  *                                       would (SendInput)
+ *   drag X1 Y1 X2 Y2     ok             drags with the left button held from
+ *                                       X1, Y1 to X2, Y2 of the game's screen
  *   key VK               ok             presses and releases a virtual key
  *   text TEXT            ok             types TEXT (Windows-1252) with the keys
  *                                       of the keyboard layout
@@ -21,6 +23,9 @@
  *                                       how many dialogs the game has shown,
  *                                       and those not destroyed, oldest first
  *                                       (flag 0x10: up; MODAL 1 in DoModal)
+ *   grab PATH            ok W H BITS    writes the game's whole 640×480 picture
+ *                                       as a 24-bit BMP, from the surface it
+ *                                       composes every frame in
  *   dump PATH            ok             writes the game's state as a savegame,
  *                                       with the original's own writer, at the
  *                                       logic thread's next safe point
@@ -183,6 +188,35 @@ static void click(int x, int y, char *reply, size_t size)
 	snprintf(reply, size, "ok");
 }
 
+/* Takes hold at X1, Y1 of the game's screen, moves there to X2, Y2 in a few
+ * steps, as a hand would, and lets go. */
+#define DRAG_STEPS 6
+
+static void drag(int x1, int y1, int x2, int y2, char *reply, size_t size)
+{
+	HWND window = main_window();
+	POINT from = {x1, y1}, to = {x2, y2};
+	if (!window || !ClientToScreen(window, &from) || !ClientToScreen(window, &to)) {
+		snprintf(reply, size, "error no game window");
+		return;
+	}
+	int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
+	INPUT inputs[DRAG_STEPS + 3] = {{0}};
+	for (int i = 0; i < DRAG_STEPS + 3; i++)
+		inputs[i].type = INPUT_MOUSE;
+	for (int i = 0; i <= DRAG_STEPS; i++) {
+		INPUT *move = &inputs[i == 0 ? 0 : i + 1];
+		int x = from.x + (to.x - from.x) * i / DRAG_STEPS, y = from.y + (to.y - from.y) * i / DRAG_STEPS;
+		move->mi.dx = (x * 65535 + width / 2) / (width - 1);
+		move->mi.dy = (y * 65535 + height / 2) / (height - 1);
+		move->mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+	}
+	inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+	inputs[DRAG_STEPS + 2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+	inject(inputs, DRAG_STEPS + 3);
+	snprintf(reply, size, "ok");
+}
+
 /* Presses and releases a virtual key, with Shift, Ctrl and Alt as the bits
  * 1, 2, 4 of shift say. */
 static void key(WORD code, int shift)
@@ -240,6 +274,123 @@ static char *take(char **cursor, BOOL rest)
 	return word;
 }
 
+/*
+ * The game's whole picture. SGL (d3d_dll.dll) composes every frame in an
+ * off-screen IDirectDrawSurface4 and copies only what changed to the window,
+ * so the window shows little of a screen; the render target the DLL keeps
+ * (at 0x0508af80 for its preferred base 0x05000000) holds all of it, the
+ * game's 640×480 at the top left.
+ */
+#define SGL_BASE 0x05000000u
+#define SGL_RENDER_TARGET 0x0508af80u
+#define FRAME_WIDTH 640
+#define FRAME_HEIGHT 480
+/* DDSURFACEDESC2, by offset: its size, height, width, pitch, the pixels,
+ * and the pixel format's bit count and red, green and blue masks. */
+#define DESC_SIZE 0x7c
+#define DESC_HEIGHT 0x08
+#define DESC_WIDTH 0x0c
+#define DESC_PITCH 0x10
+#define DESC_SURFACE 0x24
+#define DESC_BITS 0x54
+#define DESC_MASKS 0x58
+/* IDirectDrawSurface4's Lock and Unlock in its vtable. */
+#define SURFACE_LOCK 25
+#define SURFACE_UNLOCK 32
+#define DDLOCK_WAIT_READONLY 0x11
+
+typedef HRESULT (WINAPI *surface_lock)(void *, RECT *, void *, DWORD, HANDLE);
+typedef HRESULT (WINAPI *surface_unlock)(void *, RECT *);
+
+/* A colour channel of a pixel, scaled to 8 bits. */
+static BYTE channel(DWORD pixel, DWORD mask)
+{
+	if (!mask)
+		return 0;
+	int shift = 0, width = 0;
+	while (!(mask >> shift & 1))
+		shift++;
+	while (shift + width < 32 && mask >> (shift + width) & 1)
+		width++;
+	DWORD value = (pixel & mask) >> shift;
+	return (BYTE)(width >= 8 ? value >> (width - 8) : value * 255 / ((1u << width) - 1));
+}
+
+static void put32(BYTE *at, DWORD value)
+{
+	memcpy(at, &value, 4);
+}
+
+static void grab(const char *path, char *reply, size_t size)
+{
+	HMODULE sgl = GetModuleHandleA("d3d_dll.dll");
+	void **target = sgl ? (void **)((BYTE *)sgl + (SGL_RENDER_TARGET - SGL_BASE)) : NULL;
+	void *surface = target && usable(target, sizeof *target, FALSE) ? *target : NULL;
+	if (!surface) {
+		snprintf(reply, size, "error no picture yet (d3d_dll.dll %s)", sgl ? "has none" : "not loaded");
+		return;
+	}
+	void **vtable = *(void ***)surface;
+	BYTE desc[DESC_SIZE] = {0};
+	put32(desc, DESC_SIZE);
+	HRESULT locked = ((surface_lock)vtable[SURFACE_LOCK])(surface, NULL, desc, DDLOCK_WAIT_READONLY, NULL);
+	if (FAILED(locked)) {
+		snprintf(reply, size, "error the surface does not lock: %08lx", (unsigned long)locked);
+		return;
+	}
+	DWORD height, width, bits, masks[3];
+	LONG pitch;
+	BYTE *pixels;
+	memcpy(&height, desc + DESC_HEIGHT, 4);
+	memcpy(&width, desc + DESC_WIDTH, 4);
+	memcpy(&pitch, desc + DESC_PITCH, 4);
+	memcpy(&pixels, desc + DESC_SURFACE, sizeof pixels);
+	memcpy(&bits, desc + DESC_BITS, 4);
+	memcpy(masks, desc + DESC_MASKS, sizeof masks);
+	/* A BMP: bottom-up rows of blue, green, red; 640 × 3 needs no padding. */
+	static BYTE image[54 + FRAME_WIDTH * FRAME_HEIGHT * 3];
+	BOOL fits = width >= FRAME_WIDTH && height >= FRAME_HEIGHT && (bits == 16 || bits == 24 || bits == 32);
+	if (fits) {
+		for (int y = 0; y < FRAME_HEIGHT; y++) {
+			BYTE *row = pixels + (size_t)y * pitch;
+			BYTE *out = image + 54 + (size_t)(FRAME_HEIGHT - 1 - y) * FRAME_WIDTH * 3;
+			for (int x = 0; x < FRAME_WIDTH; x++) {
+				DWORD pixel = 0;
+				memcpy(&pixel, row + x * (bits / 8), bits / 8);
+				out[3 * x] = channel(pixel, masks[2]);
+				out[3 * x + 1] = channel(pixel, masks[1]);
+				out[3 * x + 2] = channel(pixel, masks[0]);
+			}
+		}
+	}
+	((surface_unlock)vtable[SURFACE_UNLOCK])(surface, NULL);
+	if (!fits) {
+		snprintf(reply, size, "error a picture of %lux%lu at %lu bits", (unsigned long)width,
+			 (unsigned long)height, (unsigned long)bits);
+		return;
+	}
+	memset(image, 0, 54);
+	image[0] = 'B';
+	image[1] = 'M';
+	put32(image + 2, sizeof image);
+	put32(image + 10, 54);
+	put32(image + 14, 40);
+	put32(image + 18, FRAME_WIDTH);
+	put32(image + 22, FRAME_HEIGHT);
+	image[26] = 1;
+	image[28] = 24;
+	put32(image + 34, FRAME_WIDTH * FRAME_HEIGHT * 3);
+	FILE *file = fopen(path, "wb");
+	if (!file || fwrite(image, sizeof image, 1, file) != 1) {
+		snprintf(reply, size, "error cannot write %s", path);
+	} else {
+		snprintf(reply, size, "ok %lu %lu %lu", (unsigned long)width, (unsigned long)height,
+			 (unsigned long)bits);
+	}
+	if (file)
+		fclose(file);
+}
+
 /* Answers one command line into reply; whether the game ends after it. */
 static BOOL answer(char *line, char *reply, size_t size)
 {
@@ -289,6 +440,13 @@ static BOOL answer(char *line, char *reply, size_t size)
 			snprintf(reply, size, "error click X Y");
 		else
 			click(atoi(x), atoi(y), reply, size);
+	} else if (!strcmp(word, "drag")) {
+		char *x1 = take(&cursor, FALSE), *y1 = take(&cursor, FALSE);
+		char *x2 = take(&cursor, FALSE), *y2 = take(&cursor, FALSE);
+		if (!x1 || !y1 || !x2 || !y2)
+			snprintf(reply, size, "error drag X1 Y1 X2 Y2");
+		else
+			drag(atoi(x1), atoi(y1), atoi(x2), atoi(y2), reply, size);
 	} else if (!strcmp(word, "key")) {
 		char *code = take(&cursor, FALSE);
 		if (!code) {
@@ -311,6 +469,12 @@ static BOOL answer(char *line, char *reply, size_t size)
 			else
 				snprintf(reply, size, "ok");
 		}
+	} else if (!strcmp(word, "grab")) {
+		char *path = take(&cursor, TRUE);
+		if (!path)
+			snprintf(reply, size, "error grab PATH");
+		else
+			grab(path, reply, size);
 	} else if (!strcmp(word, "dump")) {
 		char *path = take(&cursor, TRUE);
 		if (!path)

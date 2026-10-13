@@ -31,7 +31,7 @@ use a3_screens::classic::PLAIN;
 use a3_screens::controls::button::{CANCEL_IMAGE, OK_IMAGE, with_image};
 use a3_screens::controls::slider;
 use a3_screens::host::{Change, Host};
-use a3_screens::pointer::{Target, targets};
+use a3_screens::pointer::{Grip, Target, targets};
 use a3_screens::screens::hub;
 use a3_screens::view::View;
 
@@ -169,14 +169,16 @@ impl Frames {
     }
 }
 
-/// What the pressed pointer holds on to: an arrow that repeats, or a slider
+/// What the pressed pointer holds on to: an arrow that repeats, a slider
 /// handle being dragged — from where it was, at how many canvas pixels to a
-/// classic one.
+/// classic one — or a player's box or a list's row, to be let go of on
+/// another.
 #[derive(Resource, Default)]
 struct Held {
     repeat: Option<Target>,
     timer: f32,
     drag: Option<(usize, f32, f32)>,
+    grip: Option<Grip>,
 }
 
 /// How long the pointer has rested on what it points at, for its tooltip.
@@ -490,8 +492,9 @@ fn press(
                 target,
                 Target::Spin { .. } | Target::SliderStep { .. } | Target::Scroll { .. }
             ) {
-                *held = Held { repeat: Some(target), timer: REPEAT_DELAY, drag: None };
+                *held = Held { repeat: Some(target), timer: REPEAT_DELAY, ..default() };
             }
+            held.grip = Grip::of(target);
         }
     }
 }
@@ -569,16 +572,24 @@ fn drag(
 }
 
 /// Letting go of the pointer ends repeating, dragging and holding a button
-/// down.
+/// down; what it held of a box or a row it lets go of on what it points at,
+/// if that is something else.
 fn release(
     mut inputs: MessageReader<PointerInput>,
     mut held: ResMut<Held>,
     mut view: ResMut<OpenDialog>,
+    mut pending: ResMut<Pending>,
 ) {
     let released = inputs
         .read()
         .any(|input| matches!(input.action, PointerAction::Release(PointerButton::Primary)));
-    if released && (held.repeat.is_some() || held.drag.is_some()) {
+    if released && let Some(from) = held.grip {
+        let to = view.hovered.and_then(Grip::of);
+        if to != Some(from) {
+            pending.0.push((Target::Drop { from, to }, 1));
+        }
+    }
+    if released && (held.repeat.is_some() || held.drag.is_some() || held.grip.is_some()) {
         *held = Held::default();
     }
     if released && view.pressed.is_some() {

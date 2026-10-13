@@ -179,7 +179,8 @@ pub(crate) fn fill(frame: &mut RgbaImage, x: i32, y: i32, w: i32, h: i32, color:
 }
 
 /// Tab-separated cells at the given column starts, clipped to the next
-/// column — or centred or to the right in a width of their own.
+/// column — or to the left, centred or to the right in a width of their
+/// own.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn columns<'a>(
     font: &BitmapFont,
@@ -201,6 +202,10 @@ pub(crate) fn columns<'a>(
             }
             Some((Align::Right, width)) => {
                 font.draw(frame, left + spare(width), y, cell, color, false)
+            }
+            Some((Align::Left, width)) => {
+                let clip = (left + width as i32).min(right);
+                font.draw_clipped(frame, left, y, cell, color, false, clip);
             }
             _ => {
                 let clip = tabs.get(i + 1).map_or(right, |&next| x + next as i32 - 4);

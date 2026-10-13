@@ -501,6 +501,32 @@ static void __cdecl autosave(void)
 	autosave_original();
 }
 
+/*
+ * FUN_004316a2 picks the display mode from the list of modes it was given
+ * (12 bytes each, the width first): with none 640 wide it reads far past the
+ * list and the game crashes. Now and then, starting cold, Wine lists no
+ * 640×480; Windows always has it, so it is added then.
+ */
+typedef void(__cdecl *modes_fn)(int *, int *);
+static modes_fn modes_original;
+/* The list's room: from 0x1c6bc48 to its count at 0x1c6bf1c. */
+#define MODES_ROOM 60
+
+static void __cdecl modes(int *count, int *list)
+{
+	int i = 0;
+	while (i < *count && list[3 * i] != 640)
+		i++;
+	if (i == *count && *count < MODES_ROOM) {
+		event("modes none-of=%d 640x480 added", *count);
+		list[3 * i] = 640;
+		list[3 * i + 1] = 480;
+		list[3 * i + 2] = i ? list[2] : 16;
+		++*count;
+	}
+	modes_original(count, list);
+}
+
 /* The inline hooks. */
 
 struct hook {
@@ -532,6 +558,7 @@ static struct hook hooks[] = {
 	HOOK("autosave", 0x6ecfeb, "\x55\x8b\xec\x6a\xff", autosave, autosave_original),
 	HOOK("show", 0x7a0a79, "\x55\x8b\xec\x6a\xff", show, show_original),
 	HOOK("destroy", 0x79f127, "\x55\x8b\xec\x6a\xff", destroy, destroy_original),
+	HOOK("modes", 0x4316a2, "\x55\x8b\xec\x83\xec\x14", modes, modes_original),
 };
 
 static unsigned char *trampolines;

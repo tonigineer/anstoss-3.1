@@ -33,7 +33,7 @@ use a3_files::rch::{Dialog, Kind};
 use crate::controls::button::{CANCEL_IMAGE, OK_IMAGE, with_image};
 use crate::game::Game;
 use crate::host::{Change, Host};
-use crate::pointer::Target;
+use crate::pointer::{Grip, Target};
 use crate::screens::calendar::{WEEK, is_week};
 use crate::screens::control;
 
@@ -52,6 +52,8 @@ pub struct Script {
 pub(crate) enum Line {
     On(u16, Vec<Action>),
     Once(u16, Vec<Action>),
+    /// Actions on the dialog on top, at once, whether or not it moves on.
+    Now(Vec<Action>),
     Until(Until),
     Repeat(usize),
 }
@@ -75,7 +77,26 @@ pub(crate) enum Action {
     Type(u16, String),
     Spin(u16, bool),
     Slide(u16, i32),
+    /// Drags a control (a player's box) or a list's row onto another, or off
+    /// them all.
+    Drag(Spot, Option<Spot>),
     Wait,
+}
+
+/// A control, or a row of a list, by its id.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Spot {
+    Control(u16),
+    Row(u16, usize),
+}
+
+/// A spot at the start of `words`: `ID` or `ID row N`; and what follows it.
+fn spot<'a>(words: &'a [&'a str]) -> Option<(Spot, &'a [&'a str])> {
+    let id = words.first()?.parse().ok()?;
+    match words.get(1..3) {
+        Some(["row", row]) => Some((Spot::Row(id, row.parse().ok()?), &words[3..])),
+        _ => Some((Spot::Control(id), &words[1..])),
+    }
 }
 
 /// Why a script stopped.
@@ -159,6 +180,13 @@ impl Script {
                         },
                     ));
                 }
+                "now" => {
+                    let actions = rest
+                        .split(';')
+                        .map(|a| parse_action(a.trim()).ok_or_else(|| bad("not an action")))
+                        .collect::<Result<_, _>>()?;
+                    lines.push((number, Line::Now(actions)));
+                }
                 "until" => {
                     let words: Vec<&str> = rest.split_whitespace().collect();
                     let until = match words[..] {
@@ -201,6 +229,16 @@ fn parse_action(action: &str) -> Option<Action> {
         ["spin", spinner, "up"] => Action::Spin(id(spinner)?, true),
         ["spin", spinner, "down"] => Action::Spin(id(spinner)?, false),
         ["slide", slider, value] => Action::Slide(id(slider)?, value.parse().ok()?),
+        ["drag", ref rest @ ..] => {
+            let (from, rest) = spot(rest)?;
+            match rest {
+                ["off"] => Action::Drag(from, None),
+                _ => match spot(rest)? {
+                    (to, []) => Action::Drag(from, Some(to)),
+                    _ => return None,
+                },
+            }
+        }
         ["type", field, ..] => {
             let text = action.splitn(3, char::is_whitespace).nth(2).unwrap_or_default();
             Action::Type(id(field)?, text.to_owned())
@@ -241,6 +279,13 @@ impl<'a> Runner<'a> {
                     self.once.entry(*dialog).or_default().push_back(actions.clone())
                 }
                 Line::Until(until) => self.until(*until)?,
+                Line::Now(actions) => {
+                    self.settle()?;
+                    let shown = self.host.view().id;
+                    for action in actions {
+                        self.act(shown, action)?;
+                    }
+                }
                 Line::Repeat(days) => {
                     self.settle()?;
                     let today = self.host.state().season.as_ref().map(|s| s.day);
@@ -367,6 +412,13 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::Row(id, row) => Target::Row { control: find(id)?, row },
         Action::Spin(id, up) => Target::Spin { control: find(id)?, up },
         Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
+        Action::Drag(from, to) => {
+            let grip = |spot: Spot| match spot {
+                Spot::Control(id) => Ok(Grip::Control(find(id)?)),
+                Spot::Row(id, row) => Ok(Grip::Row { control: find(id)?, row }),
+            };
+            Target::Drop { from: grip(from)?, to: to.map(grip).transpose()? }
+        }
         Action::Type(id, _) => Target::Edit(find(id)?),
         Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
     })
@@ -482,6 +534,60 @@ mod tests {
                 assert_eq!(columns[9], age.to_string());
             }
         }
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn dragged_players_move_as_the_game_moves_them() {
+        let game = game();
+        let (mut runner, result) = Runner::play(&game, &Script::parse(LOAD).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let dialog = &game.dialogs[&147];
+        let at = |id: u16| crate::screens::control(dialog, id).unwrap();
+        let lineup = |runner: &Runner| {
+            let state = runner.host.state();
+            let season = state.season.as_ref().unwrap();
+            season.clubs[&season.manager().unwrap().club.unwrap()].lineup.clone()
+        };
+        let drop = |runner: &mut Runner, from: Grip, to: Option<Grip>| {
+            runner.host.input(&game, Target::Drop { from, to }, false);
+        };
+        let before = lineup(&runner);
+        // Two boxes on the pitch swap their players …
+        drop(&mut runner, Grip::Control(at(2510)), Some(Grip::Control(at(2511))));
+        drop(&mut runner, Grip::Control(at(2512)), Some(Grip::Control(at(2521))));
+        // … one let go of off the boxes leaves the line-up …
+        drop(&mut runner, Grip::Control(at(2520)), None);
+        // … and one of the list's rest takes a box: the 19th row, after the
+        // eleven and the bench (scrolled out of sight here).
+        drop(&mut runner, Grip::Row { control: at(2509), row: 17 }, Some(Grip::Control(at(2527))));
+        let after = lineup(&runner);
+        assert_eq!((after.field[0], after.field[1]), (before.field[1], before.field[0]));
+        assert_eq!((after.field[2], after.bench[0]), (before.bench[0], before.field[2]));
+        assert_eq!(after.field[10], None);
+        let rest: Vec<usize> =
+            (0..).take_while(|&p| p < 40).filter(|p| !before.squad().any(|q| q == *p)).collect();
+        assert!(after.bench[6].is_some() && after.bench[6] != before.bench[6]);
+        assert!(rest.contains(&after.bench[6].unwrap()), "the box took one of the rest");
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_formation_chosen_stands_the_line_up_in_it() {
+        let game = game();
+        let script = format!(
+            "{}\nnow choose 5266 1\nuntil dialog 244\nnow choose 3386 3; press 1\nuntil dialog 147",
+            LOAD.trim_end()
+        );
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let manager = season.manager().unwrap();
+        let club = &season.clubs[&manager.club.unwrap()];
+        assert_eq!(manager.formations[3].0, "4-4-2");
+        assert_eq!(club.formation, 3);
+        assert_eq!(club.lineup.spots, manager.formations[3].1);
     }
 
     #[test]

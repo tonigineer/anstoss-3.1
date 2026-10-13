@@ -1,6 +1,8 @@
 //! A player's box on the pitch or the bench of the line-up, the game's
 //! `CMannStatic`, which draws itself.
 
+use a3_files::rch::Control;
+use bevy_math::{Rect, Vec2};
 use image::{Rgba, RgbaImage, imageops};
 
 use crate::classic::{Paint, TEXT};
@@ -31,15 +33,26 @@ pub struct PlayerBox {
     pub fit: i32,
     pub icons: Vec<u16>,
     pub filled: bool,
+    /// Where the box stands, its top left, when the formation puts it
+    /// elsewhere than the dialog does.
+    pub at: Option<Vec2>,
 }
 
 impl PlayerBox {
+    /// Where the box is drawn, in classic pixels.
+    pub fn rect(&self, control: &Control) -> Rect {
+        match self.at {
+            Some(at) => Rect::from_corners(at, at + control.rect.size()),
+            None => control.rect,
+        }
+    }
+
     /// As the game paints it: blue with his name on top, his position and
     /// strength in the bottom right and his abilities in the bottom left;
     /// yellow with the position's name when the spot is empty.
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let Some(font) = paint.font() else { return };
-        let r = paint.control.rect;
+        let r = self.rect(paint.control);
         let (x, y) = (r.min.x as i32, r.min.y as i32);
         let image = if self.filled { FILLED } else { EMPTY };
         if let Some(picture) = paint.image(image) {

@@ -8,9 +8,33 @@ use a3_files::rch::{Control, Dialog};
 use crate::controls::{bar, list};
 use crate::view::View;
 
+/// What a drag takes hold of, or is let go of on: a control — a player's
+/// box — or a list's row, counted from the first one shown.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Grip {
+    Control(usize),
+    Row { control: usize, row: usize },
+}
+
+impl Grip {
+    /// What the pointer pressing on a target takes hold of, if anything.
+    pub fn of(target: Target) -> Option<Self> {
+        match target {
+            Target::Control(control) => Some(Self::Control(control)),
+            Target::Row { control, row } => Some(Self::Row { control, row }),
+            _ => None,
+        }
+    }
+}
+
 /// Something a pointer or key can act on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Target {
+    /// Something dragged and let go of on another place, or on none.
+    Drop {
+        from: Grip,
+        to: Option<Grip>,
+    },
     Option {
         control: usize,
         item: usize,

@@ -7,7 +7,7 @@ use image::{Rgba, RgbaImage};
 use a3_files::bitmap_font::BitmapFont;
 use a3_files::rch::{Align, Control};
 
-use crate::classic::{Paint, TEXT, TEXT_HOVER};
+use crate::classic::{Paint, TEXT_HOVER};
 use crate::pointer::{Geometry, Target};
 
 #[derive(Clone, Default, Debug)]
@@ -22,7 +22,8 @@ impl StaticState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let Some(font) = paint.font() else { return };
         let pointed = paint.pointed(Target::Control(paint.index));
-        let color = if pointed { TEXT_HOVER } else { TEXT };
+        let [r, g, b] = paint.control.ink;
+        let color = if pointed { TEXT_HOVER } else { Rgba([r, g, b, 255]) };
         draw_static(font, frame, paint.control, &self.text, color);
     }
 

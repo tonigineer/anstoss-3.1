@@ -81,6 +81,12 @@ impl Host {
         &self.open.last().expect("a screen is open").1
     }
 
+    /// The views of the open screens, the screen at the bottom first, the
+    /// popups over it after.
+    pub fn views(&self) -> impl Iterator<Item = &View> {
+        self.open.iter().map(|(_, view)| view)
+    }
+
     pub fn view_mut(&mut self) -> &mut View {
         &mut self.open.last_mut().expect("a screen is open").1
     }

@@ -26,7 +26,7 @@ use a3_files::rch::Kind;
 use bevy_math::Vec2;
 
 use crate::game::Game;
-use crate::pointer::{self, Pixels, Target};
+use crate::pointer::{self, Grip, Pixels, Target};
 use crate::script::{Action, Error, Line, Script, Until, target_of};
 use crate::view::View;
 
@@ -138,6 +138,12 @@ impl<'a> Original<'a> {
                     self.once.entry(*dialog).or_default().push_back(actions.clone())
                 }
                 Line::Until(until) => self.until(*until)?,
+                Line::Now(actions) => {
+                    let up = self.settle()?;
+                    for action in actions {
+                        self.act(up, action)?;
+                    }
+                }
                 Line::Repeat(days) => {
                     self.settle()?;
                     let today = self.day()?;
@@ -270,18 +276,43 @@ impl<'a> Original<'a> {
         let dialog = self.game.dialogs.get(&up.id).ok_or(Error::NoActions(up.id))?;
         let target = target_of(dialog, up.id, action)?;
         let view = View::new(up.id, dialog);
-        let rect = pointer::targets(dialog, &view, &Pixels)
-            .into_iter()
-            .find(|(t, _)| *t == target)
-            .map(|(_, rect)| rect)
-            .or_else(|| match target {
-                Target::Button(i) | Target::Control(i) | Target::Edit(i) => {
-                    Some(dialog.controls[i].rect)
-                }
-                _ => None,
-            })
-            .ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))?;
-        self.click(rect.center())?;
+        let rect = |target: Target| {
+            pointer::targets(dialog, &view, &Pixels)
+                .into_iter()
+                .find(|(t, _)| *t == target)
+                .map(|(_, rect)| rect)
+                .or_else(|| match target {
+                    Target::Button(i) | Target::Control(i) | Target::Edit(i) => {
+                        Some(dialog.controls[i].rect)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))
+        };
+        let grip = |grip: Grip| match grip {
+            Grip::Control(i) => Target::Control(i),
+            Grip::Row { control, row } => Target::Row { control, row },
+        };
+        if let Target::Drop { from, to } = target {
+            // Off the boxes is on the list, which takes a player out as
+            // well; a free spot of the pitch would move the box instead.
+            let to = match to {
+                Some(to) => rect(grip(to))?,
+                None => dialog
+                    .controls
+                    .iter()
+                    .find(|c| matches!(c.kind, Kind::ListBox))
+                    .map(|c| c.rect)
+                    .ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))?,
+            };
+            let (from, to) = (rect(grip(from))?.center(), to.center());
+            let command =
+                format!("drag {} {} {} {}", from.x as i32, from.y as i32, to.x as i32, to.y as i32);
+            self.probe.ask(command.as_bytes())?;
+            sleep(PAUSE);
+            return Ok(());
+        }
+        self.click(rect(target)?.center())?;
         if let (Action::Type(_, text), Target::Edit(field)) = (action, target) {
             let len = match dialog.controls[field].kind {
                 Kind::Edit { max_len } if max_len > 0 => max_len,

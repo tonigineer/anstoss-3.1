@@ -216,14 +216,30 @@ fn play(game: &Game, path: &Path, original: Option<bool>, shot: Option<&Path>) -
     } else {
         let (runner, result) = a3_screens::script::Runner::play(game, &script);
         if let Some(shot) = shot {
-            let view = runner.host.view();
-            let Some(dialog) = game.dialogs.get(&view.id) else {
-                eprintln!("no dialog {} to draw", view.id);
-                return AppExit::error();
-            };
-            let background = a3_screens::classic::picture(game, dialog);
-            let classic = a3_screens::classic::Classic::new(game, dialog, view, background);
-            if let Err(err) = classic.draw(dialog, view, false, 0.0).save(shot) {
+            // The screen, and every popup over it on what is under it.
+            let mut frame: Option<image::RgbaImage> = None;
+            for view in runner.host.views() {
+                let Some(dialog) = game.dialogs.get(&view.id) else {
+                    eprintln!("no dialog {} to draw", view.id);
+                    return AppExit::error();
+                };
+                let picture = a3_screens::classic::picture(game, dialog);
+                let background = match (frame.take(), dialog.frame) {
+                    (Some(mut under), Some(at)) => {
+                        image::imageops::overlay(
+                            &mut under,
+                            &picture,
+                            at.min.x as i64,
+                            at.min.y as i64,
+                        );
+                        under
+                    }
+                    _ => picture,
+                };
+                let classic = a3_screens::classic::Classic::new(game, dialog, view, background);
+                frame = Some(classic.draw(dialog, view, false, 0.0));
+            }
+            if let Some(Err(err)) = frame.map(|frame| frame.save(shot)) {
                 eprintln!("{}: {err}", shot.display());
                 return AppExit::error();
             }

@@ -6,8 +6,8 @@ original and prints the replies.
     python3 tools/probe/client.py "peek 0x89dcc0 8"
     python3 tools/probe/client.py "shot runs/start.png"
 
-"shot PATH" is the client's own: it saves the game's 640×480 screen from the
-X display (ImageMagick's import), at the client area of the game's window.
+"shot PATH" is the client's own: it saves the game's whole 640×480 picture
+(the probe's grab, as a BMP) in the format PATH names, through ImageMagick.
 
 As a module: `Probe().ask("peek 0x89dcc0 8")` returns the reply after "ok",
 `Probe().peek(address, length)` the bytes; an "error" reply raises.
@@ -70,12 +70,15 @@ class Probe:
         return found
 
     def shot(self, path: str) -> None:
-        """Saves the game's screen: 640×480 at the client area of its main window
-        (the bottommost one), from the X display the game runs on."""
-        main = self.windows()[-1]
-        x, y = main["client"][:2]
-        subprocess.run(["magick", "import", "-display", os.environ["DISPLAY"], "-window", "root",
-                        "-crop", f"640x480+{x}+{y}", "+repage", path], check=True)
+        """Saves the game's whole picture, 640×480, as the probe grabs it from the
+        surface the game composes its frames in — the window shows only what the
+        game redraws."""
+        target = os.path.abspath(path)
+        bmp = target if target.lower().endswith(".bmp") else target + ".bmp"
+        self.ask("grab Z:" + bmp.replace("/", "\\"))
+        if bmp != target:
+            subprocess.run(["magick", bmp, target], check=True)
+            os.remove(bmp)
 
     def close(self) -> None:
         self.socket.close()

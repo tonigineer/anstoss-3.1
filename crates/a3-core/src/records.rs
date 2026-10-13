@@ -160,6 +160,8 @@ record! {
     0x1d8 => injured_on, set_injured_on: u16;
     /// The injury lasts to this year and day of the year.
     0x1da => injured_to, set_injured_to: [u16; 2];
+    /// Not zero: "angeschlagen", knocked about.
+    0x1de => knocked, set_knocked: u8;
     /// Away from the club, with the national team, and for long (a year
     /// and a day of the year each).
     0x1e4 => away_to, set_away_to: [u16; 2];
@@ -177,10 +179,16 @@ record! {
     /// Matches suspended in the low six bits; bit 7: for how long is not
     /// known yet.
     0x229 => suspension, set_suspension: u8;
+    /// Why he is away from the club, in the low four bits; bit 4 marks him
+    /// on the line-up list (its status icon 6).
+    0x26b => away_kind, set_away_kind: u8;
     /// Bit 7: the long absence's length is not known yet.
     0x26e => long_unknown, set_long_unknown: u8;
     /// 100 is neither happy nor unhappy.
     0x296 => morale, set_morale: u8;
+    /// 1: the line-up list marks him with the dumbbell (what for is not
+    /// traced yet).
+    0x34c => dumbbell, set_dumbbell: u8;
     /// The form the line-up showed last, for its trend.
     0x34d => last_form, set_last_form: u8;
     0x353 => mood, set_mood: i8;
@@ -203,6 +211,10 @@ record! {
     /// A club's team (0x990 bytes at `DAT_01a72ff8` + index × 0x990), from
     /// which the game fills its club objects (`FUN_0063b75a`).
     Team, 0x990 - HEADER, base HEADER;
+    /// What the team counts for in goal, defence, midfield and attack, in
+    /// tenths, as the game last reckoned it (the club object's +0x94 …
+    /// +0x9a): the line-up's comparison shows the opponent's.
+    0xb8 => strengths, set_strengths: [i16; 4];
     0x112 => player_count, set_player_count: u16;
     /// Its number among its country's teams.
     0x129 => number, set_number: u8;
@@ -214,6 +226,9 @@ record! {
     0x1ee => cohesion, set_cohesion: u8;
     /// The formation, 0 the 5-3-2.
     0x1f0 => formation, set_formation: u8;
+    /// Where the eleven stand, in pitch pixels: the formation's spots, or
+    /// where the manager moved a box (the club object's +0xae6).
+    0x194 => spots, set_spots: [[i16; 2]; 11];
     /// Season tickets: the target the preseason sells towards, and how many
     /// are sold (the club object's +0x22c and +0x498).
     0x4a4 => ticket_target, set_ticket_target: i32;
@@ -261,7 +276,25 @@ record! {
     0x188 => confidence_swings, set_confidence_swings: [i8; 2];
 }
 
+/// A manager's formations: a name of ten bytes and the eleven's spots, x
+/// and y in pitch pixels, each (the manager object's +0x118).
+const FORMATIONS_AT: usize = 0x2f0;
+const FORMATION_SIZE: usize = 0x36;
+const FORMATION_NAME: usize = 10;
+
 impl Manager {
+    /// His formations, as the formations dialog offers them.
+    pub fn formations(&self) -> Vec<(String, [(i16, i16); 11])> {
+        (0..crate::lineup::FORMATIONS_OF_A_MANAGER)
+            .map(|f| {
+                let at = FORMATIONS_AT + f * FORMATION_SIZE;
+                let name = text(&self.0[at..], FORMATION_NAME);
+                let spots: [[i16; 2]; 11] = self.get(at + FORMATION_NAME);
+                (name, spots.map(|[x, y]| (x, y)))
+            })
+            .collect()
+    }
+
     /// The board's confidence as the screens show it, from 0 to 100.
     pub fn shown_confidence(&self) -> i32 {
         let [a, b] = self.confidence_ups();
