@@ -62,6 +62,11 @@ impl Archive {
         Ok(Self { file, entries })
     }
 
+    /// The names of the files it holds, as lookups take them.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
+    }
+
     /// Reads one file, unpacked. Lookup ignores case and the `/` vs `\`
     /// separator, as the game itself does.
     pub fn read(&mut self, name: &str) -> io::Result<Vec<u8>> {

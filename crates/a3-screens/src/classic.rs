@@ -12,8 +12,8 @@ use tracing::warn;
 use a3_files::bitmap_font::BitmapFont;
 use a3_files::rch::{Align, Control, Dialog};
 
-use crate::controls::bar;
 use crate::controls::bitmap::Picture;
+use crate::controls::{bar, combo, slider};
 use crate::game::{Game, transparent_black};
 use crate::pointer::Target;
 use crate::view::View;
@@ -83,7 +83,9 @@ impl Classic {
             }
         }
         let mut widgets = HashMap::new();
-        for name in [HANDLE, SCROLL_UP, SCROLL_DOWN] {
+        let combo = [combo::LIST_HANDLE];
+        let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS);
+        for name in [HANDLE, SCROLL_UP, SCROLL_DOWN].into_iter().chain(combo).chain(sliders) {
             match game.picture(name) {
                 Ok(picture) => _ = widgets.insert(name, transparent_black(picture)),
                 Err(err) => warn!("{name}: {err}"),
@@ -120,6 +122,13 @@ impl Classic {
             }
             let paint = Paint { classic: self, view, index, control, caret, phase, scene };
             shown.state.draw(&mut frame, &paint);
+        }
+        // A dropped list lies over everything.
+        for (index, (control, shown)) in dialog.controls.iter().zip(&view.controls).enumerate() {
+            if let (false, Some(combo)) = (shown.hidden, shown.state.as_combo()) {
+                let paint = Paint { classic: self, view, index, control, caret, phase, scene };
+                combo.draw_list(&mut frame, &paint);
+            }
         }
         if let (Some((control, item)), Some(font)) = (view.tip, &self.font) {
             let text = view.controls.get(control).and_then(|c| c.state.as_bar()?.tips.get(item));

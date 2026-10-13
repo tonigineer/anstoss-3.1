@@ -3,6 +3,7 @@
 //! on with and those he does not, his weaknesses, and how content he is —
 //! with what, in bars, and why, in a sentence.
 
+use a3_core::mood;
 use a3_core::records::Player as Record;
 
 use super::{LAST_REAL_ID, Shown, bars};
@@ -142,7 +143,7 @@ pub(super) fn show(s: &Shown, view: &mut View) {
     }
 
     // How content he is.
-    let mut parts = contentment(r);
+    let mut parts = mood::parts(r);
     if manager {
         parts[0] = MIDDLING;
     }
@@ -152,42 +153,6 @@ pub(super) fn show(s: &Shown, view: &mut View) {
     }
     let sentence = if manager { String::new() } else { content_sentence(s, r, parts) };
     s.put(view, CONTENT, sentence);
-}
-
-/// His contentment with the trainer, the team, the club, the press, his
-/// private life, his distractions and his offers, as the bars show it: the
-/// record's, less ten for each grievance his flags hold, ten more for each
-/// thing that pleases him while that keeps it to a hundred, and a best
-/// friend who manages pleasing him too (`FUN_007008b9`, `FUN_00700c42`,
-/// `FUN_00700e3f`; the others as they are).
-fn contentment(r: &Record) -> [i32; 7] {
-    const TRAINER: ([u32; 9], [u32; 1]) =
-        ([0x1, 0x2, 0x10, 0x8, 0x100, 0x1000, 0x4000, 0x2000, 0x8000], [0x80000]);
-    const TEAM: ([u32; 3], [u32; 1]) = ([0x40, 0x80, 0x800], [0x40000]);
-    const CLUB: ([u32; 3], [u32; 3]) = ([0x4, 0x20, 0x400], [0x10000, 0x20000, 0x100000]);
-    let flags = r.flags();
-    let base = r.contentment().map(i32::from);
-    let manager_friend = r.best_friend() > LAST_REAL_ID;
-    let less = |value: i32, bits: &[u32]| {
-        value - 10 * bits.iter().filter(|&&b| flags & b != 0).count() as i32
-    };
-    let up = |value: i32| if value < 100 { (value + 10).min(100) } else { value };
-    let more = |mut value: i32, bits: &[u32]| {
-        for &b in bits {
-            if flags & b != 0 {
-                value = up(value);
-            }
-        }
-        value
-    };
-    let mut trainer = more(less(base[0], &TRAINER.0), &TRAINER.1);
-    if manager_friend {
-        trainer = up(trainer);
-    }
-    let team = more(less(base[1], &TEAM.0), &TEAM.1);
-    let club = more(less(base[2] + if manager_friend { 5 } else { 0 }, &CLUB.0), &CLUB.1);
-    let clamp = |v: i32| v.clamp(0, MOST_CONTENT);
-    [clamp(trainer), clamp(team), clamp(club), base[3], base[4], base[5], base[6]]
 }
 
 /// How content he is in a sentence, with the reason that counts most

@@ -32,6 +32,9 @@ pub struct OptionsState {
     pub actions: bool,
     /// Options that are switched off: they show nothing and do not answer.
     pub off: Vec<bool>,
+    /// How far into an option its label's room starts, where the option's
+    /// picture shows something of its own on the left.
+    pub label_indent: f32,
 }
 
 impl OptionsState {
@@ -102,7 +105,8 @@ impl OptionsState {
                 let top = r.min.y + it.rect.min.y + (it.rect.height() - height) / 2.0;
                 for (i, line) in lines.iter().enumerate() {
                     let width = font.width(line, false) as f32;
-                    let left = r.min.x + it.rect.min.x + (it.rect.width() - width) / 2.0;
+                    let room = it.rect.width() - self.label_indent;
+                    let left = r.min.x + it.rect.min.x + self.label_indent + (room - width) / 2.0;
                     let top = (top + cell * i as f32).round() as i32;
                     font.draw(frame, left.round() as i32, top, line, color, false);
                 }

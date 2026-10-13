@@ -53,9 +53,15 @@ impl Screen for Notice {
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
         ball(view, cx);
-        if let Args::Text(text) = args {
-            set(view, cx.dialog, NOTICE_TEXT, cx.game.text(text).to_owned());
-        }
+        let text = match args {
+            Args::Text(text) => cx.game.text(text).to_owned(),
+            Args::TextFor(text, player) => {
+                let name = cx.state.records.as_ref().and_then(|r| r.known_as(player));
+                cx.game.text(text).replacen("%s", &name.unwrap_or_default(), 1)
+            }
+            _ => return,
+        };
+        set(view, cx.dialog, NOTICE_TEXT, text);
     }
 
     fn input(&mut self, _: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {

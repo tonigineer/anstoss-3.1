@@ -413,6 +413,7 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
             let control = find(id)?;
             match controls.controls[control].kind {
                 Kind::Check => Target::Check(control),
+                Kind::Combo => Target::Combo(control),
                 _ => Target::Control(control),
             }
         }
@@ -691,6 +692,77 @@ mod tests {
         assert_eq!(text(4844), "Vertrag bis 30.6.2028 (noch drei Jahre).");
         assert_eq!(text(4878), "Er ist gesund.");
         assert_eq!([text(4971), text(4972)], ["Geldgeier", "Skandalnudel"]);
+    }
+
+    /// Plays the save `save` to its line-up, then `then`; the runner, or
+    /// none if the installation has no such save.
+    fn on_save<'a>(game: &'a Game, save: &str, then: &str) -> Option<Runner<'a>> {
+        let Some(row) = game.save_games().iter().position(|s| s.name == save) else {
+            eprintln!("no {save} among the saves; the oracle's copy has it");
+            return None;
+        };
+        let load = LOAD.replace("row 5144 0", &format!("row 5144 {row}"));
+        let script = format!("{}\n{then}", load.trim_end());
+        let (runner, result) = Runner::play(game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        Some(runner)
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_bonus_for_the_team_costs_and_takes_the_edge_off() {
+        let game = game();
+        // The keeper's menu: "Spielerinfo", a blank line, "Prämie" (no talk
+        // on the week's last day), the bonus for the team at its start,
+        // 100.000 €.
+        let then = "now rclick 2510; choose 9950 2\nuntil dialog 195\nnow choose 2947 0; ok\n\
+                    until dialog 380\nnow press 4731\nuntil dialog 147";
+        let Some(before) = on_save(&game, "Toni", "") else { return };
+        let runner = on_save(&game, "Toni", then).unwrap();
+        let team = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            (team.bonuses_paid(), team.will_to_win())
+        };
+        let ((paid, will), (paid_now, will_now)) = (team(&before), team(&runner));
+        assert_eq!(paid_now, paid + 100_000);
+        // Two tries in the first league, two off the will to win each.
+        assert_eq!(will_now, will - 4);
+        assert!(runner.log.iter().any(|l| l == "screen 380"));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_fine_for_nothing_is_refused() {
+        let game = game();
+        let then =
+            "now rclick 2510; choose 9950 3\nuntil dialog 85\nnow press 1867\nuntil dialog 88";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&88];
+        let text = view.text(crate::screens::control(dialog, 1873).unwrap());
+        assert_eq!(
+            text,
+            "Frederik Rönnow hat absolut nichts gemacht, daß eine Geldstrafe rechtfertigen würde!"
+        );
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_talk_is_booked_in_the_planner() {
+        let game = game();
+        // The keeper's menu on the first day of a week: the talk is its
+        // second entry; the first free day is today.
+        let then =
+            "now rclick 2510; choose 9950 1\nuntil dialog 412\nnow choose 5034 0\nuntil dialog 147";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let day = usize::from(records.globals.day());
+        let booked = records.planners[0].day(day);
+        assert_eq!((booked.kind, booked.flag, booked.player), (0x19, 1, 3204));
     }
 
     /// A page, a control of it, and the text it shows.

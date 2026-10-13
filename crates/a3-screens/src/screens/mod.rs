@@ -5,10 +5,12 @@
 //! screen below it. The [`crate::host`] keeps them open.
 
 pub mod calendar;
+pub mod discipline;
 pub mod formations;
 pub mod hub;
 pub mod jobs;
 pub mod office;
+pub mod planner;
 pub mod playerinfo;
 pub mod popups;
 pub mod special;
@@ -103,6 +105,11 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(special::Special),
         Box::new(playerinfo::PlayerInfo::default()),
         Box::new(office::Office),
+        Box::new(discipline::Bonus::default()),
+        Box::new(discipline::Fine::default()),
+        Box::new(discipline::FineReply),
+        Box::new(discipline::Change),
+        Box::new(planner::Planner::default()),
     ]
 }
 
@@ -116,6 +123,7 @@ pub fn compose(game: &mut Game) {
     formations::compose(&mut game.dialogs, &game.data.rules);
     special::compose(&mut game.dialogs);
     playerinfo::compose(&mut game.dialogs);
+    discipline::compose(&mut game.dialogs);
 }
 
 /// The index of the dialog's control with `id`.

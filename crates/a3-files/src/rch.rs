@@ -67,8 +67,11 @@ pub enum Kind {
     Anim,
     /// The tiny up/down arrows next to a number.
     Spin,
-    /// A horizontal scrollbar: arrows at both ends, a handle in between.
-    Slider,
+    /// A horizontal scrollbar: arrows at both ends, a handle in between, in
+    /// one of the game's colours (0 blue, 1 red, 3 green, 4 yellow).
+    Slider {
+        style: u16,
+    },
     /// Column titles of a list, separated by tabs.
     Header,
     Edit {
@@ -83,6 +86,14 @@ pub enum Kind {
     },
     /// A box to tick, with its label beside it.
     Check,
+    /// A field that shows one of a list of texts, the list dropping down
+    /// under it to choose another: the game's `CMyComboBox`.
+    Combo,
+    /// A button with a text on its picture: the game's `CMyPushButton`.
+    PushButton {
+        normal: u16,
+        hover: u16,
+    },
     /// A menu that opens where a right click falls, which the screens put
     /// in; the game's `CPopupMenue`.
     Menu,
@@ -212,12 +223,14 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         4 => Kind::ListBox,
         6 => Kind::Anim,
         7 => Kind::Bitmap,
-        8 if w > h => Kind::Slider,
+        8 if w > h => Kind::Slider { style: u16s(0)? },
         8 => Kind::Spin,
         9 => Kind::Header,
         10 => Kind::Edit { max_len: usize::from(u16s(4)?).clamp(1, 64) },
         11 => Kind::Options { image: u16s(1)?, items: parse_items(extra, usize::from(u16s(0)?)) },
+        5 => Kind::Combo,
         13 => Kind::Check,
+        14 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
         15 => Kind::Paint,
         _ => Kind::Other,
     };

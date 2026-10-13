@@ -7,6 +7,7 @@ pub mod bar;
 pub mod bitmap;
 pub mod button;
 pub mod check;
+pub mod combo;
 pub mod edit;
 pub mod header;
 pub mod list;
@@ -31,6 +32,7 @@ use self::bar::BarState;
 use self::bitmap::BitmapState;
 use self::button::ButtonState;
 use self::check::CheckState;
+use self::combo::ComboState;
 use self::edit::EditState;
 use self::header::HeaderState;
 use self::list::ListState;
@@ -65,6 +67,7 @@ pub enum ControlState {
     /// What a player's box shows, once the flow has filled it.
     Player(Option<PlayerBox>),
     Check(CheckState),
+    Combo(ComboState),
     Menu(MenuState),
     Bar(BarState),
     Paint(PaintState),
@@ -84,11 +87,13 @@ impl ControlView {
             Kind::Bitmap => ControlState::Bitmap(BitmapState::default()),
             Kind::Anim => ControlState::Anim(AnimState::default()),
             Kind::Spin => ControlState::Spin(Value::default()),
-            Kind::Slider => ControlState::Slider(Value::default()),
+            Kind::Slider { .. } => ControlState::Slider(Value::default()),
             Kind::Edit { .. } => ControlState::Edit(EditState { text: text() }),
             Kind::Options { items, .. } => ControlState::Options(OptionsState::new(items)),
             Kind::Player => ControlState::Player(None),
             Kind::Check => ControlState::Check(CheckState { checked: false, text: text() }),
+            Kind::Combo => ControlState::Combo(ComboState::default()),
+            Kind::PushButton { .. } => ControlState::Button(ButtonState::default()),
             Kind::Menu => ControlState::Menu(MenuState::default()),
             Kind::Bar { .. } => ControlState::Bar(BarState::default()),
             Kind::Paint => ControlState::Paint(PaintState::default()),
@@ -132,6 +137,7 @@ kinds! {
     as_bar, as_bar_mut, Bar, BarState;
     as_check, as_check_mut, Check, CheckState;
     as_paint, as_paint_mut, Paint, PaintState;
+    as_combo, as_combo_mut, Combo, ComboState;
 }
 
 impl ControlState {
@@ -200,6 +206,7 @@ impl ControlState {
             Self::Menu(m) => m.draw(frame, paint),
             Self::Bar(b) => b.draw(frame, paint),
             Self::Paint(p) => p.draw(frame, paint),
+            Self::Combo(c) => c.draw(frame, paint),
             Self::Spin(_) | Self::Player(None) | Self::Other => {}
         }
     }
@@ -223,6 +230,7 @@ impl ControlState {
             Self::Options(o) => o.targets(index, control, geometry, out),
             Self::Bar(b) => b.targets(index, control, geometry, out),
             Self::Check(c) => c.targets(index, control, geometry, out),
+            Self::Combo(c) => c.targets(index, control, geometry, out),
             Self::Menu(m) => m.targets(index, control, geometry, out),
             // A player's box can be dragged to another place.
             Self::Player(Some(player)) => {

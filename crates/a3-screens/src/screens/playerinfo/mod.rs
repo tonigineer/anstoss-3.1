@@ -223,13 +223,7 @@ impl Shown<'_> {
     /// The name a team-mate goes by: his nickname if he has one shown,
     /// else his first and last name (`FUN_006feb4d`).
     fn known_as(&self, id: u16) -> Option<String> {
-        let records = self.records?;
-        let r = records.player(id)?;
-        Some(if r.shown() & NICKNAME != 0 {
-            records.name(r.nickname()).to_owned()
-        } else {
-            format!("{} {}", records.name(r.first_name()), records.name(r.last_name()))
-        })
+        self.records?.known_as(id)
     }
 
     /// Whether the game follows his country's matches: the main country
@@ -351,7 +345,7 @@ fn one_decimal(v: f64) -> String {
 }
 
 /// Money as the game writes it (`FUN_004daf8f`): "144.000 €", "1.36 Mio €".
-fn money(game: &Game, value: i64) -> String {
+pub(crate) fn money(game: &Game, value: i64) -> String {
     let sign = if value < 0 { "- " } else { "" };
     let v = value.abs();
     let template = |i: usize| {

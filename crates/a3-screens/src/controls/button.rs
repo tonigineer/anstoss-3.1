@@ -1,11 +1,12 @@
 //! Bitmap buttons: a picture as they stand and one for when the pointer is
-//! on them.
+//! on them. Push buttons have their text in the middle, on the dialog's
+//! picture, their own picture showing them held down.
 
 use image::RgbaImage;
 
 use a3_files::rch::{Control, Dialog, Kind};
 
-use crate::classic::{Paint, paste};
+use crate::classic::{Paint, TEXT, TEXT_HOVER, paste};
 use crate::pointer::Target;
 
 /// Graphic ids of the OK and cancel buttons' normal images.
@@ -20,13 +21,28 @@ pub struct ButtonState {
 
 impl ButtonState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
-        let Kind::Button { normal, hover } = paint.control.kind else { return };
+        let (normal, hover, labelled) = match paint.control.kind {
+            Kind::Button { normal, hover } => (normal, hover, false),
+            Kind::PushButton { normal, hover } => (normal, hover, true),
+            _ => return,
+        };
         let target = Target::Button(paint.index);
         let pointed = paint.pointed(target) && !self.disabled;
         // The objects of a scene change only while they are held down.
         let pointed = pointed && (!paint.scene || paint.view.pressed == Some(target));
-        if let Some(sprite) = paint.image(if pointed { hover } else { normal }) {
-            paste(frame, sprite, paint.control.rect.min);
+        let r = paint.control.rect;
+        // A push button is the dialog's picture; its own shows it held down.
+        let held = paint.view.pressed == Some(target);
+        if (!labelled || held)
+            && let Some(sprite) = paint.image(if pointed { hover } else { normal })
+        {
+            paste(frame, sprite, r.min);
+        }
+        if let (true, Some(font)) = (labelled, paint.font()) {
+            let text = &paint.control.text;
+            let left = r.min.x as i32 + (r.width() as i32 - font.width(text, false) as i32) / 2;
+            let top = r.min.y as i32 + (r.height() as i32 - font.height() as i32) / 2;
+            font.draw(frame, left, top, text, if pointed { TEXT_HOVER } else { TEXT }, false);
         }
     }
 }
@@ -34,6 +50,7 @@ impl ButtonState {
 pub(crate) fn graphics(control: &Control) -> (Vec<u16>, bool) {
     match control.kind {
         Kind::Button { normal, hover } => (vec![normal, hover], true),
+        Kind::PushButton { normal, hover } => (vec![normal, hover], false),
         _ => (Vec::new(), true),
     }
 }

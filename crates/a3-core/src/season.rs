@@ -102,6 +102,8 @@ pub struct Rules {
     pub value: crate::value::ValueTables,
     /// What the screens call a player's things.
     pub words: crate::words::Words,
+    /// Bonuses and fines.
+    pub discipline: crate::discipline::DisciplineTables,
 }
 
 impl Rules {
@@ -135,6 +137,7 @@ impl Rules {
                 .collect(),
             value: crate::value::ValueTables::load(exe)?,
             words: crate::words::Words::load(exe)?,
+            discipline: crate::discipline::DisciplineTables::load(exe)?,
         })
     }
 

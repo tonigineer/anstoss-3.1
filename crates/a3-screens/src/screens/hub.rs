@@ -26,13 +26,14 @@ use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, set};
-use super::{playerinfo, special};
+use super::{discipline, planner, playerinfo, special};
 use crate::controls::ControlState;
 use crate::controls::player_box::PlayerBox;
 use crate::game::Game;
 use crate::pointer::{Grip, Target};
 use crate::view::View;
 use a3_core::autolineup;
+use a3_core::mood::LAST_REAL_ID;
 
 /// The bar runs along the bottom of the screen; its symbols are as wide as
 /// it is high.
@@ -61,10 +62,27 @@ const NO_TRAINING: u16 = 3238;
 const CAPTION_ID: u16 = 9920;
 /// The menu of a player: "Spielerinfo", "Einzelgespräch", a blank line,
 /// "Prämie", "Geldstrafe" (the commands 0, 2, 9, 3, 4 of the table at
-/// 0x884a38, their texts at 0x8a4508).
+/// 0x884a38, their texts at 0x8a4508). The talk is not offered on a week's
+/// last day.
 const MENU_ID: u16 = 9950;
-const MENU_ENTRIES: [u16; 5] = [4036, 4045, 4046, 4066, 4067];
-const INFO_ENTRY: usize = 0;
+const MENU: [(Command, u16); 5] = [
+    (Command::Info, 4036),
+    (Command::Talk, 4045),
+    (Command::Blank, 4046),
+    (Command::Bonus, 4066),
+    (Command::Fine, 4067),
+];
+const WEEK: usize = 7;
+
+/// What an entry of a player's menu does.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Command {
+    Info,
+    Talk,
+    Blank,
+    Bonus,
+    Fine,
+}
 const BAR_ID: u16 = 9930;
 /// What the bar takes the place of: the OK button and, on the line-up, the
 /// second row of column titles, which the game moves away and hides.
@@ -229,8 +247,9 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
 pub struct MenuBar {
     /// The popup the line-up opened, whose answer it waits for.
     popup: Option<u16>,
-    /// The player whose menu is open.
+    /// The player whose menu is open, and its entries.
     menu_player: Option<usize>,
+    menu: Vec<Command>,
 }
 
 impl Screen for MenuBar {
@@ -298,21 +317,55 @@ impl Screen for MenuBar {
             if let Target::Option { control: c, item } = target
                 && Some(c) == menu
             {
-                if item == INFO_ENTRY {
-                    self.popup = Some(playerinfo::CURRENT);
-                    return Outcome::Popup(Request::with(
-                        playerinfo::CURRENT,
-                        Args::Player(player),
-                    ));
+                match self.menu.get(item) {
+                    Some(Command::Info) => {
+                        self.popup = Some(playerinfo::CURRENT);
+                        return Outcome::Popup(Request::with(
+                            playerinfo::CURRENT,
+                            Args::Player(player),
+                        ));
+                    }
+                    Some(Command::Bonus) => {
+                        self.popup = Some(discipline::BONUS);
+                        return Outcome::Popup(Request::with(
+                            discipline::BONUS,
+                            Args::Player(player),
+                        ));
+                    }
+                    // A talk is booked in the planner; not with a manager
+                    // who plays.
+                    Some(Command::Talk) => {
+                        let id = club_state(cx).and_then(|c| c.status.get(player)).map(|s| s.id);
+                        if let Some(id) = id.filter(|&id| id != 0 && id <= LAST_REAL_ID) {
+                            self.popup = Some(planner::PLANNER);
+                            return Outcome::Popup(Request::with(
+                                planner::PLANNER,
+                                Args::Record(id),
+                            ));
+                        }
+                    }
+                    Some(Command::Fine) => {
+                        self.popup = Some(discipline::FINE);
+                        return Outcome::Popup(Request::with(
+                            discipline::FINE,
+                            Args::Player(player),
+                        ));
+                    }
+                    Some(command) => info!("{command:?} ({player}): not built yet"),
+                    None => {}
                 }
-                let entry = MENU_ENTRIES.get(item).map_or("", |&t| cx.game.text(t));
-                info!("{entry} ({player}): not built yet");
             }
             return Outcome::Stay;
         }
         if let Target::Menu(grip) = target {
             if view.id == LINEUP {
-                self.menu_player = open_menu(cx, view, grip);
+                let day = cx.state.season.as_ref().map_or(0, |s| s.day);
+                self.menu = MENU
+                    .iter()
+                    .map(|&(command, _)| command)
+                    .filter(|&c| c != Command::Talk || day % WEEK != WEEK - 1)
+                    .collect();
+                self.menu_player = open_menu(cx, view, grip, &self.menu);
             }
             return Outcome::Stay;
         }
@@ -389,6 +442,11 @@ impl Screen for MenuBar {
                 self.popup = Some(next);
                 Outcome::Popup(Request::new(next))
             }
+            // A bonus or a fine may have changed the players' morale.
+            (Some(discipline::BONUS | discipline::FINE), _) => {
+                change_lineup(cx, view, |_, _, _| {});
+                Outcome::Stay
+            }
             (None, Reply::Ok) => Outcome::Close(Reply::Ok),
             _ => Outcome::Stay,
         }
@@ -439,7 +497,7 @@ fn stand_in(cx: &mut Cx, view: &mut View, formation: usize) {
 }
 
 /// Opens the menu of the player a right click fell on, there; the player.
-fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip) -> Option<usize> {
+fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip, commands: &[Command]) -> Option<usize> {
     let club = club_state(cx)?;
     let player = match place_of(cx.dialog, view, club, grip)? {
         Place::Field(i) => club.lineup.field[i]?,
@@ -453,7 +511,8 @@ fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip) -> Option<usize> {
     let (_, rect) = crate::pointer::targets(cx.dialog, view, &crate::pointer::Pixels)
         .into_iter()
         .find(|(t, _)| *t == target)?;
-    let entries = MENU_ENTRIES.iter().map(|&t| cx.game.text(t).to_owned()).collect();
+    let text = |c: &Command| MENU.iter().find(|(m, _)| m == c).map_or(0, |&(_, t)| t);
+    let entries = commands.iter().map(|c| cx.game.text(text(c)).to_owned()).collect();
     let menu = control(cx.dialog, MENU_ID)?;
     if let ControlState::Menu(m) = &mut view.controls[menu].state {
         m.at = Some(rect.center());

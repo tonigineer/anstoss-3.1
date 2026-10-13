@@ -8,6 +8,7 @@ use crate::controls::anim::AnimState;
 use crate::controls::bar::BarState;
 use crate::controls::bitmap::Picture;
 use crate::controls::check::CheckState;
+use crate::controls::combo::ComboState;
 use crate::controls::header::HeaderState;
 use crate::controls::list::{ListState, WHEEL_ROWS, visible_rows};
 use crate::controls::options::OptionsState;
@@ -60,6 +61,7 @@ impl View {
         value, value_mut, as_value, as_value_mut, Value;
         check, check_mut, as_check, as_check_mut, CheckState;
         paint, paint_mut, as_paint, as_paint_mut, PaintState;
+        combo, combo_mut, as_combo, as_combo_mut, ComboState;
     }
 
     /// What a static, field or header says; nothing for other controls.
@@ -129,6 +131,25 @@ impl View {
     /// it: not for a disabled button, an option that is off, a row with
     /// nothing in it, a scrollbar or a slider's track.
     pub fn press(&mut self, dialog: &Dialog, target: Target) -> bool {
+        // A dropped list takes the click: a row chooses, an arrow scrolls,
+        // anything else puts it up.
+        if let Some(open) =
+            self.controls.iter().position(|c| c.state.as_combo().is_some_and(|c| c.open))
+        {
+            let control = &dialog.controls[open];
+            let combo = self.combo_mut(open).expect("a combo box");
+            return match target {
+                Target::Row { control: c, row } if c == open => combo.press(row),
+                Target::Scroll { control: c, up } if c == open => {
+                    combo.scroll_by(if up { -1 } else { 1 }, control);
+                    false
+                }
+                _ => {
+                    combo.open = false;
+                    false
+                }
+            };
+        }
         match target {
             Target::Button(button) => !self.disabled(button),
             Target::Option { control, item } => match self.controls.get_mut(control) {
@@ -137,7 +158,20 @@ impl View {
                 Some(ControlView { state: ControlState::Menu(m), .. }) => m.at.is_some(),
                 _ => false,
             },
-            Target::Row { control, row } => self.list_mut(control).is_some_and(|l| l.press(row)),
+            Target::Row { control, row } => match self.combo_mut(control) {
+                // A script chooses a combo box's row without dropping it.
+                Some(combo) => {
+                    let row = row.saturating_sub(combo.scroll);
+                    combo.press(row)
+                }
+                None => self.list_mut(control).is_some_and(|l| l.press(row)),
+            },
+            Target::Combo(control) => {
+                if let Some(combo) = self.combo_mut(control) {
+                    combo.toggle(&dialog.controls[control]);
+                }
+                false
+            }
             Target::Edit(control) => {
                 self.focus = Some(control);
                 true

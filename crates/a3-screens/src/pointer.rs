@@ -56,6 +56,9 @@ pub enum Target {
     Control(usize),
     /// A check box, ticked or not by a click.
     Check(usize),
+    /// A combo box's field, which drops its list down; while it is down,
+    /// everywhere but the list, which puts it up again.
+    Combo(usize),
     /// An arrow at the end of a slider.
     SliderStep {
         control: usize,
@@ -130,6 +133,12 @@ pub fn targets(dialog: &Dialog, view: &View, geometry: &dyn Geometry) -> Vec<(Ta
     for (index, (control, shown)) in dialog.controls.iter().zip(&view.controls).enumerate() {
         if !shown.hidden {
             shown.state.targets(index, control, geometry, &mut targets);
+        }
+    }
+    // A dropped list lies over everything.
+    for (index, (control, shown)) in dialog.controls.iter().zip(&view.controls).enumerate() {
+        if let (false, Some(combo)) = (shown.hidden, shown.state.as_combo()) {
+            combo.list_targets(index, control, geometry, &mut targets);
         }
     }
     targets

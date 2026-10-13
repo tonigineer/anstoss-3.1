@@ -283,6 +283,9 @@ record! {
     /// Why he is away from the club, in the low four bits; bit 4 marks him
     /// on the line-up list (its status icon 6).
     0x26b => away_kind, set_away_kind: u8;
+    /// A doping ban: its kind in the low two bits, how far it has got in
+    /// bits 2 and 3.
+    0x26d => doping, set_doping: u8;
     /// Bit 7: the long absence's length is not known yet.
     0x26e => long_unknown, set_long_unknown: u8;
     /// His partner: her kind in the low two bits (0 none, girlfriend,
@@ -327,11 +330,18 @@ record! {
     0x271 => picks, set_picks: u8;
     /// 100 is neither happy nor unhappy.
     0x296 => morale, set_morale: u8;
+    /// What he did wrong: bit 3 + k an offence of level k (1 to 4) this
+    /// week, the low four bits last week's; and how often of each level, two
+    /// bits each from the lowest.
+    0x297 => offences, set_offences: u8;
+    0x298 => offence_counts, set_offence_counts: u8;
     /// 1: the line-up list marks him with the dumbbell (what for is not
     /// traced yet).
     0x34c => dumbbell, set_dumbbell: u8;
     /// The form the line-up showed last, for its trend.
     0x34d => last_form, set_last_form: u8;
+    /// Bit k: he was punished for an offence of level k this week.
+    0x34f => fined, set_fined: u8;
     0x353 => mood, set_mood: i8;
 }
 
@@ -380,6 +390,14 @@ record! {
     0x12d => country, set_country: u8;
     /// Its league's level, 0 the first.
     0x12e => level, set_level: u8;
+    /// This season: bonuses paid the first team, fines taken from players.
+    0x500 => bonuses_paid, set_bonuses_paid: i32;
+    0x504 => fines, set_fines: i32;
+    /// The team's bonuses: 0 full, 1 half, 2 none.
+    0x830 => bonus_cut, set_bonus_cut: i16;
+    /// What the manager has done to the team's will to win, -200 to 200
+    /// (`FUN_0069efe8`).
+    0x95a => will_to_win, set_will_to_win: i16;
     /// The club it is one with, by number (or, if the first is below 0,
     /// the second): a club and its amateurs.
     0x872 => linked, set_linked: [i8; 2];
@@ -519,6 +537,49 @@ impl Manager {
     }
 }
 
+/// The human managers' week planners (`CDatenTerminplaner`), by slot.
+const PLANNER_AT: u32 = 0x1c39620;
+/// A day of a planner: its kind, a flag, and what it is about.
+const PLANNER_DAYS: usize = 378;
+const PLANNER_ENTRY: usize = 0x1c;
+const PLANNER_ENTRIES_AT: usize = 0x24;
+
+record! {
+    /// A manager's week planner: an appointment for every day of the season
+    /// (`0x1c39620` + slot × 0x297c).
+    Planner, 10588, base HEADER;
+}
+
+/// An appointment of a planner: what kind of appointment (0 none), and the
+/// player it is about, for the kinds about a player.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Appointment {
+    pub kind: u8,
+    pub flag: u8,
+    pub player: u16,
+}
+
+impl Planner {
+    pub fn day(&self, day: usize) -> Appointment {
+        if day >= PLANNER_DAYS {
+            return Appointment::default();
+        }
+        let at = PLANNER_ENTRIES_AT + day * PLANNER_ENTRY;
+        Appointment { kind: self.get(at), flag: self.get(at + 1), player: self.get(at + 4) }
+    }
+
+    /// Books an appointment for a day; what else the day's entry held stays
+    /// (`FUN_0072e973`).
+    pub fn book(&mut self, day: usize, appointment: Appointment) {
+        if day < PLANNER_DAYS {
+            let at = PLANNER_ENTRIES_AT + day * PLANNER_ENTRY;
+            self.put(at, appointment.kind);
+            self.put(at + 1, appointment.flag);
+            self.put(at + 4, appointment.player);
+        }
+    }
+}
+
 /// The block of globals around the date (`0xb5cb68`, its data from
 /// `0xb5cb88`).
 const GLOBALS_AT: u32 = 0xb5cb68;
@@ -541,6 +602,8 @@ record! {
     0xb5cbd2 => half_weeks, set_half_weeks: u16;
     /// Days since the start of the first season.
     0xb5cbd4 => day, set_day: u16;
+    /// The day the week began with.
+    0xb5cbd6 => week_start, set_week_start: i16;
     /// The game's day 0 is this many days after the first of July of the
     /// start year (`FUN_0067677e`).
     0xb5cbd8 => first_day, set_first_day: i16;
@@ -619,6 +682,8 @@ pub struct Records {
     pub countries: Countries,
     /// The human clubs' extra data, by slot.
     pub extras: Vec<Extra>,
+    /// The human managers' week planners, by slot.
+    pub planners: Vec<Planner>,
     /// The pool of names the players' names point into.
     pub names: Vec<String>,
     save: Save,
@@ -647,10 +712,13 @@ impl Records {
         let extras = (0..MANAGERS)
             .map(|n| Extra::new(block(format!("{EXTRA_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
+        let planners = (0..MANAGERS)
+            .map(|n| Planner::new(block(format!("{PLANNER_AT:#x}[{n}]"))?))
+            .collect::<io::Result<_>>()?;
         let globals = Globals::new(block(format!("{GLOBALS_AT:#x}"))?)?;
         let countries = Countries::new(block(format!("{COUNTRIES_AT:#x}"))?)?;
         let names = block("names".to_owned())?.split(|&b| b == 0).map(cp1252).collect();
-        Ok(Self { players, teams, managers, globals, countries, extras, names, save })
+        Ok(Self { players, teams, managers, globals, countries, extras, planners, names, save })
     }
 
     /// The save with the records written back into their blocks.
@@ -671,6 +739,9 @@ impl Records {
         }
         for (n, extra) in self.extras.iter().enumerate() {
             put(format!("{EXTRA_AT:#x}[{n}]"), 0, extra.bytes());
+        }
+        for (n, planner) in self.planners.iter().enumerate() {
+            put(format!("{PLANNER_AT:#x}[{n}]"), 0, planner.bytes());
         }
         put(format!("{GLOBALS_AT:#x}"), 0, self.globals.bytes());
         put(format!("{COUNTRIES_AT:#x}"), 0, self.countries.bytes());
@@ -695,6 +766,22 @@ impl Records {
 
     pub fn player(&self, id: u16) -> Option<&Player> {
         (id != 0).then(|| self.players.get(usize::from(id))).flatten()
+    }
+
+    /// The slot of the `n`th manager in play.
+    pub fn human_slot(&self, n: usize) -> Option<usize> {
+        self.globals.slots().iter().enumerate().filter(|(_, s)| **s > 0).nth(n).map(|(i, _)| i)
+    }
+
+    /// The name a player goes by: his nickname if he has one shown, else
+    /// his first and last name (`FUN_006feb4d`).
+    pub fn known_as(&self, id: u16) -> Option<String> {
+        let r = self.player(id)?;
+        Some(if r.shown() & 0x8000_0000 != 0 {
+            self.name(r.nickname()).to_owned()
+        } else {
+            format!("{} {}", self.name(r.first_name()), self.name(r.last_name()))
+        })
     }
 
     /// The managers in play, in their slots.

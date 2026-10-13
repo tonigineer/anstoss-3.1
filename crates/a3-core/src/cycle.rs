@@ -99,6 +99,18 @@ pub enum Args {
     Offer(usize),
     /// A player of the current club, by his place in its squad.
     Player(usize),
+    /// A player of the game, by his record's id.
+    Record(u16),
+    /// A text by its id, with a player's name for its `%s`.
+    TextFor(u16, u16),
+    /// What changed of a player's contentment with the trainer, told with a
+    /// text with his name.
+    Change {
+        text: u16,
+        player: u16,
+        before: i16,
+        after: i16,
+    },
 }
 
 /// How a screen was left.

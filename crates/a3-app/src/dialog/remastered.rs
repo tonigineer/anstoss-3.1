@@ -390,7 +390,7 @@ pub(super) fn spawn(
                     ))
                     .add_child(next);
             }
-            Kind::Slider => {
+            Kind::Slider { .. } => {
                 let value = state.as_value().copied().unwrap_or_default();
                 spawn_slider(commands, images, root, &layout, index, control, &value)
             }
