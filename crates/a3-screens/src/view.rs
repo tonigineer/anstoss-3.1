@@ -75,7 +75,8 @@ impl View {
         }
         let size = dialog.controls.iter().position(|c| matches!(c.kind, Kind::Player))?;
         let half = dialog.controls[size].rect.size() / 2.0;
-        Some((size, PlayerBox { at: Some(dragging.at - half), ..shown }))
+        // A dragged box shows no duty (0x50d59b).
+        Some((size, PlayerBox { at: Some(dragging.at - half), duty: None, ..shown }))
     }
 
     pub fn new(id: u16, dialog: &Dialog) -> Self {
@@ -284,7 +285,7 @@ impl View {
             if let Some(state) = self.options_mut(options) {
                 state.step(step, items.len());
             }
-        } else if let Some(list) = first(|k| matches!(k, Kind::ListBox)) {
+        } else if let Some(list) = first(|k| matches!(k, Kind::ListBox { .. })) {
             let visible = visible_rows(&dialog.controls[list]);
             if let Some(state) = self.list_mut(list) {
                 state.step(step, visible);

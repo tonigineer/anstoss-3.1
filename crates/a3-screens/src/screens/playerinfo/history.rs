@@ -168,7 +168,7 @@ pub(super) fn show(s: &Shown, view: &mut View) {
 
 /// The career list's column titles, lined up with its columns.
 fn titles(s: &Shown, view: &mut View) {
-    let headers = super::super::indices(s.dialog, |k| matches!(k, Kind::Header));
+    let headers = super::super::indices(s.dialog, |k| matches!(k, Kind::Header { .. }));
     for c in headers {
         if let Some(header) = view.header_mut(c) {
             header.tabs = TITLE_TABS.to_vec();

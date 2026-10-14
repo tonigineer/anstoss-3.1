@@ -24,7 +24,8 @@ const INK: Rgba<u8> = Rgba([255, 255, 255, 255]);
 
 /// What a box shows: the player's name — or, on an empty spot, the
 /// position's — the position he plays and his strength there, up to three
-/// abilities, and how well he fits the spot, in tenths.
+/// abilities and the duty he has on the pitch, beside them, and how well he
+/// fits the spot, in tenths.
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct PlayerBox {
     pub name: String,
@@ -32,6 +33,7 @@ pub struct PlayerBox {
     pub strength: String,
     pub fit: i32,
     pub icons: Vec<u16>,
+    pub duty: Option<u16>,
     pub filled: bool,
     /// Where the box stands, its top left, when the formation puts it
     /// elsewhere than the dialog does.
@@ -77,7 +79,7 @@ impl PlayerBox {
         font.draw(frame, x + POSITION, y + DETAIL_TOP, &self.position, INK, false);
         let at = x + STRENGTH_RIGHT - font.width(&self.strength, false) as i32;
         font.draw(frame, at, y + DETAIL_TOP, &self.strength, INK, false);
-        for (i, &id) in self.icons.iter().enumerate() {
+        for (i, &id) in self.icons.iter().chain(&self.duty).enumerate() {
             if let Some(icon) = paint.image(id) {
                 let left = x + ICON_LEFT + ICON_STEP * i as i32;
                 imageops::overlay(frame, icon, left.into(), (y + ICON_TOP).into());
@@ -87,7 +89,7 @@ impl PlayerBox {
 }
 
 pub(crate) fn graphics(player: Option<&PlayerBox>) -> (Vec<u16>, bool) {
-    let icons = player.iter().flat_map(|p| p.icons.iter().copied());
+    let icons = player.iter().flat_map(|p| p.icons.iter().chain(&p.duty).copied());
     ([FILLED, EMPTY].into_iter().chain(icons).collect(), false)
 }
 

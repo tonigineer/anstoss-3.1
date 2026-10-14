@@ -6,6 +6,7 @@
 
 pub mod calendar;
 pub mod discipline;
+pub mod duties;
 pub mod formations;
 pub mod hub;
 pub mod jobs;
@@ -26,7 +27,7 @@ use a3_files::rch::{
 };
 use bevy_math::{Rect, Vec2};
 
-use crate::controls::button::{CANCEL_IMAGE, OK_IMAGE};
+use crate::controls::button::{is_cancel, is_ok};
 use crate::game::Game;
 use crate::pointer::Target;
 use crate::view::View;
@@ -109,6 +110,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(hub::MenuBar::default()),
         Box::new(formations::Formations::default()),
         Box::new(special::Special),
+        Box::new(duties::Takers::default()),
         Box::new(playerinfo::PlayerInfo::default()),
         Box::new(office::Office),
         Box::new(discipline::Bonus::default()),
@@ -130,6 +132,7 @@ pub fn compose(game: &mut Game) {
     hub::compose(&mut game.dialogs, &game.data.rules);
     formations::compose(&mut game.dialogs, &game.data.rules);
     special::compose(&mut game.dialogs);
+    duties::compose(&mut game.dialogs);
     playerinfo::compose(&mut game.dialogs);
     discipline::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
@@ -242,12 +245,8 @@ pub(crate) fn set(view: &mut View, dialog: &Dialog, id: u16, text: String) {
 
 /// Whether `target` is the OK or the cancel button of the dialog.
 pub(crate) fn ok_or_cancel(dialog: &Dialog, target: Target) -> (bool, bool) {
-    let image = match target {
-        Target::Button(i) => match dialog.controls[i].kind {
-            Kind::Button { normal, .. } => normal,
-            _ => 0,
-        },
-        _ => 0,
-    };
-    (image == OK_IMAGE, image == CANCEL_IMAGE)
+    match target {
+        Target::Button(i) => (is_ok(&dialog.controls[i]), is_cancel(&dialog.controls[i])),
+        _ => (false, false),
+    }
 }

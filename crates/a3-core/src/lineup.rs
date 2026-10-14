@@ -44,9 +44,11 @@ const POSITIONS: usize = 21;
 const POSITION_NAMES_AT: u32 = 0x8a84e4;
 const ABBREVIATIONS_AT: u32 = 0x8a8490;
 /// The graphics of the abilities a list shows: sixteen a field player can be
-/// good at, then bad at, nine a goalkeeper can be good at, then bad at.
+/// good at, then bad at, nine a goalkeeper can be good at, then bad at; and
+/// the six duties' ([`crate::duties::Duty::ON_PITCH`]).
 const ABILITY_ICONS_AT: u32 = 0x89f918;
 const ABILITY_ICONS: usize = 50;
+const DUTY_ICONS: usize = 6;
 const FIELD_ABILITIES: usize = 16;
 const KEEPER_ABILITIES: usize = 9;
 /// What abilities and character add when the game ranks a player for its
@@ -142,7 +144,7 @@ impl Tables {
             fit: exe.u16s(FIT_AT, KINDS * KINDS)?.into_iter().map(|v| v as i16).collect(),
             parts: parts.chunks(PART_ROW).map(|r| [r[0], r[1], r[2], r[3]]).collect(),
             ability_icons: exe
-                .u32s(ABILITY_ICONS_AT, ABILITY_ICONS)?
+                .u32s(ABILITY_ICONS_AT, ABILITY_ICONS + DUTY_ICONS)?
                 .into_iter()
                 .map(|id| id as u16)
                 .collect(),
@@ -167,6 +169,11 @@ impl Tables {
             }
         }
         icons
+    }
+
+    /// The graphic of a duty, as a player's box and dialog 418 show it.
+    pub fn duty_icon(&self, duty: crate::duties::Duty) -> Option<u16> {
+        self.ability_icons.get(ABILITY_ICONS + duty.on_pitch()).copied()
     }
 
     /// The area of the pitch a spot lies in; the goal's when none.
@@ -221,6 +228,24 @@ impl Tables {
             value = value * 9 / 10;
         }
         value.max(0)
+    }
+
+    /// What a player counts for wherever he plays, in tenths of strength
+    /// (`FUN_006a115b`): his strength and form as far as his morale lets
+    /// him, a doping's lift, no knock and no position.
+    pub fn strength(&self, player: &Player, fitness: Fitness, doping: u8) -> i32 {
+        let base = (i32::from(player.strength) - 1) * 10 + form(fitness);
+        let morale = fitness.morale;
+        let mut value = if morale <= MORALE_TOP {
+            base * morale / 100
+        } else {
+            base * (2 * MORALE_TOP - morale) / 100
+        };
+        // A doping of the third stage.
+        if doping & 3 != 0 && (doping >> 2) & 3 == 3 {
+            value += if doping & 2 != 0 { 4 } else { 2 };
+        }
+        value.clamp(0, MOST_STRENGTH)
     }
 
     /// The strongest eleven of a squad on the spots of a formation, the

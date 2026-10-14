@@ -195,7 +195,7 @@ fn own_mask(dialog: &Dialog, art: &RgbaImage, photo: bool) -> GrayImage {
         let r = control.rect;
         match &control.kind {
             // Lists keep the picture inside their frame.
-            Kind::ListBox => paint(r, LIST_FRAME, Some(LIST_INSIDE)),
+            Kind::ListBox { .. } => paint(r, LIST_FRAME, Some(LIST_INSIDE)),
             // Buttons of a strip, with whatever the picture has around them.
             Kind::Options { image, .. } if *image != 0 => paint(r, BOX_MARGIN, None),
             Kind::Edit { .. } | Kind::Spin | Kind::Bitmap | Kind::Player | Kind::Bar { .. } => {

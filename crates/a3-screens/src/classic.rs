@@ -13,7 +13,7 @@ use a3_files::bitmap_font::BitmapFont;
 use a3_files::rch::{Align, Control, Dialog, PLAIN_FONT};
 
 use crate::controls::bitmap::Picture;
-use crate::controls::{bar, combo, slider};
+use crate::controls::{bar, combo, list, slider};
 use crate::fonts::Fonts;
 use crate::game::{Game, transparent_black};
 use crate::pointer::Target;
@@ -27,7 +27,6 @@ pub(crate) const TEXT_HOVER: Rgba<u8> = Rgba([176, 48, 0, 255]);
 const POPUP_EDGE: i32 = 2;
 /// The handle of sliders and scrollbars, and the arrows of list scrollbars,
 /// which the game loads by name.
-pub(crate) const HANDLE: &str = "ScrollerBlau.bmp";
 pub(crate) const SCROLL_UP: &str = "Pfeile/PfeilO1.bmp";
 pub(crate) const SCROLL_DOWN: &str = "Pfeile/PfeilU1.bmp";
 /// Screens that are a picture to act in rather than a form: the wait screen
@@ -49,11 +48,16 @@ pub fn art(game: &Game, dialog: &Dialog) -> RgbaImage {
     })
 }
 
-/// A dialog's picture as the classic look shows it: a popup's with a black
-/// edge over its rim.
+/// A dialog's picture as the classic look shows it: a popup's cut to its
+/// window, which may be smaller, with a black edge over its rim.
 pub fn picture(game: &Game, dialog: &Dialog) -> RgbaImage {
     let mut picture = art(game, dialog);
-    if dialog.frame.is_some() {
+    if let Some(frame) = dialog.frame {
+        let (w, h) = (frame.width() as u32, frame.height() as u32);
+        if picture.width() > w || picture.height() > h {
+            let (w, h) = (w.min(picture.width()), h.min(picture.height()));
+            picture = imageops::crop_imm(&picture, 0, 0, w, h).to_image();
+        }
         let (w, h) = (picture.width() as i32, picture.height() as i32);
         fill(&mut picture, 0, 0, w, POPUP_EDGE, TEXT);
         fill(&mut picture, 0, h - POPUP_EDGE, w, POPUP_EDGE, TEXT);
@@ -96,8 +100,12 @@ impl Classic {
         let mut widgets = HashMap::new();
         let combo = [combo::LIST_HANDLE];
         let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS);
-        for name in [HANDLE, SCROLL_UP, SCROLL_DOWN].into_iter().chain(combo).chain(sliders) {
+        let lists = list::HANDLES.into_iter().chain(list::TRACKS);
+        let named = [SCROLL_UP, SCROLL_DOWN].into_iter().chain(lists).chain(combo).chain(sliders);
+        for name in named {
             match game.picture(name) {
+                // A TGA brings its own alpha, shadows in black.
+                Ok(picture) if name.ends_with(".tga") => _ = widgets.insert(name, picture),
                 Ok(picture) => _ = widgets.insert(name, transparent_black(picture)),
                 Err(err) => warn!("{name}: {err}"),
             }

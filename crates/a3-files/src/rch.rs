@@ -64,7 +64,13 @@ pub enum Kind {
         normal: u16,
         hover: u16,
     },
-    ListBox,
+    /// A list of rows (`CMyListBox`): how high a row is, and its style —
+    /// bits 2 and 3 and 7 for its scrollbar, bits 4 to 6 its colours.
+    ListBox {
+        row_height: u8,
+        style: u8,
+        columns: Vec<Column>,
+    },
     Bitmap,
     /// The game's `AniStatic`: a picture that can play a series of frames.
     Anim,
@@ -75,8 +81,11 @@ pub enum Kind {
     Slider {
         style: u16,
     },
-    /// Column titles of a list, separated by tabs.
-    Header,
+    /// Column titles of a list, separated by tabs, at their columns (the
+    /// game's `CMyTabStatic`).
+    Header {
+        columns: Vec<Column>,
+    },
     Edit {
         max_len: usize,
     },
@@ -253,12 +262,23 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
             Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? }
         }
         2 => Kind::Button { normal: u16s(5)?, hover: u16s(6)? },
-        4 => Kind::ListBox,
+        // The list's font, row height and style (`FUN_007aa393`: the
+        // control's +0x1e8, +0x1ea and +0x1eb).
+        // A few lists hold the file's padding there (0xcdcd): nothing set.
+        4 => {
+            let columns = columns(extra, LIST_COLUMNS);
+            match u16s(14).unwrap_or(0).to_le_bytes() {
+                [row_height, style] if row_height < 0x40 => {
+                    Kind::ListBox { row_height, style, columns }
+                }
+                _ => Kind::ListBox { row_height: 0, style: 0, columns },
+            }
+        }
         6 => Kind::Anim,
         7 => Kind::Bitmap,
         8 if w > h => Kind::Slider { style: u16s(0)? },
         8 => Kind::Spin,
-        9 => Kind::Header,
+        9 => Kind::Header { columns: columns(extra, HEADER_COLUMNS) },
         10 => Kind::Edit { max_len: usize::from(u16s(4)?).clamp(1, 64) },
         11 => Kind::Options { image: u16s(1)?, items: parse_items(extra, usize::from(u16s(0)?)) },
         5 => Kind::Combo,
@@ -292,6 +312,40 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         font,
         ink,
     })
+}
+
+/// Where a column of a list or of its titles starts, relative to the
+/// control, and how its text sits: from there, or centred or to the right
+/// in the width given.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Column {
+    pub at: f32,
+    pub align: Option<(Align, f32)>,
+}
+
+/// Where a list's and a header's columns are in their data: the word with
+/// their count, the first's; each takes four words, its place — 0x4000
+/// centred, 0x8000 right-aligned — and its width first.
+const LIST_COLUMNS: (usize, usize) = (12, 15);
+const HEADER_COLUMNS: (usize, usize) = (3, 4);
+const MOST_COLUMNS: u16 = 50;
+
+fn columns(extra: &[u8], (count, first): (usize, usize)) -> Vec<Column> {
+    let word = |i: usize| u16_at(extra, 2 * i);
+    let count = word(count).unwrap_or(0).min(MOST_COLUMNS);
+    (0..usize::from(count))
+        .map_while(|i| {
+            let (place, width) = (word(first + 4 * i)?, f32::from(word(first + 4 * i + 1)?));
+            let align = if place & 0x8000 != 0 {
+                Some((Align::Right, width))
+            } else if place & 0x4000 != 0 {
+                Some((Align::Centre, width))
+            } else {
+                None
+            };
+            Some(Column { at: f32::from(place & 0x3fff), align })
+        })
+        .collect()
 }
 
 /// The options of a `HighButton`. Each is a rectangle (four `u16`), eight

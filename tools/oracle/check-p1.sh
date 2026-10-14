@@ -80,8 +80,7 @@ else
 fi
 
 # 4. The line-up of the save as the original shows it, and as the replica
-#    does; they differ where the replica crosses out what does nothing yet,
-#    and in what it does not show yet (the set-piece takers' icons).
+#    does; they differ where the replica crosses out what does nothing yet.
 only "$out/Probe1.an3"
 A3PROBE_SRAND=1 "$here/tools/oracle/run.sh" bash -c "'$here/target/debug/anstoss3-menu' --original '$here/tools/oracle/scripts/lineup.txt' && python3 '$here/tools/probe/client.py' 'shot $out/lineup-original.png'" > "$out/lineup-original.log" 2>&1
 ANSTOSS3_DIR="$oracle/game" "$here/target/debug/anstoss3-menu" --script "$here/crates/a3-screens/scripts/load.txt" --shot "$out/lineup-replica.png" > "$out/lineup-replica.log" 2>&1

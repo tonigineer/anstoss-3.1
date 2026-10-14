@@ -28,7 +28,7 @@ use image::{Rgba, RgbaImage};
 
 use a3_files::rch::{Dialog, Kind};
 use a3_screens::classic::PLAIN;
-use a3_screens::controls::button::{CANCEL_IMAGE, OK_IMAGE, with_image};
+use a3_screens::controls::button::{cancel_button, ok_button};
 use a3_screens::controls::slider;
 use a3_screens::host::{Change, Host};
 use a3_screens::pointer::{Grip, Target, targets};
@@ -717,12 +717,12 @@ fn keyboard(
         view.step(dialog, step);
     }
     if keys.just_pressed(KeyCode::Enter)
-        && let Some(ok) = with_image(dialog, OK_IMAGE)
+        && let Some(ok) = ok_button(dialog)
     {
         pending.0.push((Target::Button(ok), 1));
     }
     if keys.just_pressed(KeyCode::Escape)
-        && let Some(cancel) = with_image(dialog, CANCEL_IMAGE)
+        && let Some(cancel) = cancel_button(dialog)
     {
         pending.0.push((Target::Button(cancel), 1));
     }

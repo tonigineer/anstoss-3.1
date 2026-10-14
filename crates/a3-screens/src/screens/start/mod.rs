@@ -179,9 +179,9 @@ fn fill_in(view: &mut View, dialog: &Dialog, number: usize, name: &str) {
 
 /// Column titles line up with the list below them.
 fn line_up_headers(view: &mut View, dialog: &Dialog) {
-    for header in indices(dialog, |k| matches!(k, Kind::Header)) {
+    for header in indices(dialog, |k| matches!(k, Kind::Header { .. })) {
         let below = dialog.controls[header].rect.max.y;
-        let list = indices(dialog, |k| matches!(k, Kind::ListBox))
+        let list = indices(dialog, |k| matches!(k, Kind::ListBox { .. }))
             .into_iter()
             .filter(|&l| dialog.controls[l].rect.min.y >= below - 1.0)
             .min_by(|&a, &b| {

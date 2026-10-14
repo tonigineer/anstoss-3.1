@@ -84,16 +84,28 @@ impl ControlState {
     }
 }
 
+/// Where columns start; a list without any has one.
+fn tabs(columns: &[a3_files::rch::Column]) -> Vec<f32> {
+    if columns.is_empty() { vec![0.0] } else { columns.iter().map(|c| c.at).collect() }
+}
+
 impl ControlView {
     pub fn new(control: &Control) -> Self {
         let text = || control.text.clone();
         let state = match &control.kind {
             Kind::Static => ControlState::Static(StaticState { text: text(), clickable: false }),
             Kind::Button { .. } => ControlState::Button(ButtonState::default()),
-            Kind::ListBox => ControlState::List(ListState::default()),
-            Kind::Header => {
-                ControlState::Header(HeaderState { text: text(), ..Default::default() })
-            }
+            // Columns as the dialog file sets them, until the screen sets its own.
+            Kind::ListBox { columns, .. } => ControlState::List(ListState {
+                tabs: tabs(columns),
+                aligns: columns.iter().map(|c| c.align).collect(),
+                ..ListState::default()
+            }),
+            Kind::Header { columns } => ControlState::Header(HeaderState {
+                text: text(),
+                tabs: tabs(columns),
+                aligns: columns.iter().map(|c| c.align).collect(),
+            }),
             Kind::Bitmap => ControlState::Bitmap(BitmapState::default()),
             Kind::Anim => ControlState::Anim(AnimState::default()),
             Kind::Spin => ControlState::Spin(Value::default()),

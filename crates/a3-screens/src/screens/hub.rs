@@ -26,7 +26,7 @@ use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, set};
-use super::{discipline, mark_inert, planner, playerinfo, special};
+use super::{discipline, duties, mark_inert, planner, playerinfo, special};
 use crate::controls::ControlState;
 use crate::controls::player_box::PlayerBox;
 use crate::game::Game;
@@ -107,8 +107,10 @@ const DUTIES: u16 = 5266;
 const SPECIAL_ITEM: usize = 0;
 /// No co-trainer to line the team up: text 3131.
 const NO_CO_TRAINER: u16 = 3131;
-/// The segment of the duties that opens the formations.
+/// The segments of the duties that open the formations, and who takes the
+/// set pieces ("Aufgaben im Spiel").
 const FORMATION_ITEM: usize = 1;
+const TAKERS_ITEM: usize = 3;
 /// The squad list's columns as the game sets them: where each starts, and
 /// how the centred and right-aligned ones sit in their width.
 const COLUMNS: [(f32, Option<(Align, f32)>); 11] = [
@@ -297,7 +299,15 @@ impl Screen for MenuBar {
             && let Some(club) = manager.club
             && let Some(state) = season.clubs.get(&club)
         {
-            show_lineup(view, dialog, game, season, state, cx.state.records.as_ref());
+            show_lineup(
+                view,
+                dialog,
+                game,
+                season,
+                state,
+                cx.state.records.as_ref(),
+                Boxes::Refill,
+            );
         }
         // Crossed out: what does nothing yet.
         let works = |target: Target| {
@@ -305,7 +315,7 @@ impl Screen for MenuBar {
             match dialog.controls[c].id {
                 Some(BAR_ID) => matches!(item, LINEUP_SYMBOL | DRESSING_SYMBOL | WHISTLE),
                 Some(SPECIAL) => true,
-                Some(DUTIES) => item == FORMATION_ITEM,
+                Some(DUTIES) => matches!(item, FORMATION_ITEM | TAKERS_ITEM),
                 Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
                 _ => false,
             }
@@ -387,12 +397,18 @@ impl Screen for MenuBar {
             self.popup = Some(FORMATIONS);
             return Outcome::Popup(Request::new(FORMATIONS));
         }
+        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == TAKERS_ITEM {
+            self.popup = Some(duties::TAKERS);
+            return Outcome::Popup(Request::new(duties::TAKERS));
+        }
         if view.id == LINEUP && cx.dialog.controls[c].id == Some(SPECIAL) {
             if item == SPECIAL_ITEM {
                 self.popup = Some(special::SPECIAL);
                 return Outcome::Popup(Request::new(special::SPECIAL));
             }
-            change_lineup(cx, view, |tables, club, _| autolineup::bench(tables, club));
+            change_lineup(cx, view, Boxes::Refill, |tables, club, _| {
+                autolineup::bench(tables, club);
+            });
             return Outcome::Stay;
         }
         if view.id == DRESSING_ROOM
@@ -440,7 +456,7 @@ impl Screen for MenuBar {
                     return Outcome::Popup(Request::with(NOTICE, Args::Text(NO_CO_TRAINER)));
                 }
                 let mut put_up = true;
-                change_lineup(cx, view, |tables, club, today| {
+                change_lineup(cx, view, Boxes::Refill, |tables, club, today| {
                     put_up = autolineup::variant(tables, club, variant, today);
                 });
                 if !put_up {
@@ -456,9 +472,11 @@ impl Screen for MenuBar {
                 self.popup = Some(next);
                 Outcome::Popup(Request::new(next))
             }
-            // A bonus or a fine may have changed the players' morale.
-            (Some(discipline::BONUS | discipline::FINE), _) => {
-                change_lineup(cx, view, |_, _, _| {});
+            // A bonus or a fine may have changed the players' morale; the
+            // takers their duties, a deposed captain his morale. The boxes
+            // keep what they show but for the duties.
+            (Some(discipline::BONUS | discipline::FINE | duties::TAKERS), _) => {
+                change_lineup(cx, view, Boxes::Keep, |_, _, _| {});
                 Outcome::Stay
             }
             (Some(QUIT_QUESTION), Reply::Ok) => Outcome::Close(Reply::Quit),
@@ -478,6 +496,7 @@ fn club_state<'a>(cx: &'a Cx) -> Option<&'a ClubState> {
 fn change_lineup(
     cx: &mut Cx,
     view: &mut View,
+    boxes: Boxes,
     change: impl FnOnce(&lineup::Tables, &mut ClubState, chrono::NaiveDate),
 ) {
     let (game, dialog) = (cx.game, cx.dialog);
@@ -489,7 +508,7 @@ fn change_lineup(
     change(&game.rules.pitch, club_state, today);
     let (season, records) = (state.season.as_ref().expect("the season"), state.records.as_ref());
     if let Some(club_state) = season.clubs.get(&club) {
-        show_lineup(view, dialog, game, season, club_state, records);
+        show_lineup(view, dialog, game, season, club_state, records, boxes);
     }
 }
 
@@ -507,7 +526,7 @@ fn stand_in(cx: &mut Cx, view: &mut View, formation: usize) {
     club_state.lineup.spots = spots;
     let (season, records) = (state.season.as_ref().expect("the season"), state.records.as_ref());
     if let Some(club_state) = season.clubs.get(&club) {
-        show_lineup(view, dialog, game, season, club_state, records);
+        show_lineup(view, dialog, game, season, club_state, records, Boxes::Refill);
     }
 }
 
@@ -574,7 +593,7 @@ fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
         let (season, records) =
             (state.season.as_ref().expect("the season"), state.records.as_ref());
         if let Some(club_state) = season.clubs.get(&club) {
-            show_lineup(view, dialog, game, season, club_state, records);
+            show_lineup(view, dialog, game, season, club_state, records, Boxes::Refill);
         }
     }
 }
@@ -583,6 +602,16 @@ fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
 fn list_order(lineup: &Lineup, players: usize) -> Vec<usize> {
     let squad: Vec<usize> = lineup.squad().collect();
     squad.iter().copied().chain((0..players).filter(|p| !squad.contains(p))).collect()
+}
+
+/// Whether the boxes are filled anew, or keep what they show — but for the
+/// duties — as the original's do where nobody moved (it refills only the
+/// boxes it marked, `FUN_0050bbc8`: all as it opens and after "Spz.", the
+/// bench after "Auto.", those moved or of a new formation).
+#[derive(Clone, Copy, PartialEq)]
+enum Boxes {
+    Refill,
+    Keep,
 }
 
 /// The line-up: the boxes on the pitch and the bench, the squad below, the
@@ -594,6 +623,7 @@ fn show_lineup(
     season: &Season,
     state: &ClubState,
     records: Option<&Records>,
+    boxes: Boxes,
 ) {
     let pitch = &game.rules.pitch;
     let players = &state.players;
@@ -615,15 +645,20 @@ fn show_lineup(
             strength: tenths(pitch.strength_at(player, fitness(p), position)),
             fit: pitch.fit(player, position),
             icons: pitch.ability_icons(player),
+            duty: None,
             filled: true,
             at: None,
         }
     };
+    let duties = a3_core::duties::on_pitch(players, &state.duties, &lineup.field);
     for (i, (&spot, &player)) in lineup.spots.iter().zip(&lineup.field).enumerate() {
         let Some(c) = control(dialog, FIELD_BOXES + i as u16) else { continue };
         let position = pitch.position(spot);
         let shown = match player {
-            Some(p) => filled(p, position),
+            Some(p) => PlayerBox {
+                duty: duties[i].and_then(|d| pitch.duty_icon(d)),
+                ..filled(p, position)
+            },
             None => {
                 let id = pitch.position_names.get(usize::from(position)).copied().unwrap_or(0);
                 PlayerBox { name: game.text(id as u16).to_owned(), ..PlayerBox::default() }
@@ -631,9 +666,15 @@ fn show_lineup(
         };
         // On the spot of the club's formation.
         let at = PITCH_ORIGIN + Vec2::new(f32::from(spot.0), f32::from(spot.1));
-        view.set_player(c, PlayerBox { at: Some(at), ..shown });
+        let shown = match view.controls[c].state.as_player() {
+            Some(old) if boxes == Boxes::Keep => PlayerBox { duty: shown.duty, ..old.clone() },
+            _ => PlayerBox { at: Some(at), ..shown },
+        };
+        view.set_player(c, shown);
     }
-    for (i, &player) in lineup.bench.iter().enumerate() {
+    // The bench shows no duties.
+    let bench = if boxes == Boxes::Refill { &lineup.bench[..] } else { &[] };
+    for (i, &player) in bench.iter().enumerate() {
         let Some(c) = control(dialog, BENCH_BOXES + i as u16) else { continue };
         let shown = player.map_or_else(PlayerBox::default, |p| filled(p, players[p].positions[0]));
         view.set_player(c, shown);
@@ -926,8 +967,8 @@ mod tests {
 
         // A box for every spot of the formation and the bench: blue with a
         // player in it — between his abilities and his position it shows the
-        // box as it is — or yellow above the name of a position the squad
-        // has nobody for.
+        // box as it is, a duty after three abilities leaving two columns —
+        // or yellow above the name of a position the squad has nobody for.
         let filled = game.graphic(player_box::FILLED).unwrap();
         let empty = game.graphic(player_box::EMPTY).unwrap();
         let boxes = (FIELD_BOXES..FIELD_BOXES + FIELD as u16)
@@ -937,8 +978,10 @@ mod tests {
             let ControlState::Player(Some(player)) = &view.controls[c].state else {
                 panic!("box {id} shows nothing");
             };
+            let free =
+                if player.icons.len() + player.duty.iter().len() > 3 { 57..59 } else { 46..56 };
             let (picture, columns, rows) =
-                if player.filled { (&filled, 46..56, 13..23) } else { (&empty, 0..99, 0..4) };
+                if player.filled { (&filled, free, 13..23) } else { (&empty, 0..99, 0..4) };
             let r = dialog.controls[c].rect;
             for (x, y) in columns.flat_map(|x| rows.clone().map(move |y| (x, y))) {
                 let shown = frame.get_pixel(r.min.x as u32 + x, r.min.y as u32 + y);

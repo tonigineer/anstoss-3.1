@@ -16,7 +16,7 @@ use image::RgbaImage;
 use a3_core::cycle::dialogs::*;
 use a3_files::rch::{Align, Control, Dialog, Kind, PLAIN_FONT};
 use a3_screens::controls::bitmap::Picture;
-use a3_screens::controls::list::{ListState, ROW_HEIGHT, visible_rows};
+use a3_screens::controls::list::{ListState, row_height, visible_rows};
 use a3_screens::controls::options::{BULLET_SIZE, bullet_centre};
 use a3_screens::controls::player_box::PlayerBox;
 use a3_screens::controls::slider::{self, SLIDER_ARROW};
@@ -395,7 +395,7 @@ pub(super) fn spawn(
                 let value = state.as_value().copied().unwrap_or_default();
                 spawn_slider(commands, images, root, &layout, index, control, &value)
             }
-            Kind::Header => {
+            Kind::Header { .. } => {
                 let Some(header) = state.as_header() else { continue };
                 for (column, title) in header.text.split("\\t").enumerate() {
                     let Some(&tab) = header.tabs.get(column) else { break };
@@ -415,7 +415,7 @@ pub(super) fn spawn(
                     ));
                 }
             }
-            Kind::ListBox => {
+            Kind::ListBox { .. } => {
                 let Some(list) = state.as_list() else { continue };
                 spawn_list(commands, images, root, &layout, index, control, list, fonts);
                 let mut icons = ListIcons::default();
@@ -917,9 +917,9 @@ fn spawn_list(
         ChildOf(root),
     ));
     let (full, narrow) = (r.width(), r.width() - CARD_SCROLLBAR - 6.0);
-    let height = layout.y(ROW_HEIGHT);
+    let height = layout.y(row_height(control));
     for row in 0..visible_rows(control) {
-        let top = layout.y(control.rect.min.y + 1.0 + row as f32 * ROW_HEIGHT);
+        let top = layout.y(control.rect.min.y + 1.0 + row as f32 * row_height(control));
         let width = if state.scrolls(control) { narrow } else { full };
         let slot = commands
             .spawn((
@@ -1663,7 +1663,7 @@ fn spawn_player(
     let abilities = commands
         .spawn((Node { column_gap: px(3.0), ..default() }, Pickable::IGNORE, ChildOf(line)))
         .id();
-    for &id in &player.icons {
+    for &id in player.icons.iter().chain(&player.duty) {
         let Ok(icon) = game.graphic(id).inspect_err(|err| warn!("graphic {id}: {err}")) else {
             continue;
         };

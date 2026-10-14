@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use a3_core::autolineup;
 use a3_core::cycle::dialogs::NOTICE;
-use a3_files::rch::{Align, Dialog};
+use a3_files::rch::Dialog;
 
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, ok_or_cancel, set};
 use crate::controls::ControlState;
@@ -28,8 +28,6 @@ const CAPTION_ID: u16 = 9922;
 /// No more than eleven are always picked: text 4282.
 const ELEVEN_ALWAYS: u16 = 4282;
 const MOST_ALWAYS: usize = 11;
-/// The lists: the player's name, his position, his strength.
-const TABS: [f32; 3] = [0.0, 99.0, 145.0];
 
 /// Puts the dialog's caption in its frame.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
@@ -204,9 +202,8 @@ fn show(cx: &mut Cx, view: &mut View) {
         .collect();
     for (id, always) in [(ALWAYS, true), (NEVER, false)] {
         let Some(list) = control(dialog, id).and_then(|c| view.list_mut(c)) else { continue };
+        // In the dialog file's columns.
         list.rows.clone_from(&rows);
-        list.tabs = TABS.to_vec();
-        list.aligns = vec![None, None, Some((Align::Right, 10.0))];
         list.selected = None;
         list.marked = (0..rows.len())
             .map(|p| state.status.get(p).is_some_and(|s| if always { s.always } else { s.never }))

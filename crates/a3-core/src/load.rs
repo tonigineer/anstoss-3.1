@@ -14,7 +14,7 @@ use crate::random::Random;
 use crate::records::{self, Globals, Records, Team};
 use crate::season::{ClubState, Fitness, Manager, Season, Status};
 use crate::world::Player;
-use crate::{autolineup, cohesion};
+use crate::{autolineup, cohesion, duties};
 
 /// A manager under contract (`records::Manager::status`).
 const HIRED: u8 = 3;
@@ -108,8 +108,12 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
     let formation = usize::from(team.formation());
     let tickets = team.tickets().into();
     let co_trainer = team.co_trainer() != 0;
-    let line_up_flags =
-        human.and_then(|slot| records.extras.get(slot)).map_or(0, |e| e.line_up_flags());
+    let extra = human.and_then(|slot| records.extras.get(slot));
+    let line_up_flags = extra.map_or(0, |e| e.line_up_flags());
+    let ids: Vec<u16> = squad.iter().map(|&(id, _)| id).collect();
+    let duties = extra.map_or_else(Default::default, |e| {
+        e.duty_lists().map(|list| duties::from_ids(&ids, &list))
+    });
     let pitch = &data.rules.pitch;
     let country = usize::from(team.country());
     let counted = pitch.european.get(country).copied().unwrap_or(false);
@@ -123,6 +127,7 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
         co_trainer,
         line_up_flags,
         foreigner_rule,
+        duties,
         ..state
     };
     // A game saved in the middle of a matchday goes on with its matches: the
@@ -177,6 +182,10 @@ const ALWAYS: u8 = 0x20;
 const NEVER: u8 = 0x10;
 /// He smokes: his condition counts five less.
 const SMOKER: u32 = 0x800;
+/// He will not be captain (`FUN_00707588`); his strength is not known yet
+/// (`FUN_00696b4c`).
+const NO_CAPTAIN: u8 = 0x40;
+const STRENGTH_UNKNOWN: u8 = 0x20;
 
 fn status(records: &Records, record: &records::Player) -> Status {
     let globals = &records.globals;
@@ -204,6 +213,9 @@ fn status(records: &Records, record: &records::Player) -> Status {
         joined: record.joined().and_then(|(day, month, year)| {
             NaiveDate::from_ymd_opt(year.into(), month.into(), day.into())
         }),
+        no_captain: record.manner() & NO_CAPTAIN != 0,
+        strength_unknown: record.retiring() & STRENGTH_UNKNOWN != 0,
+        doping: record.doping(),
     }
 }
 

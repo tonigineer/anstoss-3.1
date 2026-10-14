@@ -331,7 +331,7 @@ impl<'a> Original<'a> {
                 None => dialog
                     .controls
                     .iter()
-                    .find(|c| matches!(c.kind, Kind::ListBox))
+                    .find(|c| matches!(c.kind, Kind::ListBox { .. }))
                     .map(|c| c.rect)
                     .ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))?,
             };

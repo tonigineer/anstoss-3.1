@@ -15,6 +15,7 @@ use chrono::NaiveDate;
 use a3_files::exe::Exe;
 
 use crate::calendar::{self, Calendar};
+use crate::duties;
 use crate::jobs::Offer;
 use crate::lineup::{self, FULL_MORALE, Lineup, NEUTRAL_MOOD, Tables};
 use crate::random::Random;
@@ -258,6 +259,9 @@ pub struct ClubState {
     /// The week so far: the team's condition and freshness at its start and
     /// after each day.
     pub week: Vec<(i32, i32)>,
+    /// Who takes the set pieces and who is captain, in the manager's order
+    /// ([`crate::duties`]); none for a club without a human manager.
+    pub duties: crate::duties::Lists,
 }
 
 /// How a player is: fit and fresh, in hundredths, and in what spirits.
@@ -315,6 +319,11 @@ pub struct Status {
     pub clashes: [u16; 2],
     /// When he came to the club.
     pub joined: Option<NaiveDate>,
+    /// He will not be captain; his strength is not known yet (an amateur's);
+    /// his doping, as the record keeps it.
+    pub no_captain: bool,
+    pub strength_unknown: bool,
+    pub doping: u8,
 }
 
 impl ClubState {
@@ -341,6 +350,7 @@ impl ClubState {
             foreigner_rule: false,
             strengths: None,
             week,
+            duties: Default::default(),
         }
     }
 }
@@ -542,6 +552,7 @@ impl Season {
         // calculation records it.
         let joined = Status { joined: Some(calendar::date(self.year, 0)), ..Status::default() };
         state.status = vec![joined; club.players.len()];
+        state.duties = duties::choose(&state.players, &state.fitness, &mut state.status);
         self.clubs.insert((slot, index), state);
     }
 

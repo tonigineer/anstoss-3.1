@@ -41,14 +41,10 @@ macro_rules! numbers {
 }
 numbers!(u8, i8, u16, i16, u32, i32);
 
-impl<T: Field + Copy + Default, const N: usize> Field for [T; N] {
+impl<T: Field, const N: usize> Field for [T; N] {
     const SIZE: usize = T::SIZE * N;
     fn get(bytes: &[u8]) -> Self {
-        let mut values = [T::default(); N];
-        for (i, value) in values.iter_mut().enumerate() {
-            *value = T::get(&bytes[i * T::SIZE..]);
-        }
-        values
+        std::array::from_fn(|i| T::get(&bytes[i * T::SIZE..]))
     }
     fn put(self, bytes: &mut [u8]) {
         for (i, value) in self.into_iter().enumerate() {
@@ -210,11 +206,12 @@ record! {
     /// Matches of the competitions of the kinds 12 to 15 this season: his
     /// internationals.
     0x266 => kind_12_matches, set_kind_12_matches: u8;
-    /// Bit 7: he ends his career.
+    /// Bit 7: he ends his career; bit 5: his strength is not known yet
+    /// (an amateur's, `CAmateure::FUN_0070699b`).
     0x26f => retiring, set_retiring: u8;
     /// His strong foot (bits 2 and 3: 1 right, 2 left, 3 both), how the
     /// fans see him (low bits: 2 loved, 3 hated), counts as home-grown
-    /// (0x10).
+    /// (0x10), will not be captain (0x40, from the data files).
     0x282 => manner, set_manner: u8;
     /// Matches played this season: in the league, and in the competitions
     /// of the kinds 3–4, 5–10 and 12–15 (the line-up's object +0x54, +0x59,
@@ -402,6 +399,10 @@ record! {
     /// This season: bonuses paid the first team, fines taken from players.
     0x500 => bonuses_paid, set_bonuses_paid: i32;
     0x504 => fines, set_fines: i32;
+    /// Penalties this season in competitive matches: awarded, scored; and
+    /// direct free kicks: taken, scored (the club object's +0xdea … +0xdee).
+    0x332 => penalties, set_penalties: [u8; 2];
+    0x334 => free_kicks, set_free_kicks: [u16; 2];
     /// The team's bonuses: 0 full, 1 half, 2 none.
     0x830 => bonus_cut, set_bonus_cut: i16;
     /// What the manager has done to the team's will to win, -200 to 200
@@ -457,6 +458,11 @@ record! {
     0x364 => sessions_20, set_sessions_20: i16;
     0x37e => sessions_33, set_sessions_33: i16;
     0x380 => sessions_34, set_sessions_34: i16;
+    /// Who takes the set pieces and who is captain: six lists of player
+    /// ids in the manager's order, a 0 ending each — penalties, free kicks
+    /// crossed, free kicks shot, corners from the left, from the right, the
+    /// captain ([`crate::duties`]).
+    0xcc => duty_lists, set_duty_lists: [[u16; 35]; 6];
     /// A count cohesion takes twice (`FUN_0069d5a7`; meaning not traced).
     0x2564 => together, set_together: i16;
     /// The line-up's special settings (`CMannaufSpezial`): bit 1 the
@@ -809,6 +815,11 @@ impl Records {
     pub fn team(&self, country: u16, number: u16) -> Option<&Team> {
         let first = usize::try_from(self.countries.first_team(country.into())).ok()?;
         self.teams.get(first + usize::from(number))
+    }
+
+    pub fn team_mut(&mut self, country: u16, number: u16) -> Option<&mut Team> {
+        let first = usize::try_from(self.countries.first_team(country.into())).ok()?;
+        self.teams.get_mut(first + usize::from(number))
     }
 
     pub fn player(&self, id: u16) -> Option<&Player> {

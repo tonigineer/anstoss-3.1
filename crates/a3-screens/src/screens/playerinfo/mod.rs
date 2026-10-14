@@ -329,7 +329,7 @@ fn bars(f: Fitness) -> (i32, i32) {
 
 /// A number with one decimal as the original's `printf` writes it: a half
 /// rounds up, where Rust's rounds to even. Only quarters fall halfway.
-fn one_decimal(v: f64) -> String {
+pub(crate) fn one_decimal(v: f64) -> String {
     let halfway = (v * 4.0).fract() == 0.0 && (v * 2.0).fract() != 0.0;
     if halfway { format!("{:.1}", v + 0.05f64.copysign(v)) } else { format!("{v:.1}") }
 }

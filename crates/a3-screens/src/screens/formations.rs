@@ -88,6 +88,13 @@ impl Screen for Formations {
         if let Some(files) = control(cx.dialog, FILES).and_then(|c| view.options_mut(c)) {
             files.actions = true;
         }
+        // Loading, saving and the original formations are not built yet.
+        let dialog = cx.dialog;
+        super::mark_inert(
+            view,
+            dialog,
+            |t| !matches!(t, Target::Option { control: c, .. } if dialog.controls[c].id == Some(FILES)),
+        );
         self.show(cx, view);
     }
 

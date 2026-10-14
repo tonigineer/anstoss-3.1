@@ -9,6 +9,7 @@ pub mod cohesion;
 pub mod cycle;
 pub mod data;
 pub mod discipline;
+pub mod duties;
 pub mod jobs;
 pub mod lineup;
 pub mod load;

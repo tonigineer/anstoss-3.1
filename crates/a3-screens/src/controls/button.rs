@@ -66,11 +66,40 @@ fn file_graphics(control: &Control) -> (Vec<u16>, bool) {
     }
 }
 
-/// The button of a dialog that shows `image`, like OK for Enter and cancel
-/// for Escape.
+/// The button of a dialog that shows `image`.
 pub fn with_image(dialog: &Dialog, image: u16) -> Option<usize> {
     dialog
         .controls
         .iter()
         .position(|c| matches!(c.kind, Kind::Button { normal, .. } if normal == image))
+}
+
+/// The ids Windows gives OK and cancel, which the game's buttons keep in
+/// every look of theirs — the seasons' among them (`OkHerb1.bmp` …).
+const IDOK: u16 = 1;
+const IDCANCEL: u16 = 2;
+
+/// Whether a control is an OK button: by its picture or its id.
+pub fn is_ok(control: &Control) -> bool {
+    is_button(control, OK_IMAGE, IDOK)
+}
+
+pub fn is_cancel(control: &Control) -> bool {
+    is_button(control, CANCEL_IMAGE, IDCANCEL)
+}
+
+fn is_button(control: &Control, image: u16, id: u16) -> bool {
+    match control.kind {
+        Kind::Button { normal, .. } => normal == image || control.id == Some(id),
+        _ => false,
+    }
+}
+
+/// A dialog's OK button, for Enter; its cancel button, for Escape.
+pub fn ok_button(dialog: &Dialog) -> Option<usize> {
+    dialog.controls.iter().position(is_ok)
+}
+
+pub fn cancel_button(dialog: &Dialog) -> Option<usize> {
+    dialog.controls.iter().position(is_cancel)
 }

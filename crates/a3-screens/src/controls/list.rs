@@ -1,25 +1,49 @@
 //! List boxes: rows of tab-separated columns, one of them selected, with a
-//! scrollbar while there are more rows than fit.
+//! scrollbar while there are more rows than fit — or always, as a list's
+//! style says. The scrollbar is the game's `CMyScrBar` in the list's colour:
+//! a handle as long as the rows shown are of all, over a track in some.
 
 use bevy_math::{Rect, Vec2};
 use image::{Rgba, RgbaImage, imageops};
 
-use a3_files::rch::{Align, Control};
+use a3_files::rch::{Align, Control, Kind};
 
+use super::combo;
 use super::player_box::{self, PlayerBox};
-use crate::classic::{
-    HANDLE, Paint, SCROLL_DOWN, SCROLL_UP, TEXT, TEXT_HOVER, columns, fill, paste,
-};
+use crate::classic::{Paint, SCROLL_DOWN, SCROLL_UP, TEXT, TEXT_HOVER, columns, fill, paste};
 use crate::pointer::{Geometry, Target};
 
-/// Rows are one line of the dialog font.
-pub const ROW_HEIGHT: f32 = 13.0;
-/// Lists longer than they are tall get a scrollbar in the strip this wide
-/// that the backgrounds leave free right of the list's frame: an arrow at
+/// Rows are as high as the dialog file says; this high where it says
+/// nothing.
+const ROW_HEIGHT: f32 = 13.0;
+/// The scrollbar runs down the list's right edge this wide: an arrow at
 /// each end, a handle in between.
 const SCROLLBAR_WIDTH: f32 = 20.0;
-/// The scrollbar handle, the game's `ScrollerBlau.bmp`.
-const SCROLL_HANDLE: Vec2 = Vec2::new(18.0, 20.0);
+/// The scrollbars' colours (the table at 0x8ade78, by the list's style):
+/// the long bars their handles are cut from, blue, red, red, green and
+/// yellow, and the tracks some draw behind them.
+pub(crate) const HANDLES: [&str; 5] = [
+    "ScrGrossBlau.bmp",
+    "ScrGrossRot.bmp",
+    "ScrGrossRot.bmp",
+    "ScrGrossGruen.bmp",
+    "ScrGrossGelb.bmp",
+];
+pub(crate) const TRACKS: [&str; 6] =
+    ["ScrBlauV.tga", "ScrRotV.tga", "ScrBlauV.tga", "ScrGruenV.tga", "ScrGelbV.tga", "ScrRotV.tga"];
+/// A list's style bits: its scrollbar only while it scrolls (either of
+/// 0x0c), with a track (0x08), its colour (0x70); 0x80 and 0x04 alone let
+/// the rows run under it.
+const ONLY_SCROLLING: u8 = 0x0c;
+const WITH_TRACK: u8 = 0x08;
+const COLOUR: u8 = 0x70;
+const WIDE_ROWS: u8 = 0x80;
+const BESIDE: u8 = 0x04;
+/// The track: where it starts across the scrollbar, and how wide it is.
+const TRACK_LEFT: u32 = 7;
+const TRACK_WIDTH: u32 = 13;
+/// The shortest the handle gets (`FUN_007ae43e`).
+const MIN_HANDLE: i32 = 8;
 /// Rows the mouse wheel scrolls per notch, as Windows does.
 pub const WHEEL_ROWS: i32 = 3;
 const SELECTED_TEXT: Rgba<u8> = Rgba([255, 255, 255, 255]);
@@ -101,20 +125,30 @@ impl ListState {
         true
     }
 
-    /// Whether the list has more rows than it shows, and so a scrollbar.
+    /// Whether the list has more rows than it shows.
     pub fn scrolls(&self, control: &Control) -> bool {
         self.rows.len() > visible_rows(control)
     }
 
+    /// Whether the classic look shows its scrollbar: while it scrolls, or
+    /// always, as its style says (`FUN_007a9863`).
+    pub fn scrollbar(&self, control: &Control) -> bool {
+        self.scrolls(control) || style(control) & ONLY_SCROLLING == 0
+    }
+
     /// Where the scrollbar handle sits, in classic pixels: between the
-    /// arrows, as far down as the list is scrolled.
+    /// arrows, as long as the rows shown are of all (the whole track when
+    /// they are all), as far down as the list is scrolled (`FUN_007ae43e`,
+    /// `FUN_007ad818`).
     pub fn thumb(&self, control: &Control) -> Rect {
         let (up, down) = scroll_arrows(control);
-        let room = (down.min.y - up.max.y - SCROLL_HANDLE.y).max(0.0);
-        let last = self.rows.len().saturating_sub(visible_rows(control)).max(1) as f32;
-        let top = up.max.y + (room * self.scroll as f32 / last).round();
-        let left = up.min.x + ((SCROLLBAR_WIDTH - SCROLL_HANDLE.x) / 2.0).floor();
-        Rect::new(left, top, left + SCROLL_HANDLE.x, top + SCROLL_HANDLE.y)
+        let track = (down.min.y - up.max.y) as i32;
+        let (rows, shown) = (self.rows.len() as i32, visible_rows(control) as i32);
+        let length = if shown < rows { (track * shown / rows).max(MIN_HANDLE) } else { track };
+        let last = rows - shown;
+        let down = if last > 0 { self.scroll as i32 * (track - length) / last } else { 0 };
+        let top = up.max.y + down as f32;
+        Rect::new(up.min.x, top, up.max.x, top + length as f32)
     }
 
     pub(crate) fn graphics(&self) -> (Vec<u16>, bool) {
@@ -127,9 +161,17 @@ impl ListState {
         let control = paint.control;
         let r = control.rect;
         let (x, y, right) = (r.min.x as i32, r.min.y as i32, r.max.x as i32);
-        let scrolls = self.scrolls(control);
-        if scrolls {
+        if self.scrollbar(control) {
             let (up, down) = scroll_arrows(control);
+            if style(control) & WITH_TRACK != 0
+                && let Some(track) = paint.widget(TRACKS[scheme(control).min(TRACKS.len() - 1)])
+            {
+                let height = ((down.min.y - up.max.y) as u32).min(track.height());
+                let width = TRACK_WIDTH.min(track.width());
+                let part = imageops::crop_imm(track, 0, 0, width, height).to_image();
+                let at = Vec2::new(up.min.x + TRACK_LEFT as f32, up.max.y);
+                imageops::overlay(frame, &part, at.x as i64, at.y as i64);
+            }
             for (name, arrow) in [(SCROLL_UP, up), (SCROLL_DOWN, down)] {
                 if let Some(picture) = paint.widget(name) {
                     // Centred in the arrow's square.
@@ -139,26 +181,31 @@ impl ListState {
                     paste(frame, picture, (arrow.min + gap).floor());
                 }
             }
-            if let Some(handle) = paint.widget(HANDLE) {
-                paste(frame, handle, self.thumb(control).min);
+            if let Some(long) = paint.widget(HANDLES[scheme(control).min(HANDLES.len() - 1)]) {
+                let thumb = self.thumb(control);
+                paste(frame, &combo::cut(long, thumb.height() as u32), thumb.min);
             }
         }
         let Some(font) = paint.font() else { return };
-        let right = if scrolls { right - SCROLLBAR_WIDTH as i32 } else { right };
+        // The rows stop short of the scrollbar's strip, scrolling or not,
+        // unless the style lets them run under it (`FUN_007a7d9c`).
+        let style = style(control);
+        let beside = style & WIDE_ROWS == 0 && (style & BESIDE == 0 || style & WITH_TRACK != 0);
+        let right = if beside { right - SCROLLBAR_WIDTH as i32 } else { right };
         // The rows are drawn on the list's own area, which cuts off the
         // last one where the list ends.
         let (width, height) = (r.width() as u32, r.height() as u32);
         let mut area = imageops::crop_imm(frame, x as u32, y as u32, width, height).to_image();
         let (left, right) = (0, right - x);
-        let shown = self.rows.iter().skip(self.scroll).take(shown_rows(control));
+        let shown = self.rows.iter().skip(self.scroll).take(visible_rows(control));
         for (row, line) in shown.enumerate() {
             let frame = &mut area;
-            let (x, top) = (left, 1 + (row as f32 * ROW_HEIGHT) as i32);
+            let (x, top) = (left, 1 + (row as f32 * row_height(control)) as i32);
             let selected = self.selected == Some(self.scroll + row)
                 || self.marked.get(self.scroll + row).copied().unwrap_or(false);
             let ink = self.inks.get(self.scroll + row).copied().flatten();
             let color = if selected {
-                fill(frame, x, top, right - x, ROW_HEIGHT as i32, SELECTED_ROW);
+                fill(frame, x, top, right - x, row_height(control) as i32, SELECTED_ROW);
                 SELECTED_TEXT
             } else if paint.pointed(Target::Row { control: paint.index, row }) {
                 TEXT_HOVER
@@ -169,9 +216,10 @@ impl ListState {
             // The text sits at the list's left edge, a pixel above the row.
             let at = (x, top - 1);
             columns(font, frame, at, cells, &self.tabs, &self.aligns, color, right);
+            // So do the icons.
             for &(left, id) in self.row_icons.get(self.scroll + row).into_iter().flatten() {
                 if let Some(icon) = paint.image(id) {
-                    paste(frame, icon, Vec2::new(x as f32 + left, top as f32));
+                    paste(frame, icon, Vec2::new(x as f32 + left, at.1 as f32));
                 }
             }
         }
@@ -179,15 +227,32 @@ impl ListState {
     }
 }
 
-/// The rows a list has room for.
-pub fn visible_rows(control: &Control) -> usize {
-    ((control.rect.height() - 2.0) / ROW_HEIGHT).floor().max(0.0) as usize
+/// A list's style, as the dialog file gives it.
+fn style(control: &Control) -> u8 {
+    match control.kind {
+        Kind::ListBox { style, .. } => style,
+        _ => 0,
+    }
 }
 
-/// The rows a list shows: every one that starts inside it, as the game
-/// draws them all and the list's window cuts them off (`CMyListBox`).
-pub fn shown_rows(control: &Control) -> usize {
-    ((control.rect.height() - 1.0) / ROW_HEIGHT).ceil().max(0.0) as usize
+/// The colour of its scrollbar.
+fn scheme(control: &Control) -> usize {
+    usize::from((style(control) & COLOUR) >> 4)
+}
+
+/// How high a list's rows are.
+pub fn row_height(control: &Control) -> f32 {
+    match control.kind {
+        Kind::ListBox { row_height, .. } if row_height > 0 => f32::from(row_height),
+        _ => ROW_HEIGHT,
+    }
+}
+
+/// The rows a list shows, and scrolls by: as many as its height holds, the
+/// last of them perhaps cut off a pixel where the list ends (`CMyListBox`,
+/// `FUN_007a9d22`).
+pub fn visible_rows(control: &Control) -> usize {
+    (control.rect.height() / row_height(control)).floor().max(0.0) as usize
 }
 
 /// Where a list's scrollbar puts its up and down arrows, in classic pixels.
@@ -207,9 +272,9 @@ pub(crate) fn targets(
     out: &mut Vec<(Target, Rect)>,
 ) {
     let r = control.rect;
-    for row in 0..shown_rows(control) {
-        let y = r.min.y + 1.0 + row as f32 * ROW_HEIGHT;
-        let rect = Rect::new(r.min.x, y, r.max.x, (y + ROW_HEIGHT).min(r.max.y));
+    for row in 0..visible_rows(control) {
+        let y = r.min.y + 1.0 + row as f32 * row_height(control);
+        let rect = Rect::new(r.min.x, y, r.max.x, (y + row_height(control)).min(r.max.y));
         out.push((Target::Row { control: index, row }, geometry.map(rect)));
     }
     let (up, down) = geometry.scroll(control);

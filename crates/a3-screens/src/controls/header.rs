@@ -6,6 +6,8 @@ use a3_files::rch::Align;
 
 use crate::classic::{Paint, TEXT, columns};
 
+const TOP: i32 = 2;
+
 #[derive(Clone, Debug)]
 pub struct HeaderState {
     /// The titles, separated by `\t` as the dialog file writes it.
@@ -27,7 +29,8 @@ impl HeaderState {
         let Some(font) = paint.font() else { return };
         let r = paint.control.rect;
         let titles = self.text.split("\\t");
-        let (at, right) = ((r.min.x as i32, r.min.y as i32), r.max.x as i32);
+        // Two pixels below the top (`CMyTabStatic::FUN_007afa80`).
+        let (at, right) = ((r.min.x as i32, r.min.y as i32 + TOP), r.max.x as i32);
         columns(font, frame, at, titles, &self.tabs, &self.aligns, TEXT, right);
     }
 }

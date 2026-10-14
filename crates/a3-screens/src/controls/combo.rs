@@ -41,8 +41,8 @@ const LOWER_END: u32 = 0x1ba;
 const MIN_HANDLE: i32 = 7;
 
 /// A handle `length` long cut from a long upright bar: its upper end and
-/// middle, then its lower end.
-fn cut(long: &RgbaImage, length: u32) -> RgbaImage {
+/// middle, then its lower end (`FUN_007ae11d` for a list's).
+pub(crate) fn cut(long: &RgbaImage, length: u32) -> RgbaImage {
     let (width, end) = (long.width(), END as u32);
     let mut handle = RgbaImage::new(width, length);
     let part = |y: u32, h: u32| imageops::crop_imm(long, 0, y, width, h).to_image();

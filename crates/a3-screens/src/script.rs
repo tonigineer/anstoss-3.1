@@ -30,7 +30,7 @@ use std::fmt;
 
 use a3_files::rch::{Dialog, Kind};
 
-use crate::controls::button::{CANCEL_IMAGE, OK_IMAGE, with_image};
+use crate::controls::button::{cancel_button, ok_button};
 use crate::game::Game;
 use crate::host::{Change, Host};
 use crate::pointer::{Grip, Target};
@@ -403,11 +403,10 @@ impl<'a> Runner<'a> {
 /// nothing.
 pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Result<Target, Error> {
     let find = |id: u16| control(controls, id).ok_or(Error::NoControl { dialog, control: id });
-    let button =
-        |image: u16| with_image(controls, image).ok_or(Error::NoControl { dialog, control: 0 });
+    let button = |found: Option<usize>| found.ok_or(Error::NoControl { dialog, control: 0 });
     Ok(match *action {
-        Action::Ok => Target::Button(button(OK_IMAGE)?),
-        Action::Cancel => Target::Button(button(CANCEL_IMAGE)?),
+        Action::Ok => Target::Button(button(ok_button(controls))?),
+        Action::Cancel => Target::Button(button(cancel_button(controls))?),
         Action::Press(id) => Target::Button(find(id)?),
         Action::Click(id) => {
             let control = find(id)?;
@@ -676,6 +675,47 @@ mod tests {
             let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
             let cohesion = a3_core::cohesion::of(&game.rules.pitch, club, season.date());
             assert_eq!(cohesion, expected, "after {actions:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_penalty_taker_picked_takes_the_penalties() {
+        use a3_core::duties::Duty;
+        let game = game();
+        let open =
+            format!("{}\nnow choose 5266 3\nuntil dialog 418\nnow choose 5340 2", LOAD.trim_end());
+        let (runner, result) = Runner::play(&game, &Script::parse(&open).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let view = runner.host.view();
+        let list = control(&game.dialogs[&418], 5339).unwrap();
+        let rows = &view.list(list).unwrap().rows;
+        let name = rows[3].split('\t').nth(1).unwrap().to_owned();
+        assert_eq!(rows[3].split('\t').next(), Some("4"));
+
+        let script = format!("{open}\nnow row 5339 3; ok\nuntil dialog 147");
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+        // He goes first, the three above him one down; the record has it.
+        let taker = club.duties[Duty::Penalty.stored()][0];
+        let p = &club.players[taker];
+        let initial = p.first_name.chars().next().map_or(String::new(), |c| format!(", {c}."));
+        assert_eq!(format!("{}{initial}", p.last_name), name);
+        assert_eq!(club.duties[Duty::Penalty.stored()].len(), club.players.len().min(35));
+        let records = state.records.as_ref().unwrap();
+        let human = records.humans().next().unwrap();
+        let team = records.team(human.country(), human.team()).unwrap();
+        let extra = &records.extras[usize::from(team.human()) - 1];
+        assert_eq!(extra.duty_lists()[Duty::Penalty.stored()][0], club.status[taker].id);
+        // On the pitch his box shows the penalty, if he plays.
+        let view = runner.host.view();
+        if let Some(slot) = club.lineup.field.iter().position(|&f| f == Some(taker)) {
+            let c = control(&game.dialogs[&147], 2510 + slot as u16).unwrap();
+            let shown = view.controls[c].state.as_player().unwrap().duty;
+            assert_eq!(shown, game.rules.pitch.duty_icon(Duty::Penalty));
         }
     }
 
