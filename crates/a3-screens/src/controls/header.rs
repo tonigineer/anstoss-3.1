@@ -26,7 +26,7 @@ impl Default for HeaderState {
 
 impl HeaderState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
-        let Some(font) = paint.font() else { return };
+        let Some(font) = paint.font_of(paint.control.font) else { return };
         let r = paint.control.rect;
         let titles = self.text.split("\\t");
         // Two pixels below the top (`CMyTabStatic::FUN_007afa80`).

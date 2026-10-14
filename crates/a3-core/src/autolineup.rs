@@ -329,7 +329,7 @@ impl CoTrainerTables {
 /// contract not run out.
 pub fn may_play(s: &Status) -> bool {
     s.suspended == 0
-        && s.injured < INJURED_DAYS
+        && (s.injured < INJURED_DAYS || s.injected)
         && s.away == 0
         && s.away_kind & MARKED_AWAY == 0
         && s.long == 0

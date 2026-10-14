@@ -352,7 +352,7 @@ fn clear_no_captain(cx: &mut Cx) {
 }
 
 /// "Name, F.", or the nickname he goes by (`FUN_006fec36`).
-fn short_name(cx: &Cx, player: &Player, id: u16) -> String {
+pub(crate) fn short_name(cx: &Cx, player: &Player, id: u16) -> String {
     const NICKNAME: u32 = 0x8000_0000;
     let records = cx.state.records.as_ref();
     if let Some(r) = records.and_then(|records| records.player(id))

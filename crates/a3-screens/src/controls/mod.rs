@@ -246,7 +246,7 @@ impl ControlState {
         match self {
             Self::Static(s) => s.targets(index, control, geometry, out),
             Self::Button(_) => out.push((Target::Button(index), geometry.rect(control))),
-            Self::List(_) => list::targets(index, control, geometry, out),
+            Self::List(l) => list::targets(l, index, control, geometry, out),
             Self::Anim(a) => a.targets(index, control, geometry, out),
             Self::Spin(_) => spin::targets(index, control, geometry, out),
             Self::Slider(_) => slider::targets(index, control, geometry, out),

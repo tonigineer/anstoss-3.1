@@ -1,7 +1,8 @@
 //! The week planner to book an appointment in (dialog 412,
 //! `CSummeTerminplTerminAuswahl`): the days of this week, a row each with
 //! what is booked for it. From the line-up's menu it books a talk with a
-//! player (`Einzelgespräch`, kind 0x19) on a free day from today on
+//! player (`Einzelgespräch`, kind 0x19), from the medical department a
+//! sick visit (`Krankenbesuch`, 0x0b), on a free day from today on
 //! (`FUN_0076640b`); a day gone or taken does not answer.
 
 use a3_core::records::{Appointment, Records};
@@ -51,10 +52,11 @@ const KINDS: [(u8, u16, bool); 16] = [
 /// The kinds 2 to 10 the original shows as missing.
 const MISSING: &str = " Fehlt !!!! ";
 
-/// The planner, booking a talk with a player.
+/// The planner, booking an appointment with a player.
 #[derive(Default)]
 pub struct Planner {
-    /// The player the talk is with, and which days can be booked.
+    /// What is booked, with whom, and which days can be booked.
+    kind: u8,
     player: u16,
     free: [bool; WEEK],
 }
@@ -90,8 +92,11 @@ impl Screen for Planner {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
-        let Args::Record(player) = args else { return };
-        self.player = player;
+        (self.kind, self.player) = match args {
+            Args::Record(player) => (TALK, player),
+            Args::Book(kind, player) => (kind, player),
+            _ => return,
+        };
         if let Some(ok) = control(cx.dialog, OK) {
             view.controls[ok].hidden = true;
         }
@@ -145,7 +150,10 @@ impl Screen for Planner {
         let Some(planner) = cx.state.records.as_mut().and_then(|r| r.planners.get_mut(slot)) else {
             return Outcome::Stay;
         };
-        planner.book(start + item, Appointment { kind: TALK, flag: ONE_DAY, player: self.player });
+        planner.book(
+            start + item,
+            Appointment { kind: self.kind, flag: ONE_DAY, player: self.player },
+        );
         Outcome::Close(Reply::Ok)
     }
 }

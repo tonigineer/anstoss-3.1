@@ -298,6 +298,9 @@ impl<'a> Original<'a> {
                     Target::Button(i) | Target::Control(i) | Target::Edit(i) => {
                         Some(dialog.controls[i].rect)
                     }
+                    Target::Cell { control, row, column } => {
+                        crate::controls::list::cell_rect(&dialog.controls[control], row, column)
+                    }
                     _ => None,
                 })
                 .ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))

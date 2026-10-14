@@ -17,6 +17,7 @@ use tracing::{info, warn};
 
 use crate::data::Data;
 use crate::load;
+use crate::medical;
 use crate::newgame::{self, Mode, Setup};
 use crate::random::Random;
 use crate::records::Records;
@@ -55,6 +56,7 @@ pub mod dialogs {
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
     /// A talk with a player, on the day it was booked for.
     pub const TALK: u16 = 461;
+    pub const VISIT: u16 = 210;
 }
 
 use self::dialogs::*;
@@ -76,6 +78,14 @@ const WEEK_DAYS: usize = 7;
 /// A talk booked in the week planner, and the talk itself.
 const TALK: u8 = 0x19;
 const TALK_DIALOG: u16 = dialogs::TALK;
+/// A sick visit booked in the week planner; what the week calls each.
+const VISIT: u8 = 0x0b;
+const TALK_TEXT: u16 = 4230;
+const VISIT_TEXT: u16 = 2221;
+/// The visit tells how he took it with the preparation at "normal", or
+/// from this day of the season on.
+const NORMAL_PREPARATION: u8 = 5;
+const TOLD_FROM: usize = 42;
 
 /// A screen to open, with what it is to show.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -108,6 +118,14 @@ pub enum Args {
     Record(u16),
     /// A text by its id, with a player's name for its `%s`.
     TextFor(u16, u16),
+    /// How a player took a sick visit (`medical::Reaction`).
+    Visit {
+        player: u16,
+        kind: u8,
+        draw: u8,
+    },
+    /// An appointment of a kind to book with a player, by his record's id.
+    Book(u8, u16),
     /// A text by its id, with the name of one of the current manager's
     /// formations for its `%s`.
     TextForFormation(u16, usize),
@@ -371,7 +389,7 @@ impl Cycle {
             };
             self.ask(Request::new(week))?;
             for _ in 0..WEEK_DAYS {
-                self.talks()?;
+                self.appointments()?;
                 self.season(|s| {
                     s.pass_day();
                     s.day += 1;
@@ -381,36 +399,72 @@ impl Cycle {
         }
     }
 
-    /// The talks the managers booked for today with a player still in
-    /// their squads, each in its manager's turn (`FUN_0072fd53`,
-    /// `FUN_0048ddbe`); the week tells of them.
-    fn talks(&self) -> Result<(), Gone> {
-        // Each day's message is new.
-        self.season(|s| s.talk_of = None);
-        let talks: Vec<(usize, u16, String)> = {
-            let state = self.state();
-            let (Some(season), Some(records)) = (state.season.as_ref(), state.records.as_ref())
-            else {
-                return Ok(());
+    /// What the managers booked for today in their planners with a player
+    /// still in their squads, manager by manager (`FUN_0072fd53`): a talk
+    /// opens in its manager's turn (`FUN_0048ddbe`); a sick visit happens
+    /// (`FUN_00557e1f`) and tells how he took it — unless the game runs its
+    /// preparation fast and the season is younger than day 42. Each
+    /// manager's step clears the week's message, so the last one's stays.
+    fn appointments(&self) -> Result<(), Gone> {
+        let managers = self.season(|s| s.managers.len()).unwrap_or(0);
+        for n in 0..managers {
+            let booked = {
+                let mut state = self.state();
+                let state = &mut *state;
+                let (Some(season), Some(records)) = (state.season.as_mut(), state.records.as_mut())
+                else {
+                    return Ok(());
+                };
+                season.current = n;
+                season.planner_message = None;
+                let manager = &season.managers[n];
+                let last_name = manager.last_name.clone();
+                let club = manager.club;
+                let booked = records
+                    .human_slot(n)
+                    .and_then(|slot| records.planners.get(slot))
+                    .map(|p| p.day(season.day))
+                    .filter(|b| b.player != 0);
+                let status = booked.and_then(|b| {
+                    let club = season.clubs.get(&club?)?;
+                    club.status.iter().position(|s| s.id == b.player).map(|p| (b, p))
+                });
+                match status {
+                    Some((b, _)) if b.kind == TALK => {
+                        season.planner_message = Some((TALK_TEXT, last_name));
+                        Some((TALK_DIALOG, Args::Record(b.player)))
+                    }
+                    Some((b, p)) if b.kind == VISIT => {
+                        let Some(key) = club else { continue };
+                        let days_out = season.clubs[&key].status[p].injured;
+                        let Some(r) = records.players.get_mut(usize::from(b.player)) else {
+                            continue;
+                        };
+                        let reaction = medical::visit(r, &mut season.random, days_out);
+                        let morale = i32::from(r.morale());
+                        if let Some(fitness) =
+                            season.clubs.get_mut(&key).and_then(|c| c.fitness.get_mut(p))
+                        {
+                            fitness.morale = morale;
+                        }
+                        season.planner_message = Some((VISIT_TEXT, last_name));
+                        let told = records.globals.preparation() == NORMAL_PREPARATION
+                            || season.day >= TOLD_FROM;
+                        told.then_some((
+                            dialogs::VISIT,
+                            Args::Visit {
+                                player: b.player,
+                                kind: reaction.kind,
+                                draw: reaction.draw,
+                            },
+                        ))
+                    }
+                    _ => None,
+                }
             };
-            (0..season.managers.len())
-                .filter_map(|n| {
-                    let slot = records.human_slot(n)?;
-                    let booked = records.planners.get(slot)?.day(season.day);
-                    let manager = &season.managers[n];
-                    let club = season.clubs.get(&manager.club?)?;
-                    let in_squad = club.status.iter().any(|s| s.id == booked.player);
-                    (booked.kind == TALK && booked.player != 0 && in_squad)
-                        .then(|| (n, booked.player, manager.last_name.clone()))
-                })
-                .collect()
-        };
-        for (n, player, last_name) in talks {
-            self.season(|s| {
-                s.current = n;
-                s.talk_of = Some(last_name);
-            });
-            self.ask(Request::with(TALK_DIALOG, Args::Record(player)))?;
+            if let Some((dialog, args)) = booked {
+                self.ask(Request::with(dialog, args))?;
+            }
         }
         self.season(|s| s.current = 0);
         Ok(())

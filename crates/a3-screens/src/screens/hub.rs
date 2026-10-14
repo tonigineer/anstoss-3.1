@@ -28,7 +28,7 @@ use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, set};
-use super::{discipline, duties, mark_inert, planner, playerinfo, special};
+use super::{discipline, duties, mark_inert, medical, planner, playerinfo, special};
 use crate::controls::player_box::PlayerBox;
 use crate::controls::{ControlState, list};
 use crate::game::Game;
@@ -121,6 +121,8 @@ const TAKERS_ITEM: usize = 3;
 /// asking (text 5071, `FUN_0050da9b`); the question told apart by this
 /// stand-in for its popup.
 const KEEP_ITEM: usize = 2;
+/// The segment that opens the medical department.
+const MEDICAL_ITEM: usize = 6;
 const KEEP_FORMATION: u16 = 5071;
 const KEEP_QUESTION: u16 = u16::MAX - 1;
 /// The squad list's columns as the game sets them: where each starts, and
@@ -303,20 +305,8 @@ impl Screen for MenuBar {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(season) = &cx.state.season else { return };
         let Some(manager) = season.manager() else { return };
-        let club = manager.club.and_then(|(slot, c)| game.world.country(slot)?.clubs.get(c));
-        let caption = game.text(if view.id == LINEUP { LINEUP_CAPTION } else { DRESSING_CAPTION });
-        let date = season.date();
-        let date = game
-            .text(DATE)
-            .replace("%1", &date.format("%-d").to_string())
-            .replace("%2", &date.format("%-m").to_string())
-            .replace("%3", &date.format("%Y").to_string());
-        let who = format!("{caption} {} {}", manager.first_name, manager.last_name);
-        let title = match club {
-            Some(club) => format!("{who} ({}), {date}", club.name),
-            None => format!("{who}, {date}"),
-        };
-        set(view, dialog, CAPTION_ID, title);
+        let caption = if view.id == LINEUP { LINEUP_CAPTION } else { DRESSING_CAPTION };
+        set(view, dialog, CAPTION_ID, manager_title(game, season, caption));
 
         let open = if view.id == LINEUP { LINEUP_SYMBOL } else { DRESSING_SYMBOL };
         if let Some(state) = control(dialog, BAR_ID).and_then(|b| view.bar_mut(b)) {
@@ -372,7 +362,9 @@ impl Screen for MenuBar {
                 Some(SPECIAL) => true,
                 Some(TITLES) => item < squadlist::COLUMNS,
                 Some(SECOND_TITLES) => item < squadlist::STATS_COLUMNS,
-                Some(DUTIES) => matches!(item, FORMATION_ITEM | KEEP_ITEM | TAKERS_ITEM),
+                Some(DUTIES) => {
+                    matches!(item, FORMATION_ITEM | KEEP_ITEM | TAKERS_ITEM | MEDICAL_ITEM)
+                }
                 Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
                 _ => false,
             }
@@ -467,6 +459,10 @@ impl Screen for MenuBar {
             let args = Args::TextForFormation(KEEP_FORMATION, formation);
             return Outcome::Popup(Request::with(QUESTION, args));
         }
+        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == MEDICAL_ITEM {
+            self.popup = Some(medical::MEDICAL);
+            return Outcome::Popup(Request::new(medical::MEDICAL));
+        }
         if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == TAKERS_ITEM {
             self.popup = Some(duties::TAKERS);
             return Outcome::Popup(Request::new(duties::TAKERS));
@@ -552,7 +548,7 @@ impl Screen for MenuBar {
             // A bonus or a fine may have changed the players' morale; the
             // takers their duties, a deposed captain his morale. The boxes
             // keep what they show but for the duties.
-            (Some(discipline::BONUS | discipline::FINE | duties::TAKERS), _) => {
+            (Some(discipline::BONUS | discipline::FINE | duties::TAKERS | medical::MEDICAL), _) => {
                 change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
                 Outcome::Stay
             }
@@ -592,6 +588,41 @@ impl MenuBar {
         change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
     }
 }
+
+/// A title as the turn's screens write it in their frame (`FUN_00730fed`):
+/// the screen's, the manager's name, his club and the date.
+pub(crate) fn manager_title(game: &Game, season: &Season, caption: u16) -> String {
+    let Some(manager) = season.manager() else { return String::new() };
+    let club = manager.club.and_then(|(slot, c)| game.world.country(slot)?.clubs.get(c));
+    let date = season.date();
+    let date = game
+        .text(DATE)
+        .replace("%1", &date.format("%-d").to_string())
+        .replace("%2", &date.format("%-m").to_string())
+        .replace("%3", &date.format("%Y").to_string());
+    let who = format!("{} {} {}", game.text(caption), manager.first_name, manager.last_name);
+    match club {
+        Some(club) => format!("{who} ({}), {date}", club.name),
+        None => format!("{who}, {date}"),
+    }
+}
+
+/// A title as the popups of the turn write it (text 1431, `FUN_00731086`):
+/// the popup's, the manager's name and his club; its last "%s" the
+/// original fills from a buffer nothing writes.
+pub(crate) fn club_title(game: &Game, season: &Season, kind: u16) -> String {
+    let Some(manager) = season.manager() else { return String::new() };
+    let club = manager.club.and_then(|(slot, c)| game.world.country(slot)?.clubs.get(c));
+    game.text(CLUB_TITLE)
+        .replacen("%s", game.text(kind), 1)
+        .replacen("%s", &manager.first_name, 1)
+        .replacen("%s", &manager.last_name, 1)
+        .replacen("%s", club.map_or("", |c| c.name.as_str()), 1)
+        .replacen("%s", "", 1)
+        .trim_end()
+        .to_owned()
+}
+const CLUB_TITLE: u16 = 1431;
 
 /// The current manager's club as the season follows it.
 fn club_state<'a>(cx: &'a Cx) -> Option<&'a ClubState> {

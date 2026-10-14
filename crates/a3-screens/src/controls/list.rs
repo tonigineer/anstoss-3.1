@@ -72,6 +72,8 @@ pub struct ListState {
     /// What each row stands for, for the screen to look up: a player's
     /// place in the squad, say.
     pub keys: Vec<usize>,
+    /// Whether a click tells which column it fell in (`Target::Cell`).
+    pub by_column: bool,
 }
 
 impl Default for ListState {
@@ -87,6 +89,7 @@ impl Default for ListState {
             marked: Vec::new(),
             row_boxes: Vec::new(),
             keys: Vec::new(),
+            by_column: false,
         }
     }
 }
@@ -155,6 +158,13 @@ impl ListState {
         Rect::new(up.min.x, top, up.max.x, top + length as f32)
     }
 
+    /// Whether the pointer is on a column of the row.
+    fn pointed_cell(&self, paint: &Paint, row: usize) -> bool {
+        self.by_column
+            && (0..self.tabs.len())
+                .any(|column| paint.pointed(Target::Cell { control: paint.index, row, column }))
+    }
+
     pub(crate) fn graphics(&self) -> (Vec<u16>, bool) {
         let icons = self.row_icons.iter().flatten().map(|&(_, id)| id);
         let boxes = self.row_boxes.iter().flatten().flat_map(|b| player_box::graphics(Some(b)).0);
@@ -211,7 +221,9 @@ impl ListState {
             let color = if selected {
                 fill(frame, x, top, right - x, row_height(control) as i32, SELECTED_ROW);
                 SELECTED_TEXT
-            } else if paint.pointed(Target::Row { control: paint.index, row }) {
+            } else if paint.pointed(Target::Row { control: paint.index, row })
+                || self.pointed_cell(paint, row)
+            {
                 TEXT_HOVER
             } else {
                 ink.map_or(TEXT, |[r, g, b]| Rgba([r, g, b, 255]))
@@ -221,9 +233,11 @@ impl ListState {
             let at = (x, top - 1);
             columns(font, frame, at, cells, &self.tabs, &self.aligns, color, right);
             // So do the icons.
+            // With their pure black left out, as the game's list draws them.
             for &(left, id) in self.row_icons.get(self.scroll + row).into_iter().flatten() {
                 if let Some(icon) = paint.image(id) {
-                    paste(frame, icon, Vec2::new(x as f32 + left, at.1 as f32));
+                    let icon = crate::game::transparent_black(icon.clone());
+                    paste(frame, &icon, Vec2::new(x as f32 + left, at.1 as f32));
                 }
             }
         }
@@ -242,6 +256,24 @@ fn style(control: &Control) -> u8 {
 /// The colour of its scrollbar.
 fn scheme(control: &Control) -> usize {
     usize::from((style(control) & COLOUR) >> 4)
+}
+
+/// A row's column: from its start to the next one's.
+fn cell(row: Rect, list: Rect, tabs: &[f32], column: usize) -> Rect {
+    let at = tabs.get(column).copied().unwrap_or(0.0);
+    let end = tabs.get(column + 1).map_or(row.max.x, |&next| list.min.x + next);
+    Rect::new(list.min.x + at, row.min.y, end, row.max.y)
+}
+
+/// Where a row's column is, in classic pixels, by the columns the dialog
+/// file gives the list.
+pub fn cell_rect(control: &Control, row: usize, column: usize) -> Option<Rect> {
+    let Kind::ListBox { columns, .. } = &control.kind else { return None };
+    let tabs: Vec<f32> = columns.iter().map(|c| c.at).collect();
+    let r = control.rect;
+    let y = r.min.y + 1.0 + row as f32 * row_height(control);
+    let line = Rect::new(r.min.x, y, r.max.x, (y + row_height(control)).min(r.max.y));
+    Some(cell(line, r, &tabs, column))
 }
 
 /// How high a list's rows are.
@@ -268,8 +300,11 @@ pub fn scroll_arrows(control: &Control) -> (Rect, Rect) {
     (up, down)
 }
 
-/// Every row it has room for, and the arrows of its scrollbar on top.
+/// Every row it has room for — or every column of each, in a list that
+/// answers by column: the stretch from one column's start to the next —
+/// and the arrows of its scrollbar on top.
 pub(crate) fn targets(
+    state: &ListState,
     index: usize,
     control: &Control,
     geometry: &dyn Geometry,
@@ -279,7 +314,14 @@ pub(crate) fn targets(
     for row in 0..visible_rows(control) {
         let y = r.min.y + 1.0 + row as f32 * row_height(control);
         let rect = Rect::new(r.min.x, y, r.max.x, (y + row_height(control)).min(r.max.y));
-        out.push((Target::Row { control: index, row }, geometry.map(rect)));
+        if !state.by_column {
+            out.push((Target::Row { control: index, row }, geometry.map(rect)));
+            continue;
+        }
+        for column in 0..state.tabs.len() {
+            let cell = cell(rect, r, &state.tabs, column);
+            out.push((Target::Cell { control: index, row, column }, geometry.map(cell)));
+        }
     }
     let (up, down) = geometry.scroll(control);
     out.push((Target::Scroll { control: index, up: true }, up));

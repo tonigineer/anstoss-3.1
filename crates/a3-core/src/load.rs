@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::data::Data;
 use crate::lineup::{BENCH, FIELD, Lineup};
+use crate::medical::{self, MedicalTables};
 use crate::random::Random;
 use crate::records::{self, Globals, Records, Team};
 use crate::season::{ClubState, Fitness, Manager, Season, Status};
@@ -55,7 +56,7 @@ pub fn season(records: &Records, data: &Data, random: Random) -> Season {
         current: 0,
         expected: BTreeMap::new(),
         clubs,
-        talk_of: None,
+        planner_message: None,
         random,
     }
 }
@@ -74,7 +75,8 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
         team.players().into_iter().filter_map(|id| Some((id, records.player(id)?))).collect();
     let players = squad.iter().map(|(_, record)| player(records, record)).collect();
     let fitness = squad.iter().map(|(_, record)| fitness(record)).collect();
-    let status = squad.iter().map(|(_, record)| status(records, record)).collect();
+    let medical = &data.rules.medical;
+    let status = squad.iter().map(|(_, record)| status(records, medical, record)).collect();
     let place = |id: u16| squad.iter().position(|&(other, _)| other == id);
     // Where the team keeps its eleven — the formation's spots, or where
     // the manager moved them; a team that keeps none stands in its
@@ -189,7 +191,7 @@ const STRENGTH_UNKNOWN: u8 = 0x20;
 /// The top two bits of `picks` at 1 or 3 (`FUN_00706acd`).
 const STRENGTH_HIDDEN: u8 = 0x40;
 
-fn status(records: &Records, record: &records::Player) -> Status {
+fn status(records: &Records, medical: &MedicalTables, record: &records::Player) -> Status {
     let globals = &records.globals;
     Status {
         last_form: Some(record.last_form().into()),
@@ -219,6 +221,8 @@ fn status(records: &Records, record: &records::Player) -> Status {
         strength_unknown: record.retiring() & STRENGTH_UNKNOWN != 0,
         doping: record.doping(),
         strength_hidden: record.picks() & STRENGTH_HIDDEN != 0,
+        injected: record.knocks() & medical::INJECTION != 0
+            && medical.injection_allowed(record.injury_kind()),
     }
 }
 

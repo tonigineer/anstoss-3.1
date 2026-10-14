@@ -16,7 +16,7 @@
 //! Actions, separated by `;`, act on the dialog's controls by their ids in
 //! the dialog file: `ok`, `cancel`, `press <button>`, `click <static or
 //! animation>`, `click bar <symbol>`, `choose <options> <item>`,
-//! `row <list> <row>`, `type <field> <text>`, `spin <spinner> up|down`,
+//! `row <list> <row>`, `cell <list> <row> <column>`, `type <field> <text>`, `spin <spinner> up|down`,
 //! `slide <slider> <value>`, and `wait` until the screen moves on by
 //! itself. A dialog the script has no actions for stops it, as does an
 //! action for a control the dialog does not have.
@@ -74,6 +74,8 @@ pub(crate) enum Action {
     Bar(usize),
     Choose(u16, usize),
     Row(u16, usize),
+    /// A row's column, in a list that answers by column.
+    Cell(u16, usize, usize),
     Type(u16, String),
     Spin(u16, bool),
     Slide(u16, i32),
@@ -228,6 +230,9 @@ fn parse_action(action: &str) -> Option<Action> {
         ["click", control] => Action::Click(id(control)?),
         ["choose", options, item] => Action::Choose(id(options)?, item.parse().ok()?),
         ["row", list, row] => Action::Row(id(list)?, row.parse().ok()?),
+        ["cell", list, row, column] => {
+            Action::Cell(id(list)?, row.parse().ok()?, column.parse().ok()?)
+        }
         ["spin", spinner, "up"] => Action::Spin(id(spinner)?, true),
         ["spin", spinner, "down"] => Action::Spin(id(spinner)?, false),
         ["slide", slider, value] => Action::Slide(id(slider)?, value.parse().ok()?),
@@ -422,6 +427,7 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         }
         Action::Choose(id, item) => Target::Option { control: find(id)?, item },
         Action::Row(id, row) => Target::Row { control: find(id)?, row },
+        Action::Cell(id, row, column) => Target::Cell { control: find(id)?, row, column },
         Action::Spin(id, up) => Target::Spin { control: find(id)?, up },
         Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
         Action::Drag(from, to) => {
@@ -678,6 +684,33 @@ mod tests {
             let cohesion = a3_core::cohesion::of(&game.rules.pitch, club, season.date());
             assert_eq!(cohesion, expected, "after {actions:?}");
         }
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_medical_department_lists_the_injured_and_the_knocked() {
+        let game = game();
+        let script = format!("{}\nnow choose 5266 6\nuntil dialog 151", LOAD.trim_end());
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+        let records = state.records.as_ref().unwrap();
+        let knocks = |p: usize| records.player(club.status[p].id).map_or(0, |r| r.knocks());
+        let sick = a3_core::medical::sick_list(club, knocks);
+        let view = runner.host.view();
+        let list = view.list(control(&game.dialogs[&151], 2586).unwrap()).unwrap();
+        if sick.is_empty() {
+            assert_eq!(list.rows, ["Alle Spieler sind derzeit einsetzbar."]);
+        } else {
+            assert_eq!(list.keys, sick);
+            assert_eq!(list.rows.len(), sick.len());
+        }
+        // OK goes back to the line-up.
+        let script = format!("{script}\nnow ok\nuntil dialog 147");
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
     }
 
     #[test]

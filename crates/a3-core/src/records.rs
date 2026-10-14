@@ -330,6 +330,9 @@ record! {
     0x319 => matchdays, set_matchdays: [u8; 46];
     /// Bit 5: the automatic line-ups always pick him; bit 4: never.
     0x271 => picks, set_picks: u8;
+    /// Sick visits: how many in the top two bits (up to 3), the days he
+    /// has been out unvisited in the low six.
+    0x270 => visits, set_visits: u8;
     /// His form this season, week by week: the sum and how many weeks
     /// (`FUN_006ff257`'s "DForm"; the season sets it to his form and 1).
     0x1e0 => season_form, set_season_form: i16;
@@ -623,6 +626,9 @@ record! {
     Globals, 0x1590, base 0xb5cb88;
     /// Whether each human slot is in play: above 0.
     0xb5cb9c => slots, set_slots: [i16; MANAGERS];
+    /// The start setting "Vorbereitung und Kalkulation" (dialog 256):
+    /// normal 5, fast 7, only competitive matches 12.
+    0xb5d152 => preparation, set_preparation: u8;
     /// The countries played besides the main one: how many, which.
     0xb5cbae => more_count, set_more_count: i16;
     0xb5cbb0 => main_country, set_main_country: i16;

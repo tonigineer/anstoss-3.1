@@ -305,11 +305,12 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         _ => Align::Left,
     };
     // Statics carry their colour (a COLORREF) and a font number after their
-    // name.
+    // name; column titles the font (`CMyTabStatic` +0xf0).
     let is_static = matches!(kind, Kind::Static);
+    let has_font = is_static || matches!(kind, Kind::Header { .. });
     let font = u16s(2)
         .and_then(|f| u8::try_from(f).ok())
-        .filter(|&f| is_static && f < FONTS)
+        .filter(|&f| has_font && f < FONTS)
         .unwrap_or(PLAIN_FONT);
     let ink = match extra.get(..3) {
         Some(&[r, g, b]) if is_static => [r, g, b],

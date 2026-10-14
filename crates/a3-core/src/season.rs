@@ -105,6 +105,8 @@ pub struct Rules {
     pub words: crate::words::Words,
     /// Bonuses and fines.
     pub discipline: crate::discipline::DisciplineTables,
+    /// Injuries: which allow an injection.
+    pub medical: crate::medical::MedicalTables,
 }
 
 impl Rules {
@@ -139,6 +141,7 @@ impl Rules {
             value: crate::value::ValueTables::load(exe)?,
             words: crate::words::Words::load(exe)?,
             discipline: crate::discipline::DisciplineTables::load(exe)?,
+            medical: crate::medical::MedicalTables::load(exe)?,
         })
     }
 
@@ -222,9 +225,10 @@ pub struct Season {
     pub expected: BTreeMap<(usize, usize), (usize, usize)>,
     /// The clubs with a human manager, as the week shows them.
     pub clubs: BTreeMap<(usize, usize), ClubState>,
-    /// The last name of the manager whose booked talk the week had today,
-    /// for its message (`IDC_ABLAUF_WOCHE_MELDUNG`).
-    pub talk_of: Option<String>,
+    /// What the week tells of today's appointment in the planner: the
+    /// text of its kind ("Einzelgespräch", "Krankenbesuch") and the last
+    /// name of the manager who had it (`IDC_ABLAUF_WOCHE_MELDUNG`).
+    pub planner_message: Option<(u16, String)>,
     pub random: Random,
 }
 
@@ -327,6 +331,8 @@ pub struct Status {
     /// His strength is hidden (`FUN_00706acd`): the list does not mark
     /// his contract's end.
     pub strength_hidden: bool,
+    /// He may play with an injection despite his injury (`FUN_006ffa39`).
+    pub injected: bool,
 }
 
 impl ClubState {
@@ -475,7 +481,7 @@ impl Season {
             main,
             expected,
             clubs: BTreeMap::new(),
-            talk_of: None,
+            planner_message: None,
             random,
         };
         for m in 0..season.managers.len() {
@@ -618,7 +624,18 @@ impl Season {
         &self,
         world: &World,
         calendar: &Calendar,
+        club: (usize, usize),
+    ) -> Option<Match> {
+        self.next_match_from(world, calendar, club, self.day)
+    }
+
+    /// A club's next league match from a day of the season on.
+    pub fn next_match_from(
+        &self,
+        world: &World,
+        calendar: &Calendar,
         (slot, club): (usize, usize),
+        from: usize,
     ) -> Option<Match> {
         let country = world.country(slot)?;
         let leagues = world.leagues_in_play(slot, self.main);
@@ -626,7 +643,7 @@ impl Season {
             Some((i, league, league.clubs.iter().position(|&c| c == club)?))
         })?;
         let row = calendar.row(country.nation, index)?;
-        let mut day = self.day;
+        let mut day = from;
         loop {
             let (found, matchday) = calendar.next_matchday(row, day)?;
             let pairings = league.fixtures.get(matchday - 1);

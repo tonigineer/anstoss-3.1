@@ -21,7 +21,9 @@ impl Grip {
     pub fn of(target: Target) -> Option<Self> {
         match target {
             Target::Control(control) => Some(Self::Control(control)),
-            Target::Row { control, row } => Some(Self::Row { control, row }),
+            Target::Row { control, row } | Target::Cell { control, row, .. } => {
+                Some(Self::Row { control, row })
+            }
             _ => None,
         }
     }
@@ -46,6 +48,13 @@ pub enum Target {
     Row {
         control: usize,
         row: usize,
+    },
+    /// A column of a line, in a list that answers by column
+    /// (`FUN_007aa1fd`, `FUN_007aa258`).
+    Cell {
+        control: usize,
+        row: usize,
+        column: usize,
     },
     Edit(usize),
     Spin {

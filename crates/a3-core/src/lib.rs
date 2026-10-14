@@ -13,6 +13,7 @@ pub mod duties;
 pub mod jobs;
 pub mod lineup;
 pub mod load;
+pub mod medical;
 pub mod mood;
 pub mod newgame;
 pub mod random;

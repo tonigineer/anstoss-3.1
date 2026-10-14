@@ -26,7 +26,6 @@ const FILES: u16 = 3387;
 /// The caption, in the frame: "ANSTOSS 3 - %s %s %s (%s). %s" with
 /// "Spielsysteme", the manager's names and his club.
 const CAPTION_ID: u16 = 9921;
-const CAPTION_TEXT: u16 = 1431;
 const CAPTION_KIND: u16 = 4361;
 /// The boxes on the pitch, and where its spots start, in the dialog.
 const BOXES: u16 = 9940;
@@ -67,16 +66,7 @@ impl Screen for Formations {
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         let Some(season) = &cx.state.season else { return };
         let Some(manager) = season.manager() else { return };
-        let club = manager.club.and_then(|(slot, c)| cx.game.world.country(slot)?.clubs.get(c));
-        let caption = cx
-            .game
-            .text(CAPTION_TEXT)
-            .replacen("%s", cx.game.text(CAPTION_KIND), 1)
-            .replacen("%s", &manager.first_name, 1)
-            .replacen("%s", &manager.last_name, 1)
-            .replacen("%s", club.map_or("", |c| c.name.as_str()), 1)
-            .replacen("%s", "", 1);
-        set(view, cx.dialog, CAPTION_ID, caption.trim_end().to_owned());
+        set(view, cx.dialog, CAPTION_ID, super::hub::club_title(cx.game, season, CAPTION_KIND));
         self.chosen = manager.club.and_then(|c| season.clubs.get(&c)).map_or(0, |s| s.formation);
         if let Some(choices) = control(cx.dialog, CHOICES).and_then(|c| view.options_mut(c)) {
             for (label, (name, _)) in choices.labels.iter_mut().zip(&manager.formations) {
