@@ -330,6 +330,10 @@ record! {
     0x319 => matchdays, set_matchdays: [u8; 46];
     /// Bit 5: the automatic line-ups always pick him; bit 4: never.
     0x271 => picks, set_picks: u8;
+    /// His form this season, week by week: the sum and how many weeks
+    /// (`FUN_006ff257`'s "DForm"; the season sets it to his form and 1).
+    0x1e0 => season_form, set_season_form: i16;
+    0x27b => season_form_weeks, set_season_form_weeks: u8;
     /// 100 is neither happy nor unhappy.
     0x296 => morale, set_morale: u8;
     /// What he did wrong: bit 3 + k an offence of level k (1 to 4) this

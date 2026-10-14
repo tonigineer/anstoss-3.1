@@ -186,6 +186,8 @@ const SMOKER: u32 = 0x800;
 /// (`FUN_00696b4c`).
 const NO_CAPTAIN: u8 = 0x40;
 const STRENGTH_UNKNOWN: u8 = 0x20;
+/// The top two bits of `picks` at 1 or 3 (`FUN_00706acd`).
+const STRENGTH_HIDDEN: u8 = 0x40;
 
 fn status(records: &Records, record: &records::Player) -> Status {
     let globals = &records.globals;
@@ -216,6 +218,7 @@ fn status(records: &Records, record: &records::Player) -> Status {
         no_captain: record.manner() & NO_CAPTAIN != 0,
         strength_unknown: record.retiring() & STRENGTH_UNKNOWN != 0,
         doping: record.doping(),
+        strength_hidden: record.picks() & STRENGTH_HIDDEN != 0,
     }
 }
 

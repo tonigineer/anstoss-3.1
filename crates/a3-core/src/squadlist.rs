@@ -12,8 +12,12 @@ use crate::season::ClubState;
 use crate::world::{GOALKEEPER, Player};
 
 /// The column titles: Name, Pos, NPs, Fähigk., St., Fo., Mo., ES, Rn.,
-/// Alter, Fällt aus.
+/// Alter, Fällt aus; and the season's row of them: Name, Pos, Nat, DForm,
+/// Ko, Fr, Eins., Tore, Zuf., Stamm.
 pub const COLUMNS: usize = 11;
+pub const STATS_COLUMNS: usize = 10;
+/// "Stamm.", which sorts as "Name" does without stepping it.
+const REGULAR: usize = 9;
 /// The orders "Name" steps through, one more with every click on it.
 const NAME_ORDERS: usize = 5;
 /// The main positions the list takes, keeper to striker.
@@ -21,33 +25,35 @@ const POSITIONS: u8 = 10;
 /// Days out from which a player counts as out.
 const WEEK: i32 = 7;
 
-/// Which column the list is sorted by, and which of its orders "Name" has:
+/// Which row of titles shows — the season's (`stats`) or the first — which
+/// column the list is sorted by, and which of its orders "Name" has:
 /// alphabetical (0), the eleven and the bench first (1, the order the
 /// screen opens with), the bench first (2), those in neither first (3),
 /// those out first (4).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Sort {
+    pub stats: bool,
     pub column: usize,
     pub names: usize,
 }
 
 impl Default for Sort {
     fn default() -> Self {
-        Self { column: 0, names: 1 }
+        Self { stats: false, column: 0, names: 1 }
     }
 }
 
 impl Sort {
-    /// A click on a column title; "Name" steps on even when it is the one
-    /// sorted by.
+    /// A click on a column title of the row that shows; "Name" steps on
+    /// even when it is the one sorted by, "Stamm." sorts by name.
     pub fn click(&mut self, column: usize) {
-        if column >= COLUMNS {
+        if column >= if self.stats { STATS_COLUMNS } else { COLUMNS } {
             return;
         }
         if column == 0 {
             self.names = (self.names + 1) % NAME_ORDERS;
         }
-        self.column = column;
+        self.column = if self.stats && column == REGULAR { 0 } else { column };
     }
 }
 
@@ -60,6 +66,18 @@ pub struct Name {
     pub nickname: Vec<u8>,
     pub last: Vec<u8>,
     pub first: Vec<u8>,
+}
+
+/// What the season's row compares of a player besides his fitness: his
+/// nation's three letters, his form this season in tenths ("DForm"), his
+/// appearances and goals, how content he is (0 happy to 3 wanting to go).
+#[derive(Clone, Default, Debug)]
+pub struct Season {
+    pub nation: Vec<u8>,
+    pub form: i32,
+    pub appearances: i32,
+    pub goals: i32,
+    pub content: i32,
 }
 
 /// The squad by main position, keeper to striker, in squad order within a
@@ -79,10 +97,29 @@ pub fn order(
     pitch: &Tables,
     club: &ClubState,
     names: &[Name],
+    seasons: &[Season],
     today: NaiveDate,
     sort: Sort,
 ) -> Vec<usize> {
-    exchange_sort(by_position(&club.players), |p, q| before(pitch, club, names, today, sort, p, q))
+    let rows = by_position(&club.players);
+    if sort.stats {
+        let season = |p: usize| seasons.get(p).cloned().unwrap_or_default();
+        let fitness = |p: usize| lineup::fitness_of(&club.fitness, p);
+        exchange_sort(rows, |p, q| match sort.column {
+            0 => by_name(club, names, sort.names, p, q),
+            1 => club.players[p].positions[0] < club.players[q].positions[0],
+            2 => season(p).nation < season(q).nation,
+            3 => season(p).form > season(q).form,
+            4 => lineup::condition(fitness(p)) > lineup::condition(fitness(q)),
+            5 => lineup::freshness(fitness(p)) > lineup::freshness(fitness(q)),
+            6 => season(p).appearances > season(q).appearances,
+            7 => season(p).goals > season(q).goals,
+            8 => season(p).content < season(q).content,
+            _ => false,
+        })
+    } else {
+        exchange_sort(rows, |p, q| before(pitch, club, names, today, sort, p, q))
+    }
 }
 
 /// The original's sort (`FUN_0050f112`): every row against each above it,
@@ -229,13 +266,24 @@ mod tests {
     }
 
     #[test]
+    fn the_seasons_row_sorts_by_name_under_its_last_title() {
+        let mut sort = Sort { stats: true, ..Sort::default() };
+        sort.click(4);
+        assert_eq!(sort.column, 4);
+        sort.click(REGULAR);
+        assert_eq!(sort, Sort { stats: true, column: 0, names: 1 });
+        sort.click(STATS_COLUMNS);
+        assert_eq!(sort.column, 0);
+    }
+
+    #[test]
     fn name_steps_through_its_orders() {
         let mut sort = Sort::default();
         sort.click(4);
-        assert_eq!(sort, Sort { column: 4, names: 1 });
+        assert_eq!(sort, Sort { stats: false, column: 4, names: 1 });
         for names in [2, 3, 4, 0, 1] {
             sort.click(0);
-            assert_eq!(sort, Sort { column: 0, names });
+            assert_eq!(sort, Sort { stats: false, column: 0, names });
         }
     }
 }

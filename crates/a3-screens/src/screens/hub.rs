@@ -35,7 +35,7 @@ use crate::game::Game;
 use crate::pointer::{Grip, Target};
 use crate::view::View;
 use a3_core::autolineup;
-use a3_core::mood::LAST_REAL_ID;
+use a3_core::mood::{self, LAST_REAL_ID};
 
 /// The bar runs along the bottom of the screen; its symbols are as wide as
 /// it is high.
@@ -85,10 +85,14 @@ enum Command {
     Fine,
 }
 const BAR_ID: u16 = 9930;
-/// What the bar takes the place of: the OK button and, on the line-up, the
-/// second row of column titles, which the game moves away and hides.
+/// What the bar takes the place of: the OK button.
 const OK_BUTTON: u16 = 1;
+/// The line-up's second row of column titles, the season's, which the game
+/// puts where the first is and hides, with a picture of its own under it;
+/// the button left of them that switches the rows (`0x5114ee`).
 const SECOND_TITLES: u16 = 5515;
+const SECOND_TITLES_PICTURE: u16 = 2259;
+const ROWS_BUTTON: u16 = 2571;
 
 /// The line-up's controls: the boxes on the pitch and the bench.
 const FIELD_BOXES: u16 = 2510;
@@ -134,6 +138,26 @@ const COLUMNS: [(f32, Option<(Align, f32)>); 11] = [
     (355.0, Some((Align::Centre, 20.0))),
     (385.0, None),
 ];
+/// The season's row of columns (the tables at 0x884b08 and 0x884b2c):
+/// name, position, nation, form this season, condition, freshness,
+/// appearances, goals, a regular place; and where it shows how content a
+/// player is — happy, content, all right, wanting to go (`0x89f918[57..]`).
+const STATS_COLUMNS: [(f32, Option<(Align, f32)>); 9] = [
+    (0.0, None),
+    (105.0, Some((Align::Centre, 30.0))),
+    (140.0, Some((Align::Centre, 30.0))),
+    (180.0, Some((Align::Right, 30.0))),
+    (225.0, Some((Align::Right, 20.0))),
+    (253.0, Some((Align::Right, 25.0))),
+    (285.0, Some((Align::Right, 20.0))),
+    (320.0, Some((Align::Right, 20.0))),
+    (385.0, Some((Align::Centre, 30.0))),
+];
+const CONTENT_COLUMN: f32 = 358.0;
+const CONTENT_ICONS: [u16; 4] = [1807, 1808, 1806, 1809];
+/// A regular place guaranteed in his contract, and "Ja" (text 1028).
+const REGULAR_PLACE: u16 = 0x4000;
+const YES: u16 = 1028;
 /// Where the list puts a player's abilities.
 const ABILITY_COLUMNS: [f32; 3] = [180.0, 196.0, 212.0];
 /// Where a row shows its player's status, and the graphics of the statuses
@@ -158,6 +182,8 @@ const KNOCKED: u8 = 11;
 const DOPING: u8 = 12;
 const PRISON: u8 = 13;
 const UFO: u8 = 14;
+/// The mark of a player suspended by the club, in his absence's kind.
+const MARKED: u8 = 0x10;
 /// The list's colours: the line-up black, the bench blue, the rest of the
 /// squad green.
 const PLAYING_INK: [u8; 3] = [0, 0, 0];
@@ -194,7 +220,13 @@ const QUIT_QUESTION: u16 = u16::MAX;
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     for id in [LINEUP, DRESSING_ROOM] {
         let Some(dialog) = dialogs.get_mut(&id) else { continue };
-        dialog.controls.retain(|c| !matches!(c.id, Some(OK_BUTTON | SECOND_TITLES)));
+        dialog.controls.retain(|c| c.id != Some(OK_BUTTON));
+        let first_titles = dialog.controls.iter().find(|c| c.id == Some(TITLES)).map(|c| c.rect);
+        if let Some(rect) = first_titles
+            && let Some(second) = dialog.controls.iter_mut().find(|c| c.id == Some(SECOND_TITLES))
+        {
+            second.rect = rect;
+        }
         dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
         if id == LINEUP {
             let spots = rules.pitch.formations.first().map_or([(0, 0); FIELD], |f| f.1);
@@ -255,8 +287,11 @@ pub struct MenuBar {
     /// The player whose menu is open, and its entries.
     menu_player: Option<usize>,
     menu: Vec<Command>,
-    /// The column the squad list is sorted by; each opening starts afresh.
+    /// The column the squad list is sorted by, and the one each row of
+    /// titles had when the other was switched to; each opening starts
+    /// afresh.
     sort: Sort,
+    kept: [usize; 2],
 }
 
 impl Screen for MenuBar {
@@ -312,19 +347,31 @@ impl Screen for MenuBar {
             // Sorted as it opens, "Name" lit (`CMannschaftsaufstellung`'s
             // constructor).
             self.sort = Sort::default();
+            self.kept = [0; 2];
             if let Some(titles) = control(dialog, TITLES).and_then(|i| view.options_mut(i)) {
                 titles.chosen = self.sort.column;
+            }
+            if let Some(second) = control(dialog, SECOND_TITLES) {
+                view.controls[second].hidden = true;
+                if let Some(titles) = view.options_mut(second) {
+                    titles.background = Some(SECOND_TITLES_PICTURE);
+                    titles.chosen = 0;
+                }
             }
             let records = cx.state.records.as_ref();
             show_lineup(view, dialog, game, season, state, records, Boxes::Refill, self.sort);
         }
         // Crossed out: what does nothing yet.
         let works = |target: Target| {
+            if let Target::Button(c) = target {
+                return dialog.controls[c].id == Some(ROWS_BUTTON);
+            }
             let Target::Option { control: c, item } = target else { return false };
             match dialog.controls[c].id {
                 Some(BAR_ID) => matches!(item, LINEUP_SYMBOL | DRESSING_SYMBOL | WHISTLE),
                 Some(SPECIAL) => true,
                 Some(TITLES) => item < squadlist::COLUMNS,
+                Some(SECOND_TITLES) => item < squadlist::STATS_COLUMNS,
                 Some(DUTIES) => matches!(item, FORMATION_ITEM | KEEP_ITEM | TAKERS_ITEM),
                 Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
                 _ => false,
@@ -402,6 +449,13 @@ impl Screen for MenuBar {
             }
             return Outcome::Stay;
         }
+        if let Target::Button(c) = target
+            && view.id == LINEUP
+            && cx.dialog.controls[c].id == Some(ROWS_BUTTON)
+        {
+            self.switch_rows(cx, view, c);
+            return Outcome::Stay;
+        }
         let Target::Option { control: c, item } = target else { return Outcome::Stay };
         if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == FORMATION_ITEM {
             self.popup = Some(FORMATIONS);
@@ -429,7 +483,7 @@ impl Screen for MenuBar {
         }
         // A column title sorts the list by its column (`FUN_0050fd07`);
         // nothing else changes.
-        if view.id == LINEUP && cx.dialog.controls[c].id == Some(TITLES) {
+        if view.id == LINEUP && matches!(cx.dialog.controls[c].id, Some(TITLES | SECOND_TITLES)) {
             self.sort.click(item);
             change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
             return Outcome::Stay;
@@ -510,6 +564,32 @@ impl Screen for MenuBar {
             (None, Reply::Ok) => Outcome::Close(Reply::Ok),
             _ => Outcome::Stay,
         }
+    }
+}
+
+impl MenuBar {
+    /// The other row of column titles, the list sorted as it was there,
+    /// the button showing its other picture; nothing but the list changes.
+    fn switch_rows(&mut self, cx: &mut Cx, view: &mut View, button: usize) {
+        let dialog = cx.dialog;
+        self.kept[usize::from(self.sort.stats)] = self.sort.column;
+        self.sort.stats = !self.sort.stats;
+        self.sort.column = self.kept[usize::from(self.sort.stats)];
+        for (id, shown) in [(TITLES, !self.sort.stats), (SECOND_TITLES, self.sort.stats)] {
+            let Some(c) = control(dialog, id) else { continue };
+            view.controls[c].hidden = !shown;
+            if let Some(titles) = view.options_mut(c) {
+                titles.chosen = self.sort.column;
+            }
+        }
+        if let Kind::States { pictures } = &dialog.controls[button].kind
+            && let Some(&picture) = pictures.get(usize::from(self.sort.stats))
+            && let ControlState::Button(state) = &mut view.controls[button].state
+        {
+            state.images = Some((picture, picture));
+            state.ready.clone_from(pictures);
+        }
+        change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
     }
 }
 
@@ -651,10 +731,10 @@ fn list_order(
     game: &Game,
     season: &Season,
     club: &ClubState,
+    seasons: &[squadlist::Season],
     records: Option<&Records>,
     sort: Sort,
 ) -> Vec<usize> {
-    let bytes = |text: &str| text.chars().map(|c| to_cp1252(c).unwrap_or(b'?')).collect();
     let names: Vec<squadlist::Name> = club
         .players
         .iter()
@@ -671,8 +751,49 @@ fn list_order(
             }
         })
         .collect();
-    squadlist::order(&game.rules.pitch, club, &names, season.date(), sort)
+    squadlist::order(&game.rules.pitch, club, &names, seasons, season.date(), sort)
 }
+
+fn bytes(text: &str) -> Vec<u8> {
+    text.chars().map(|c| to_cp1252(c).unwrap_or(b'?')).collect()
+}
+
+/// What the season's row of the list shows of each player, from his record
+/// (`FUN_0050ada7`'s second row): his nation's letters, his form this
+/// season, his league appearances and goals, how content he is. A player of
+/// a new game has no season yet.
+fn seasons(game: &Game, club: &ClubState, records: Option<&Records>) -> Vec<squadlist::Season> {
+    let code = |nation: u8| game.world.nation_codes.get(usize::from(nation)).cloned();
+    (0..club.players.len())
+        .map(|p| {
+            let status = club.status.get(p).copied().unwrap_or_default();
+            let nation = bytes(&code(status.nations[0]).unwrap_or_default());
+            let Some(r) = records.and_then(|records| records.player(status.id)) else {
+                return squadlist::Season {
+                    nation,
+                    form: NO_FORM,
+                    content: 1,
+                    ..Default::default()
+                };
+            };
+            let weeks = i32::from(r.season_form_weeks());
+            let form = if weeks == 0 { NO_FORM } else { i32::from(r.season_form()) * 10 / weeks };
+            // A manager who plays is content (`FUN_00770877`).
+            let content =
+                if status.id > LAST_REAL_ID { 1 } else { mood::content_level(mood::parts(r)) };
+            squadlist::Season {
+                nation,
+                form,
+                appearances: i32::from(r.league_matches()),
+                goals: i32::from(r.goals()[0]),
+                content: content as i32,
+            }
+        })
+        .collect()
+}
+
+/// The season's form of a player without weeks, in tenths.
+const NO_FORM: i32 = 100;
 
 /// Bits of a record's `shown`: he goes by his nickname.
 const NICKNAME: u32 = 0x8000_0000;
@@ -756,7 +877,8 @@ fn show_lineup(
     }
 
     let status = |p: usize| state.status.get(p).copied().unwrap_or_default();
-    let order = list_order(game, season, state, records, sort);
+    let seasons = seasons(game, state, records);
+    let order = list_order(game, season, state, &seasons, records, sort);
     let visible = control(dialog, SQUAD).map_or(0, |l| list::visible_rows(&dialog.controls[l]));
     if let Some(state) = control(dialog, SQUAD).and_then(|l| view.list_mut(l)) {
         // The top row stays as far as the rows reach; no row stays selected.
@@ -764,8 +886,9 @@ fn show_lineup(
         state.selected = None;
         state.keys.clone_from(&order);
         let today = season.date();
-        state.tabs = COLUMNS.iter().map(|&(at, _)| at).collect();
-        state.aligns = COLUMNS.iter().map(|&(_, align)| align).collect();
+        let columns: &[_] = if sort.stats { &STATS_COLUMNS } else { &COLUMNS };
+        state.tabs = columns.iter().map(|&(at, _)| at).collect();
+        state.aligns = columns.iter().map(|&(_, align)| align).collect();
         state.rows.clear();
         state.inks.clear();
         state.row_icons.clear();
@@ -780,6 +903,39 @@ fn show_lineup(
                 (s, t) => format!("{}/{}", abbreviation(s), abbreviation(t)),
             };
             let form = lineup::form(fitness(p));
+            let ink = if out(&status(p)) {
+                OUT_INK
+            } else if lineup.playing(p) {
+                PLAYING_INK
+            } else if lineup.on_bench(p) {
+                BENCH_INK
+            } else {
+                STANDS_INK
+            };
+            if sort.stats {
+                let season = &seasons[p];
+                let regular = records
+                    .and_then(|r| r.player(status(p).id))
+                    .is_some_and(|r| r.terms() & REGULAR_PLACE != 0);
+                state.rows.push(
+                    [
+                        name(player),
+                        abbreviation(main),
+                        a3_files::sav::cp1252(&season.nation),
+                        format!("{:.1}", season.form as f32 / 10.0),
+                        lineup::condition(fitness(p)).to_string(),
+                        lineup::freshness(fitness(p)).to_string(),
+                        season.appearances.to_string(),
+                        season.goals.to_string(),
+                        if regular { game.text(YES).to_owned() } else { String::new() },
+                    ]
+                    .join("\t"),
+                );
+                state.inks.push(Some(ink));
+                let icon = CONTENT_ICONS.get(season.content as usize).copied();
+                state.row_icons.push(icon.map(|i| (CONTENT_COLUMN, i)).into_iter().collect());
+                continue;
+            }
             state.rows.push(
                 [
                     name(player),
@@ -796,15 +952,7 @@ fn show_lineup(
                 ]
                 .join("\t"),
             );
-            state.inks.push(Some(if out(&status(p)) {
-                OUT_INK
-            } else if lineup.playing(p) {
-                PLAYING_INK
-            } else if lineup.on_bench(p) {
-                BENCH_INK
-            } else {
-                STANDS_INK
-            }));
+            state.inks.push(Some(ink));
             let mut icons: Vec<(f32, u16)> =
                 ABILITY_COLUMNS.into_iter().zip(pitch.ability_icons(player)).collect();
             if let Some(icon) = status_icon(&status(p)) {
@@ -855,7 +1003,10 @@ fn out_for(status: &Status, game: &Game) -> String {
 /// long absence — and the club's view: suspended by it, away, or at the end
 /// of his contract.
 fn status_icon(status: &Status) -> Option<u8> {
-    const MARKED: u8 = 0x10;
+    // Away and marked: suspended, whatever else (`FUN_006fef73`).
+    if status.away > 0 && status.away_kind & MARKED != 0 {
+        return Some(SUSPENDED);
+    }
     let mut icon = None;
     if status.knocked {
         icon = Some(KNOCKED);
@@ -872,7 +1023,8 @@ fn status_icon(status: &Status) -> Option<u8> {
     } else if status.injured > 0 {
         icon = Some(RISKY);
     }
-    let contracted = status.contract.is_none_or(|years| years > 0);
+    // A player of hidden strength shows no contract's end.
+    let contracted = status.contract.is_none_or(|years| years > 0) || status.strength_hidden;
     if status.away == 0 && contracted {
         if status.away_kind & MARKED != 0 {
             icon = Some(SUSPENDED);
@@ -891,13 +1043,13 @@ fn status_icon(status: &Status) -> Option<u8> {
 }
 
 /// Whether the list writes a player in red: out for a while, suspended, or
-/// at the end of his contract.
+/// at the end of his contract — unless his strength is hidden.
 fn out(status: &Status) -> bool {
     status.long > 0
         || status.suspended != 0
         || status.injured >= WEEK_DAYS as i32
         || status.away > 0
-        || status.contract.is_some_and(|years| years <= 0)
+        || status.contract.is_some_and(|years| years <= 0) && !status.strength_hidden
 }
 
 /// The panel that holds the line-up against the next opponent's, if the

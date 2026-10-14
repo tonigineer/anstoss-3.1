@@ -451,14 +451,21 @@ impl Lineup {
 
 /// A player's form, from 0 to 20: how fit and fresh he is, around his mood.
 pub fn form(fitness: Fitness) -> i32 {
-    let mut condition = fitness.condition / 100;
-    if fitness.smoker {
-        condition = (condition - 5).max(0);
-    }
-    let fresh = (fitness.freshness.iter().sum::<i32>() / 100).clamp(0, 100);
     let (low, high) = FORM_RANGE;
-    let fit = ((condition + fresh) / 2).clamp(low, high);
+    let fit = ((condition(fitness) + freshness(fitness)) / 2).clamp(low, high);
     ((fit - low) / 3 + fitness.mood) / 2
+}
+
+/// His condition as a list shows it ("Ko", `FUN_00457e00`): a smoker's
+/// counts five less.
+pub fn condition(fitness: Fitness) -> i32 {
+    let condition = fitness.condition / 100;
+    if fitness.smoker { (condition - 5).max(0) } else { condition }
+}
+
+/// His freshness as a list shows it ("Fr", `FUN_006ff649`), 0 to 100.
+pub fn freshness(fitness: Fitness) -> i32 {
+    (fitness.freshness.iter().sum::<i32>() / 100).clamp(0, 100)
 }
 
 pub fn fitness_of(fitness: &[Fitness], player: usize) -> Fitness {

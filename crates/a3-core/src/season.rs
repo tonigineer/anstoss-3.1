@@ -324,6 +324,9 @@ pub struct Status {
     pub no_captain: bool,
     pub strength_unknown: bool,
     pub doping: u8,
+    /// His strength is hidden (`FUN_00706acd`): the list does not mark
+    /// his contract's end.
+    pub strength_hidden: bool,
 }
 
 impl ClubState {

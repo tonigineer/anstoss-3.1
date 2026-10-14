@@ -101,6 +101,11 @@ pub enum Kind {
     /// A field that shows one of a list of texts, the list dropping down
     /// under it to choose another: the game's `CMyComboBox`.
     Combo,
+    /// A button that steps through states, a picture each, at every click:
+    /// the game's `CMyPushButton` with states (its kind 3).
+    States {
+        pictures: Vec<u16>,
+    },
     /// A button with a text on its picture: the game's `CMyPushButton`.
     PushButton {
         normal: u16,
@@ -265,6 +270,13 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         // The list's font, row height and style (`FUN_007aa393`: the
         // control's +0x1e8, +0x1ea and +0x1eb).
         // A few lists hold the file's padding there (0xcdcd): nothing set.
+        // The number of states, then a picture, a word and a text each.
+        3 => match u16s(8) {
+            Some(count @ 1..=MOST_STATES) => Kind::States {
+                pictures: (0..usize::from(count)).filter_map(|i| u16s(9 + 3 * i)).collect(),
+            },
+            _ => Kind::Other,
+        },
         4 => {
             let columns = columns(extra, LIST_COLUMNS);
             match u16s(14).unwrap_or(0).to_le_bytes() {
@@ -328,6 +340,8 @@ pub struct Column {
 /// centred, 0x8000 right-aligned — and its width first.
 const LIST_COLUMNS: (usize, usize) = (12, 15);
 const HEADER_COLUMNS: (usize, usize) = (3, 4);
+/// The most states a stepping button has.
+const MOST_STATES: u16 = 8;
 const MOST_COLUMNS: u16 = 50;
 
 fn columns(extra: &[u8], (count, first): (usize, usize)) -> Vec<Column> {

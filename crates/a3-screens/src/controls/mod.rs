@@ -94,7 +94,9 @@ impl ControlView {
         let text = || control.text.clone();
         let state = match &control.kind {
             Kind::Static => ControlState::Static(StaticState { text: text(), clickable: false }),
-            Kind::Button { .. } => ControlState::Button(ButtonState::default()),
+            Kind::Button { .. } | Kind::States { .. } => {
+                ControlState::Button(ButtonState::default())
+            }
             // Columns as the dialog file sets them, until the screen sets its own.
             Kind::ListBox { columns, .. } => ControlState::List(ListState {
                 tabs: tabs(columns),
@@ -202,7 +204,7 @@ impl ControlState {
     pub(crate) fn graphics(&self, control: &Control) -> (Vec<u16>, bool) {
         match self {
             Self::Button(b) => button::graphics(b, control),
-            Self::Options(_) => options::graphics(control),
+            Self::Options(o) => options::graphics(o, control),
             Self::Anim(anim) => (anim.frames.clone(), true),
             Self::Bar(_) => (bar::IMAGES.to_vec(), false),
             Self::Player(player) => player_box::graphics(player.as_ref()),

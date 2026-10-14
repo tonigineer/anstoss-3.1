@@ -25,9 +25,11 @@ pub struct ButtonState {
 
 impl ButtonState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
-        let (normal, hover, labelled) = match paint.control.kind {
-            Kind::Button { normal, hover } => (normal, hover, false),
-            Kind::PushButton { normal, hover } => (normal, hover, true),
+        let (normal, hover, labelled) = match &paint.control.kind {
+            &Kind::Button { normal, hover } => (normal, hover, false),
+            &Kind::PushButton { normal, hover } => (normal, hover, true),
+            // Its first state's picture, which does not light up.
+            Kind::States { pictures } if !pictures.is_empty() => (pictures[0], pictures[0], false),
             _ => return,
         };
         let (normal, hover) = self.images.unwrap_or((normal, hover));
@@ -41,7 +43,14 @@ impl ButtonState {
         if (!labelled || held)
             && let Some(sprite) = paint.image(if pointed { hover } else { normal })
         {
-            paste(frame, sprite, r.min);
+            // A stepping button's window cuts its picture.
+            if matches!(paint.control.kind, Kind::States { .. }) {
+                let (w, h) =
+                    (sprite.width().min(r.width() as u32), sprite.height().min(r.height() as u32));
+                paste(frame, &image::imageops::crop_imm(sprite, 0, 0, w, h).to_image(), r.min);
+            } else {
+                paste(frame, sprite, r.min);
+            }
         }
         if let (true, Some(font)) = (labelled, paint.font()) {
             let text = &paint.control.text;
@@ -59,9 +68,10 @@ pub(crate) fn graphics(state: &ButtonState, control: &Control) -> (Vec<u16>, boo
 }
 
 fn file_graphics(control: &Control) -> (Vec<u16>, bool) {
-    match control.kind {
-        Kind::Button { normal, hover } => (vec![normal, hover], true),
-        Kind::PushButton { normal, hover } => (vec![normal, hover], false),
+    match &control.kind {
+        &Kind::Button { normal, hover } => (vec![normal, hover], true),
+        &Kind::PushButton { normal, hover } => (vec![normal, hover], false),
+        Kind::States { pictures } => (pictures.clone(), true),
         _ => (Vec::new(), true),
     }
 }

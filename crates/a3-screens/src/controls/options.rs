@@ -32,6 +32,8 @@ pub struct OptionsState {
     pub actions: bool,
     /// Options that are switched off: they show nothing and do not answer.
     pub off: Vec<bool>,
+    /// A picture of its own under the options (`FUN_007a743a`).
+    pub background: Option<u16>,
 }
 
 impl OptionsState {
@@ -67,6 +69,13 @@ impl OptionsState {
         let Kind::Options { image, items } = &control.kind else { return };
         let r = control.rect;
         let (x, y) = (r.min.x as i32, r.min.y as i32);
+        // Cut to the control, as its window cuts it.
+        if let Some(picture) = self.background.and_then(|id| paint.image(id)) {
+            let (w, h) =
+                (picture.width().min(r.width() as u32), picture.height().min(r.height() as u32));
+            let part = imageops::crop_imm(picture, 0, 0, w, h).to_image();
+            imageops::overlay(frame, &part, x.into(), y.into());
+        }
         for (item, it) in items.iter().enumerate() {
             // The chosen option shows lit; the game's buttons of this kind
             // do not light up when pointed at.
@@ -138,11 +147,14 @@ impl OptionsState {
     }
 }
 
-pub(crate) fn graphics(control: &Control) -> (Vec<u16>, bool) {
-    match control.kind {
-        Kind::Options { image, .. } if image != 0 => (vec![image], false),
-        _ => (Vec::new(), false),
+pub(crate) fn graphics(state: &OptionsState, control: &Control) -> (Vec<u16>, bool) {
+    let mut ids: Vec<u16> = state.background.into_iter().collect();
+    if let Kind::Options { image, .. } = control.kind
+        && image != 0
+    {
+        ids.push(image);
     }
+    (ids, false)
 }
 
 /// Centre of the painted bullet of an option, in classic pixels.

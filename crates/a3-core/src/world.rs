@@ -126,8 +126,9 @@ const NATIONAL_TEAMS: [u16; 46] = [
 ];
 
 pub struct World {
-    /// Nation names by code.
+    /// Nation names by code, and their three letters ("DEU").
     pub nations: Vec<String>,
+    pub nation_codes: Vec<String>,
     /// By slot; the bonus slot is empty when no bonus country is installed.
     pub countries: Vec<Option<Country>>,
     /// Nations whose clubs `Internat.sav` brings in for the European cups.
@@ -199,12 +200,14 @@ pub struct League {
 impl World {
     pub fn load(dir: &Path) -> io::Result<Self> {
         let nations = Section::read(&find(dir, "Laender.sav")?)?;
-        let nations: Vec<String> = nations
+        let nations: Vec<&Section> = nations
             .child("NATION")
             .ok_or_else(|| invalid("Laender.sav has no nations"))?
             .all("NATION")
-            .map(|n| n.text(0).unwrap_or_default().to_owned())
             .collect();
+        let text = |n: &Section, i: usize| n.text(i).unwrap_or_default().to_owned();
+        let nation_codes = nations.iter().map(|n| text(n, 2)).collect();
+        let nations = nations.iter().map(|n| text(n, 0)).collect();
         let countries =
             (0..SLOTS).map(|slot| Country::load(dir, slot)).collect::<io::Result<Vec<_>>>()?;
         let internationals = Section::read(&find(dir, "Internat.sav")?)?
@@ -217,7 +220,7 @@ impl World {
             .ok()
             .and_then(|kleinig| kleinig.child("MISC")?.number(0))
             .map_or(DEFAULT_START_YEAR, |year| year as i32);
-        Ok(Self { nations, countries, internationals, start_year })
+        Ok(Self { nations, nation_codes, countries, internationals, start_year })
     }
 
     pub fn nation(&self, code: u16) -> &str {
