@@ -12,6 +12,7 @@ pub mod hub;
 pub mod jobs;
 pub mod medical;
 pub mod office;
+pub mod opponent;
 pub mod planner;
 pub mod playerinfo;
 pub mod popups;
@@ -114,6 +115,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(duties::Takers::default()),
         Box::new(medical::Medical::default()),
         Box::new(medical::Visit),
+        Box::new(opponent::Opponent),
         Box::new(playerinfo::PlayerInfo::default()),
         Box::new(office::Office),
         Box::new(discipline::Bonus::default()),
@@ -138,6 +140,7 @@ pub fn compose(game: &mut Game) {
     duties::compose(&mut game.dialogs);
     medical::compose(&mut game.dialogs);
     medical::compose_visit(&mut game.dialogs);
+    opponent::compose(&mut game.dialogs);
     playerinfo::compose(&mut game.dialogs);
     discipline::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);

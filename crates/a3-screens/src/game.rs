@@ -11,6 +11,7 @@ use std::time::SystemTime;
 use image::{ImageFormat, Rgba, RgbaImage};
 
 use a3_core::data::Data;
+use a3_core::records::Records;
 use a3_files::cpr::Archive;
 use a3_files::rch::{self, Dialog};
 
@@ -121,6 +122,37 @@ impl Game {
         }
         out.push_str(rest);
         out
+    }
+
+    /// A club's name by its country and number (`FUN_0063e52f`): none,
+    /// the national team, a team of the country, or what the save does not
+    /// name yet — an amateur club, a club abroad.
+    pub fn club_name(&self, records: Option<&Records>, country: u8, number: i16) -> String {
+        const NO_CLUB: u16 = 4079;
+        const AMATEUR: u16 = 3491;
+        const ABROAD: u16 = 3492;
+        const NATIONAL: i16 = 200;
+        /// A country of the first kind has forty amateur clubs after its teams.
+        const AMATEUR_CLUBS: i16 = 40;
+        if country == 0 {
+            return self.text(NO_CLUB).to_owned();
+        }
+        if number == NATIONAL {
+            return self.world.nation(country.into()).to_owned();
+        }
+        let Some(records) = records else { return String::new() };
+        let countries = &records.countries;
+        let teams = countries.team_count(country.into());
+        let team = u16::try_from(number).ok().filter(|_| number < teams);
+        match (countries.kind(country.into()), team) {
+            (1 | 2, Some(number)) => {
+                records.team(country.into(), number).map_or_else(String::new, |t| t.name())
+            }
+            // The amateur clubs' and the clubs abroad's names are not read yet.
+            (1, None) if number < teams + AMATEUR_CLUBS => self.text(AMATEUR).to_owned(),
+            (1 | 2, None) => self.text(AMATEUR).to_owned(),
+            _ => self.text(ABROAD).to_owned(),
+        }
     }
 
     /// A graphic by its id in `ListeDerGrafik.rh`, from `Archives/grafik.cpr`.

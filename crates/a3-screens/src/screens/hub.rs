@@ -121,8 +121,10 @@ const TAKERS_ITEM: usize = 3;
 /// asking (text 5071, `FUN_0050da9b`); the question told apart by this
 /// stand-in for its popup.
 const KEEP_ITEM: usize = 2;
-/// The segment that opens the medical department.
+/// The segments that open the medical department, and what the game tells
+/// of the next opponent.
 const MEDICAL_ITEM: usize = 6;
+const OPPONENT_ITEM: usize = 7;
 const KEEP_FORMATION: u16 = 5071;
 const KEEP_QUESTION: u16 = u16::MAX - 1;
 /// The squad list's columns as the game sets them: where each starts, and
@@ -363,7 +365,10 @@ impl Screen for MenuBar {
                 Some(TITLES) => item < squadlist::COLUMNS,
                 Some(SECOND_TITLES) => item < squadlist::STATS_COLUMNS,
                 Some(DUTIES) => {
-                    matches!(item, FORMATION_ITEM | KEEP_ITEM | TAKERS_ITEM | MEDICAL_ITEM)
+                    matches!(
+                        item,
+                        FORMATION_ITEM | KEEP_ITEM | TAKERS_ITEM | MEDICAL_ITEM | OPPONENT_ITEM
+                    )
                 }
                 Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
                 _ => false,
@@ -458,6 +463,12 @@ impl Screen for MenuBar {
             self.popup = Some(KEEP_QUESTION);
             let args = Args::TextForFormation(KEEP_FORMATION, formation);
             return Outcome::Popup(Request::with(QUESTION, args));
+        }
+        // The next opponent's info, if there is one (`FUN_00510540`).
+        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == OPPONENT_ITEM {
+            let Some((dialog, opponent)) = next_opponent(cx) else { return Outcome::Stay };
+            self.popup = Some(dialog);
+            return Outcome::Popup(Request::with(dialog, Args::Club(opponent.0, opponent.1)));
         }
         if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == MEDICAL_ITEM {
             self.popup = Some(medical::MEDICAL);
@@ -623,6 +634,21 @@ pub(crate) fn club_title(game: &Game, season: &Season, kind: u16) -> String {
         .to_owned()
 }
 const CLUB_TITLE: u16 = 1431;
+
+/// The club the line-up compares with, and which of the opponent's dialogs
+/// the game shows of it.
+fn next_opponent(cx: &Cx) -> Option<(u16, (usize, usize))> {
+    let (game, season) = (cx.game, cx.state.season.as_ref()?);
+    let own = season.manager()?.club?;
+    let next = season
+        .next_match(&game.world, &game.calendar, own)
+        .filter(|m| m.day < season.day + FIXTURE_AHEAD)?;
+    let opponent = if next.home == own { next.away } else { next.home };
+    let records = cx.state.records.as_ref();
+    let nation = game.world.country(opponent.0)?.nation;
+    let team = records.and_then(|r| r.team(nation, u16::try_from(opponent.1).ok()?));
+    Some((super::opponent::dialog_for(records, team), opponent))
+}
 
 /// The current manager's club as the season follows it.
 fn club_state<'a>(cx: &'a Cx) -> Option<&'a ClubState> {

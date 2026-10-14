@@ -126,6 +126,8 @@ pub enum Args {
     },
     /// An appointment of a kind to book with a player, by his record's id.
     Book(u8, u16),
+    /// A club, by its country's slot and its place there.
+    Club(usize, usize),
     /// A text by its id, with the name of one of the current manager's
     /// formations for its `%s`.
     TextForFormation(u16, usize),

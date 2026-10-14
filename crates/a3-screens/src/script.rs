@@ -857,6 +857,41 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_opponent_info_tells_what_the_originals_does() {
+        let game = game();
+        let then = "now choose 5266 7\nuntil dialog 83";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        // As the original shows Union's next opponent on day 62.
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&83];
+        let text = |id: u16| view.text(crate::screens::control(dialog, id).unwrap());
+        assert_eq!(text(1828), "VfL Wolfsburg");
+        assert_eq!(text(1829), "9. Platz (3 Punkte,2 Spiele) (zuletzt: sN)");
+        assert_eq!(text(1830), "Runde 2 (RB Leipzig)");
+        assert_eq!(text(1831), "nicht dabei");
+        assert_eq!(text(1848), "gesegnet");
+        assert_eq!(text(1825), "Volkswagen Arena, 30000 Zuschauer");
+        // Clubs further in Europe, as EUROPAPOKAL-STAND.md reads the save:
+        // a seed, a qualifier winner, a UEFA qualifier, a direct entrant
+        // before the first round's draw.
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let stand = |name: &str| {
+            let team = records.teams.iter().find(|t| t.name() == name).unwrap();
+            a3_core::opponent::europe_stand(records, team)
+        };
+        use a3_core::opponent::EuropeStand::{In, NotIn};
+        assert_eq!(stand("FC Bayern München"), In(0, 1871, None));
+        let silkeborg = records.teams.iter().find(|t| t.name() == "Silkeborg IF").unwrap();
+        let silkeborg = (silkeborg.country(), i16::from(silkeborg.number()));
+        assert_eq!(stand("Eintracht Frankfurt"), In(0, 1871, Some(silkeborg)));
+        assert!(matches!(stand("Paksi FC"), In(1, 1864, Some(_))));
+        assert_eq!(stand("Borussia Dortmund"), NotIn);
+        assert_eq!(stand("Silkeborg IF"), NotIn);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_talk_is_booked_in_the_planner() {
         let game = game();
         // The keeper's menu on the first day of a week: the talk is its

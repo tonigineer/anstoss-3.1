@@ -39,7 +39,7 @@ macro_rules! numbers {
         }
     )*};
 }
-numbers!(u8, i8, u16, i16, u32, i32);
+numbers!(u8, i8, u16, i16, u32, i32, i64);
 
 impl<T: Field, const N: usize> Field for [T; N] {
     const SIZE: usize = T::SIZE * N;
@@ -385,6 +385,21 @@ record! {
     Team, 0x990 - HEADER, base HEADER;
     /// The co-trainer, 0 none (the club object's +0x84).
     0xa2 => co_trainer, set_co_trainer: i16;
+    /// The computer club's staff, by person ([`Person`]): a manager who is
+    /// also trainer, a trainer, a manager (the club object's +0x7e …).
+    0x9c => staff, set_staff: [u16; 3];
+    /// The human managers, by number from 1: the trainer, the manager.
+    0xa8 => humans, set_humans: [u8; 2];
+    /// League wins, draws and defeats this season.
+    0xd4 => record, set_record: [u8; 3];
+    /// What the board is like (`FUN_007309a3`), 0 to 5.
+    0x123 => board, set_board: u8;
+    /// Its place among its league's teams, and in the table.
+    0x12f => league_place, set_league_place: u8;
+    0x132 => table_place, set_table_place: u8;
+    /// Home games this season with a gate, and the gates.
+    0x260 => home_games, set_home_games: u8;
+    0x264 => gates, set_gates: [i32; 23];
     /// A human club's manager: his slot and one, whose extra data the club
     /// has ([`Extra`]); 0 none.
     0xb5 => human, set_human: u8;
@@ -487,6 +502,44 @@ impl Extra {
             .map(i32::from)
             .sum::<i32>()
             + 2 * i32::from(self.together())
+    }
+}
+
+/// The people who are not players: computer clubs' trainers and managers
+/// and more (0x54 bytes at `DAT_00be3920` + id × 0x54, ids 1 to 1499).
+const PERSON_AT: u32 = 0xbe3920;
+const PERSONS: usize = 1500;
+
+record! {
+    /// A person: his names in the pool, and how safe his job is (0 safe,
+    /// 1–2 wobbling, 3 and more about to go; `FUN_00732813`).
+    Person, 0x54 - HEADER, base HEADER;
+    0x20 => names, set_names: [u16; 2];
+    0x2d => job, set_job: u8;
+}
+
+/// The stadiums of the teams played (0x290 bytes at `DAT_01a48138` + team
+/// index × 0x290), and of the foreign ones (0xf0 at `DAT_01a3af38` + index
+/// from the first foreign team): the name, how many it holds.
+const STADIUM_AT: u32 = 0x1a48138;
+const FOREIGN_STADIUM_AT: u32 = 0x1a3af38;
+const STADIUM_NAME: (usize, usize) = (0x22, 0x3a);
+const STADIUM_CAPACITY: usize = 0x5c;
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Stadium {
+    pub name: String,
+    pub capacity: i32,
+}
+
+impl Stadium {
+    fn new(bytes: &[u8]) -> Option<Self> {
+        let at = |offset: usize| offset - HEADER;
+        let capacity = bytes.get(at(STADIUM_CAPACITY)..at(STADIUM_CAPACITY) + 4)?;
+        Some(Self {
+            name: text(bytes.get(at(STADIUM_NAME.0)..)?, STADIUM_NAME.1),
+            capacity: i32::from_le_bytes(capacity.try_into().ok()?),
+        })
     }
 }
 
@@ -626,6 +679,15 @@ record! {
     Globals, 0x1590, base 0xb5cb88;
     /// Whether each human slot is in play: above 0.
     0xb5cb9c => slots, set_slots: [i16; MANAGERS];
+    /// Seasons so far, 1 in the first.
+    0xb5cbc8 => seasons, set_seasons: u16;
+    /// The funds' prices, which deposits are worth by (`DAT_00b5cc8c`).
+    0xb5cc8c => fund_prices, set_fund_prices: [i32; 5];
+    /// How far the European cups are: the Champions League's stage (0 the
+    /// qualifier, 1 and 2 the group stages, then the knock-out rounds) and
+    /// the UEFA cup's round (EUROPAPOKAL-STAND.md).
+    0xb5d164 => europe_stage, set_europe_stage: i16;
+    0xb5d166 => uefa_round, set_uefa_round: i16;
     /// The start setting "Vorbereitung und Kalkulation" (dialog 256):
     /// normal 5, fast 7, only competitive matches 12.
     0xb5d152 => preparation, set_preparation: u8;
@@ -701,6 +763,34 @@ record! {
 }
 
 impl Countries {
+    /// A country's slot among those with tables of their own: titles,
+    /// archives, cups (`DAT_00ae5c97`).
+    pub fn slot(&self, country: usize) -> u8 {
+        self.get(0xae5c97 + country)
+    }
+
+    /// A country's leagues: the first's index among all leagues, how many
+    /// (`DAT_00ae5fda`, `DAT_00ae60c4`).
+    pub fn first_league(&self, country: usize) -> i16 {
+        self.get(0xae5fda + 2 * country)
+    }
+
+    pub fn leagues(&self, country: usize) -> i16 {
+        self.get(0xae60c4 + 2 * country)
+    }
+
+    /// Where the foreign teams start among all, for their stadiums
+    /// (`DAT_00ae6304`).
+    pub fn foreign_start(&self) -> i16 {
+        self.get(0xae6304)
+    }
+
+    /// The European cups' names, the Champions League's and the UEFA
+    /// cup's, as the new game set them (`DAT_00ae668e`, `DAT_00ae66ce`).
+    pub fn cup_names(&self) -> [String; 2] {
+        [0xae668e, 0xae66ce].map(|at| text(&self.0[at - Self::BASE..], 0x40))
+    }
+
     /// How many teams a country has.
     pub fn team_count(&self, country: usize) -> i16 {
         self.get(0xae5e06 + 2 * country)
@@ -742,6 +832,11 @@ pub struct Records {
     pub luck: Luck,
     /// The pool of names the players' names point into.
     pub names: Vec<String>,
+    /// By id.
+    pub persons: Vec<Person>,
+    /// By team index, and the foreign teams' from the first.
+    pub stadiums: Vec<Stadium>,
+    pub foreign_stadiums: Vec<Stadium>,
     save: Save,
 }
 
@@ -775,6 +870,18 @@ impl Records {
         let luck = Luck::new(block(format!("{LUCK_AT:#x}"))?)?;
         let countries = Countries::new(block(format!("{COUNTRIES_AT:#x}"))?)?;
         let names = block("names".to_owned())?.split(|&b| b == 0).map(cp1252).collect();
+        let persons = (0..PERSONS)
+            .map(|n| Person::new(block(format!("{PERSON_AT:#x}[{n}]"))?))
+            .collect::<io::Result<_>>()?;
+        let stadiums = |at: u32| -> Vec<Stadium> {
+            (0..)
+                .map_while(|n| blocks.get(format!("{at:#x}[{n}]").as_str()).copied())
+                .map(|bytes| {
+                    Stadium::new(bytes).unwrap_or(Stadium { name: String::new(), capacity: 0 })
+                })
+                .collect()
+        };
+        let (stadiums, foreign_stadiums) = (stadiums(STADIUM_AT), stadiums(FOREIGN_STADIUM_AT));
         Ok(Self {
             players,
             teams,
@@ -785,6 +892,9 @@ impl Records {
             planners,
             luck,
             names,
+            persons,
+            stadiums,
+            foreign_stadiums,
             save,
         })
     }
@@ -820,6 +930,24 @@ impl Records {
             }
         }
         save
+    }
+
+    /// A block of the save the records do not read, by its name: an
+    /// object's address, `[n]` for one of many.
+    pub fn block(&self, name: &str) -> Option<&[u8]> {
+        self.save.blocks.iter().find(|b| b.name == name).map(|b| b.data.as_slice())
+    }
+
+    /// A person's name: both names, or the one he has (`FUN_00637cbb`).
+    pub fn person_name(&self, id: u16) -> String {
+        let Some(person) = self.persons.get(usize::from(id)).filter(|_| id != 0) else {
+            return String::new();
+        };
+        match person.names() {
+            [0, 0] => String::new(),
+            [0, one] | [one, 0] => self.name(one).to_owned(),
+            [first, last] => format!("{} {}", self.name(first), self.name(last)),
+        }
     }
 
     /// A name from the pool.

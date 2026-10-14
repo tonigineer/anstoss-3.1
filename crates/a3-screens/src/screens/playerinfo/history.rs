@@ -39,9 +39,6 @@ const STRENGTH_STRIP: u16 = 5492;
 /// Texts of the game.
 const GOALS: u16 = 1689;
 const APPEARANCES: u16 = 1688;
-const NO_CLUB: u16 = 4079;
-const AMATEUR: u16 = 3491;
-const ABROAD: u16 = 3492;
 const YOUTH_TEAM: u16 = 4300;
 const AMATEUR_TEAM: u16 = 4301;
 
@@ -49,14 +46,10 @@ const AMATEUR_TEAM: u16 = 4301;
 const CAREER_AT: usize = 0x20;
 const STATION: usize = 0x14;
 const MOST_STATIONS: usize = 15;
-/// The club number that stands for the country's national team.
-const NATIONAL: u8 = 200;
 /// Bits of a station's last byte: strength in the low four, a youth
 /// team's, an amateur team's (strength not known).
 const YOUTH: u8 = 0x40;
 const AMATEURS: u8 = 0x80;
-/// A country of the first kind has forty amateur clubs after its teams.
-const AMATEUR_CLUBS: i16 = 40;
 
 /// The career list's columns: club, when, fee, strength, appearances,
 /// goals; and its titles'.
@@ -210,7 +203,7 @@ fn row(s: &Shown, station: &Station) -> String {
     } else {
         (station.kind & 0xf).to_string()
     };
-    let name = club_name(s, station.country, station.club);
+    let name = s.game.club_name(s.records, station.country, station.club.into());
     let club = if station.kind & YOUTH != 0 {
         s.text(YOUTH_TEAM).replacen("%s", &name, 1)
     } else if station.kind & AMATEURS != 0 {
@@ -220,29 +213,6 @@ fn row(s: &Shown, station: &Station) -> String {
     };
     let fee = money(s.game, i64::from(station.fee) * 1000);
     format!("{club}\t{start}{end}\t{fee}\t{strength}\t{appearances}\t{goals}")
-}
-
-/// A club by its country and number (`FUN_0063e52f`): none, the national
-/// team, a team, an amateur club, a club abroad.
-fn club_name(s: &Shown, country: u8, club: u8) -> String {
-    if country == 0 {
-        return s.text(NO_CLUB);
-    }
-    if club == NATIONAL {
-        return s.game.world.nation(country.into()).to_owned();
-    }
-    let Some(records) = s.records else { return String::new() };
-    let countries = &records.countries;
-    let teams = countries.team_count(country.into());
-    match countries.kind(country.into()) {
-        1 | 2 if i16::from(club) < teams => {
-            records.team(country.into(), club.into()).map_or_else(String::new, |t| t.name())
-        }
-        // The amateur clubs' and the clubs abroad's names are not read yet.
-        1 if i16::from(club) < teams + AMATEUR_CLUBS => s.text(AMATEUR),
-        1 | 2 => s.text(AMATEUR),
-        _ => s.text(ABROAD),
-    }
 }
 
 /// The year he came to his club, if he is at one: back over the stations
