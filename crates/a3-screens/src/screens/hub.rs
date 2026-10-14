@@ -17,7 +17,9 @@ use a3_core::lineup::{self, BENCH, FIELD, Lineup, PARTS, Place};
 use a3_core::load;
 use a3_core::records::Records;
 use a3_core::season::{BAR_SYMBOLS, ClubState, Rules, Season, Status};
+use a3_core::squadlist::{self, Sort};
 use a3_core::world::Player;
+use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
 pub use a3_core::cycle::dialogs::{DRESSING_ROOM, LINEUP};
@@ -27,8 +29,8 @@ use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
 use super::{Args, Cx, Outcome, Reply, Request, Screen, control, set};
 use super::{discipline, duties, mark_inert, planner, playerinfo, special};
-use crate::controls::ControlState;
 use crate::controls::player_box::PlayerBox;
+use crate::controls::{ControlState, list};
 use crate::game::Game;
 use crate::pointer::{Grip, Target};
 use crate::view::View;
@@ -111,6 +113,12 @@ const NO_CO_TRAINER: u16 = 3131;
 /// set pieces ("Aufgaben im Spiel").
 const FORMATION_ITEM: usize = 1;
 const TAKERS_ITEM: usize = 3;
+/// The segment that keeps where the boxes stand in the formation, after
+/// asking (text 5071, `FUN_0050da9b`); the question told apart by this
+/// stand-in for its popup.
+const KEEP_ITEM: usize = 2;
+const KEEP_FORMATION: u16 = 5071;
+const KEEP_QUESTION: u16 = u16::MAX - 1;
 /// The squad list's columns as the game sets them: where each starts, and
 /// how the centred and right-aligned ones sit in their width.
 const COLUMNS: [(f32, Option<(Align, f32)>); 11] = [
@@ -247,6 +255,8 @@ pub struct MenuBar {
     /// The player whose menu is open, and its entries.
     menu_player: Option<usize>,
     menu: Vec<Command>,
+    /// The column the squad list is sorted by; each opening starts afresh.
+    sort: Sort,
 }
 
 impl Screen for MenuBar {
@@ -290,7 +300,7 @@ impl Screen for MenuBar {
             state.tips =
                 game.rules.bar_tips.iter().map(|&t| game.text(t as u16).to_owned()).collect();
         }
-        for id in [TITLES, SPECIAL, DUTIES, DRESSING_OPTIONS] {
+        for id in [SPECIAL, DUTIES, DRESSING_OPTIONS] {
             if let Some(options) = control(dialog, id).and_then(|i| view.options_mut(i)) {
                 options.actions = true;
             }
@@ -299,15 +309,14 @@ impl Screen for MenuBar {
             && let Some(club) = manager.club
             && let Some(state) = season.clubs.get(&club)
         {
-            show_lineup(
-                view,
-                dialog,
-                game,
-                season,
-                state,
-                cx.state.records.as_ref(),
-                Boxes::Refill,
-            );
+            // Sorted as it opens, "Name" lit (`CMannschaftsaufstellung`'s
+            // constructor).
+            self.sort = Sort::default();
+            if let Some(titles) = control(dialog, TITLES).and_then(|i| view.options_mut(i)) {
+                titles.chosen = self.sort.column;
+            }
+            let records = cx.state.records.as_ref();
+            show_lineup(view, dialog, game, season, state, records, Boxes::Refill, self.sort);
         }
         // Crossed out: what does nothing yet.
         let works = |target: Target| {
@@ -315,7 +324,8 @@ impl Screen for MenuBar {
             match dialog.controls[c].id {
                 Some(BAR_ID) => matches!(item, LINEUP_SYMBOL | DRESSING_SYMBOL | WHISTLE),
                 Some(SPECIAL) => true,
-                Some(DUTIES) => matches!(item, FORMATION_ITEM | TAKERS_ITEM),
+                Some(TITLES) => item < squadlist::COLUMNS,
+                Some(DUTIES) => matches!(item, FORMATION_ITEM | KEEP_ITEM | TAKERS_ITEM),
                 Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
                 _ => false,
             }
@@ -388,7 +398,7 @@ impl Screen for MenuBar {
         }
         if let Target::Drop { from, to } = target {
             if view.id == LINEUP {
-                drop_player(cx, view, from, to);
+                drop_player(cx, view, from, to, self.sort);
             }
             return Outcome::Stay;
         }
@@ -396,6 +406,12 @@ impl Screen for MenuBar {
         if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == FORMATION_ITEM {
             self.popup = Some(FORMATIONS);
             return Outcome::Popup(Request::new(FORMATIONS));
+        }
+        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == KEEP_ITEM {
+            let formation = club_state(cx).map_or(0, |c| c.formation);
+            self.popup = Some(KEEP_QUESTION);
+            let args = Args::TextForFormation(KEEP_FORMATION, formation);
+            return Outcome::Popup(Request::with(QUESTION, args));
         }
         if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == TAKERS_ITEM {
             self.popup = Some(duties::TAKERS);
@@ -406,9 +422,16 @@ impl Screen for MenuBar {
                 self.popup = Some(special::SPECIAL);
                 return Outcome::Popup(Request::new(special::SPECIAL));
             }
-            change_lineup(cx, view, Boxes::Refill, |tables, club, _| {
+            change_lineup(cx, view, Boxes::Refill, self.sort, |tables, club, _| {
                 autolineup::bench(tables, club);
             });
+            return Outcome::Stay;
+        }
+        // A column title sorts the list by its column (`FUN_0050fd07`);
+        // nothing else changes.
+        if view.id == LINEUP && cx.dialog.controls[c].id == Some(TITLES) {
+            self.sort.click(item);
+            change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
             return Outcome::Stay;
         }
         if view.id == DRESSING_ROOM
@@ -445,7 +468,7 @@ impl Screen for MenuBar {
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         match (self.popup.take(), reply) {
             (Some(FORMATIONS), Reply::Choice(formation)) => {
-                stand_in(cx, view, formation);
+                stand_in(cx, view, formation, self.sort);
                 Outcome::Stay
             }
             (Some(special::SPECIAL), Reply::Choice(variant)) => {
@@ -456,7 +479,7 @@ impl Screen for MenuBar {
                     return Outcome::Popup(Request::with(NOTICE, Args::Text(NO_CO_TRAINER)));
                 }
                 let mut put_up = true;
-                change_lineup(cx, view, Boxes::Refill, |tables, club, today| {
+                change_lineup(cx, view, Boxes::Refill, self.sort, |tables, club, today| {
                     put_up = autolineup::variant(tables, club, variant, today);
                 });
                 if !put_up {
@@ -476,10 +499,14 @@ impl Screen for MenuBar {
             // takers their duties, a deposed captain his morale. The boxes
             // keep what they show but for the duties.
             (Some(discipline::BONUS | discipline::FINE | duties::TAKERS), _) => {
-                change_lineup(cx, view, Boxes::Keep, |_, _, _| {});
+                change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
                 Outcome::Stay
             }
             (Some(QUIT_QUESTION), Reply::Ok) => Outcome::Close(Reply::Quit),
+            (Some(KEEP_QUESTION), Reply::Ok) => {
+                keep_formation(cx);
+                Outcome::Stay
+            }
             (None, Reply::Ok) => Outcome::Close(Reply::Ok),
             _ => Outcome::Stay,
         }
@@ -497,6 +524,7 @@ fn change_lineup(
     cx: &mut Cx,
     view: &mut View,
     boxes: Boxes,
+    sort: Sort,
     change: impl FnOnce(&lineup::Tables, &mut ClubState, chrono::NaiveDate),
 ) {
     let (game, dialog) = (cx.game, cx.dialog);
@@ -508,13 +536,13 @@ fn change_lineup(
     change(&game.rules.pitch, club_state, today);
     let (season, records) = (state.season.as_ref().expect("the season"), state.records.as_ref());
     if let Some(club_state) = season.clubs.get(&club) {
-        show_lineup(view, dialog, game, season, club_state, records, boxes);
+        show_lineup(view, dialog, game, season, club_state, records, boxes, sort);
     }
 }
 
 /// The line-up in another of the manager's formations: every player on the
 /// spot of his place in it (`CSpielsystemeEditieren`'s OK).
-fn stand_in(cx: &mut Cx, view: &mut View, formation: usize) {
+fn stand_in(cx: &mut Cx, view: &mut View, formation: usize, sort: Sort) {
     let (game, dialog) = (cx.game, cx.dialog);
     let state = &mut *cx.state;
     let Some(season) = state.season.as_mut() else { return };
@@ -526,14 +554,34 @@ fn stand_in(cx: &mut Cx, view: &mut View, formation: usize) {
     club_state.lineup.spots = spots;
     let (season, records) = (state.season.as_ref().expect("the season"), state.records.as_ref());
     if let Some(club_state) = season.clubs.get(&club) {
-        show_lineup(view, dialog, game, season, club_state, records, Boxes::Refill);
+        show_lineup(view, dialog, game, season, club_state, records, Boxes::Refill, sort);
+    }
+}
+
+/// The formation the line-up stands in takes the spots its boxes stand on,
+/// with the manager and in his record.
+fn keep_formation(cx: &mut Cx) {
+    let state = &mut *cx.state;
+    let Some(season) = state.season.as_mut() else { return };
+    let current = season.current;
+    let Some(key) = season.manager().and_then(|m| m.club) else { return };
+    let Some(club) = season.clubs.get(&key) else { return };
+    let (formation, spots) = (club.formation, club.lineup.spots);
+    let Some(manager) = season.managers.get_mut(current) else { return };
+    let Some(kept) = manager.formations.get_mut(formation) else { return };
+    kept.1 = spots;
+    if let Some(records) = state.records.as_mut()
+        && let Some(slot) = records.human_slot(current)
+        && let Some(record) = records.managers.get_mut(slot)
+    {
+        record.set_formation_spots(formation, spots);
     }
 }
 
 /// Opens the menu of the player a right click fell on, there; the player.
 fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip, commands: &[Command]) -> Option<usize> {
     let club = club_state(cx)?;
-    let player = match place_of(cx.dialog, view, club, grip)? {
+    let player = match place_of(cx.dialog, view, grip)? {
         Place::Field(i) => club.lineup.field[i]?,
         Place::Bench(i) => club.lineup.bench[i]?,
         Place::Player(p) => p,
@@ -557,7 +605,7 @@ fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip, commands: &[Command]) -> 
 
 /// Where on the line-up a grip is: a spot, a place on the bench, or a
 /// player of the list.
-fn place_of(dialog: &Dialog, view: &View, club: &ClubState, grip: Grip) -> Option<Place> {
+fn place_of(dialog: &Dialog, view: &View, grip: Grip) -> Option<Place> {
     match grip {
         Grip::Control(c) => {
             let id = dialog.controls.get(c)?.id?;
@@ -571,38 +619,63 @@ fn place_of(dialog: &Dialog, view: &View, club: &ClubState, grip: Grip) -> Optio
         }
         Grip::Row { control, row } => {
             (dialog.controls.get(control)?.id? == SQUAD).then_some(())?;
-            let scroll = view.list(control).map_or(0, |l| l.scroll);
-            let order = list_order(&club.lineup, club.players.len());
-            order.get(scroll + row).map(|&p| Place::Player(p))
+            // The row knows its player (`FUN_0069318b`).
+            let list = view.list(control)?;
+            list.keys.get(list.scroll + row).map(|&p| Place::Player(p))
         }
     }
 }
 
 /// A player dragged on the line-up and let go of: moved as the game moves
 /// him, and the line-up shown again.
-fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>) {
+fn drop_player(cx: &mut Cx, view: &mut View, from: Grip, to: Option<Grip>, sort: Sort) {
     let (game, dialog) = (cx.game, cx.dialog);
     let state = &mut *cx.state;
     let Some(season) = state.season.as_mut() else { return };
     let Some(club) = season.manager().and_then(|m| m.club) else { return };
     let Some(club_state) = season.clubs.get_mut(&club) else { return };
-    let place = |grip: Grip| place_of(dialog, view, club_state, grip);
+    let place = |grip: Grip| place_of(dialog, view, grip);
     let Some(from) = place(from) else { return };
     let to = to.and_then(place);
     if club_state.lineup.drop(from, to) {
         let (season, records) =
             (state.season.as_ref().expect("the season"), state.records.as_ref());
         if let Some(club_state) = season.clubs.get(&club) {
-            show_lineup(view, dialog, game, season, club_state, records, Boxes::Refill);
+            show_lineup(view, dialog, game, season, club_state, records, Boxes::Refill, sort);
         }
     }
 }
 
-/// The squad as the list shows it: the eleven, the bench, then the rest.
-fn list_order(lineup: &Lineup, players: usize) -> Vec<usize> {
-    let squad: Vec<usize> = lineup.squad().collect();
-    squad.iter().copied().chain((0..players).filter(|p| !squad.contains(p))).collect()
+/// The squad as the list shows it, sorted by its column.
+fn list_order(
+    game: &Game,
+    season: &Season,
+    club: &ClubState,
+    records: Option<&Records>,
+    sort: Sort,
+) -> Vec<usize> {
+    let bytes = |text: &str| text.chars().map(|c| to_cp1252(c).unwrap_or(b'?')).collect();
+    let names: Vec<squadlist::Name> = club
+        .players
+        .iter()
+        .enumerate()
+        .map(|(p, player)| {
+            let record = club.status.get(p).and_then(|s| records?.player(s.id));
+            squadlist::Name {
+                nicknamed: record.is_some_and(|r| r.shown() & NICKNAME != 0),
+                nickname: record.map_or_else(Vec::new, |r| {
+                    records.map_or_else(Vec::new, |records| bytes(records.name(r.nickname())))
+                }),
+                last: bytes(&player.last_name),
+                first: bytes(&player.first_name),
+            }
+        })
+        .collect();
+    squadlist::order(&game.rules.pitch, club, &names, season.date(), sort)
 }
+
+/// Bits of a record's `shown`: he goes by his nickname.
+const NICKNAME: u32 = 0x8000_0000;
 
 /// Whether the boxes are filled anew, or keep what they show — but for the
 /// duties — as the original's do where nobody moved (it refills only the
@@ -616,6 +689,7 @@ enum Boxes {
 
 /// The line-up: the boxes on the pitch and the bench, the squad below, the
 /// comparison with the next opponent.
+#[allow(clippy::too_many_arguments)]
 fn show_lineup(
     view: &mut View,
     dialog: &Dialog,
@@ -624,6 +698,7 @@ fn show_lineup(
     state: &ClubState,
     records: Option<&Records>,
     boxes: Boxes,
+    sort: Sort,
 ) {
     let pitch = &game.rules.pitch;
     let players = &state.players;
@@ -681,8 +756,13 @@ fn show_lineup(
     }
 
     let status = |p: usize| state.status.get(p).copied().unwrap_or_default();
+    let order = list_order(game, season, state, records, sort);
+    let visible = control(dialog, SQUAD).map_or(0, |l| list::visible_rows(&dialog.controls[l]));
     if let Some(state) = control(dialog, SQUAD).and_then(|l| view.list_mut(l)) {
-        let order = list_order(lineup, players.len());
+        // The top row stays as far as the rows reach; no row stays selected.
+        state.scroll = state.scroll.min(order.len().saturating_sub(visible));
+        state.selected = None;
+        state.keys.clone_from(&order);
         let today = season.date();
         state.tabs = COLUMNS.iter().map(|&(at, _)| at).collect();
         state.aligns = COLUMNS.iter().map(|&(_, align)| align).collect();

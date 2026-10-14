@@ -69,6 +69,9 @@ pub struct ListState {
     pub marked: Vec<bool>,
     /// The box a row's player shows while he is dragged from the list.
     pub row_boxes: Vec<Option<PlayerBox>>,
+    /// What each row stands for, for the screen to look up: a player's
+    /// place in the squad, say.
+    pub keys: Vec<usize>,
 }
 
 impl Default for ListState {
@@ -83,6 +86,7 @@ impl Default for ListState {
             row_icons: Vec::new(),
             marked: Vec::new(),
             row_boxes: Vec::new(),
+            keys: Vec::new(),
         }
     }
 }

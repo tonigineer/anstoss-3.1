@@ -252,14 +252,15 @@ impl BitmapFont {
         }
     }
 
-    /// The lines `text` breaks into at spaces to fit `max_width`.
+    /// The lines `text` breaks into at spaces to fit `max_width`: a line
+    /// fits while it is narrower (the game's `FUN_0079c87f`).
     pub fn wrap(&self, text: &str, max_width: u32, bold: bool) -> Vec<String> {
         let mut lines = Vec::new();
         let mut line = String::new();
         for word in text.split(' ') {
             let candidate =
                 if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
-            if !line.is_empty() && self.width(&candidate, bold) > max_width {
+            if !line.is_empty() && self.width(&candidate, bold) >= max_width {
                 lines.push(std::mem::replace(&mut line, word.to_owned()));
             } else {
                 line = candidate;

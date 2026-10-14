@@ -40,8 +40,6 @@ pub const PAGES_IN_ORDER: [u16; 4] = [CURRENT, SEASON, HISTORY, PRIVATE];
 const HEADERS: [(u16, u16, u16); 4] =
     [(4825, 4826, 4827), (4851, 4852, 4853), (4883, 4884, 4885), (4886, 5496, 4887)];
 const PORTRAIT: u16 = 5481;
-/// The main positions, keeper to striker.
-const POSITIONS: u8 = 10;
 /// The arrows: through the squad, and through the pages.
 const PLAYERS: u16 = 4888;
 const PAGES: u16 = 4889;
@@ -90,7 +88,7 @@ impl Screen for PlayerInfo {
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
         if let Args::Player(player) = args {
             let Some(club) = club_state(cx) else { return };
-            self.order = by_position(&club.players);
+            self.order = a3_core::squadlist::by_position(&club.players);
             self.at = self.order.iter().position(|&p| p == player).unwrap_or(0);
         }
         for id in [PLAYERS, PAGES] {
@@ -127,17 +125,6 @@ impl Screen for PlayerInfo {
         }
         Outcome::Stay
     }
-}
-
-/// The squad as the line-up hands it to the player info: by main position,
-/// keepers first, each in the squad's order; a player of no position is
-/// left out (`FUN_00696590`).
-fn by_position(players: &[Player]) -> Vec<usize> {
-    (1..=POSITIONS)
-        .flat_map(|position| {
-            (0..players.len()).filter(move |&p| players[p].positions[0] == position)
-        })
-        .collect()
 }
 
 fn club_state<'a>(cx: &'a Cx) -> Option<&'a ClubState> {

@@ -535,6 +535,12 @@ impl Manager {
             .collect()
     }
 
+    /// Keeps where the eleven stand in one of his formations.
+    pub fn set_formation_spots(&mut self, formation: usize, spots: [(i16, i16); 11]) {
+        let at = FORMATIONS_AT + formation * FORMATION_SIZE + FORMATION_NAME;
+        self.put(at, spots.map(|(x, y)| [x, y]));
+    }
+
     /// The board's confidence as the screens show it, from 0 to 100.
     pub fn shown_confidence(&self) -> i32 {
         let [a, b] = self.confidence_ups();

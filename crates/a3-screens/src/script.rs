@@ -516,25 +516,27 @@ mod tests {
                 .any(|c| view.text(c).ends_with(&format!(", {day}.{month}.{year}")));
             assert!(dated, "{}: no caption with the date {day}.{month}.{year}", save.name);
 
-            // The squad as the save has it: the eleven, the bench, the rest —
-            // unless the save goes on with a matchday's matches, before
-            // which the co-trainer may line the team up anew (see
+            // The squad as the save has it: the eleven, the bench, the rest
+            // backwards from the squad by position, as the original's list
+            // opens — unless the save goes on with a matchday's matches,
+            // before which the co-trainer may line the team up anew (see
             // `the_co_trainer_lines_up_a_resumed_matchday`).
             let manager = records.humans().next().unwrap();
             let team = records.team(manager.country(), manager.team()).unwrap();
             let squad = team.players();
+            let position = |id: u16| records.player(id).unwrap().positions()[0];
+            let by_position: Vec<u16> = (1..=10)
+                .flat_map(|p| squad.iter().copied().filter(move |&id| position(id) == p))
+                .collect();
             let mut order: Vec<u16> =
                 team.lineup().into_iter().chain(team.bench()).filter(|&id| id != 0).collect();
-            let rest: Vec<u16> = squad.iter().copied().filter(|id| !order.contains(id)).collect();
-            order.extend(rest);
             if records.globals.resume() == MATCHES_RESUMED {
                 let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
-                let id = |p: usize| club.status[p].id;
-                let mut shown: Vec<u16> = club.lineup.squad().map(id).collect();
-                let rest: Vec<u16> = squad.iter().copied().filter(|i| !shown.contains(i)).collect();
-                shown.extend(rest);
-                order = shown;
+                order = club.lineup.squad().map(|p| club.status[p].id).collect();
             }
+            let rest: Vec<u16> =
+                by_position.iter().rev().copied().filter(|id| !order.contains(id)).collect();
+            order.extend(rest);
             let list = view.controls.iter().find_map(|c| match &c.state {
                 crate::controls::ControlState::List(list) if list.rows.len() == squad.len() => {
                     Some(list)
@@ -676,6 +678,26 @@ mod tests {
             let cohesion = a3_core::cohesion::of(&game.rules.pitch, club, season.date());
             assert_eq!(cohesion, expected, "after {actions:?}");
         }
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_formation_keeps_where_the_boxes_stand() {
+        let game = game();
+        let script = format!(
+            "{}\nnow choose 5266 2\nuntil dialog 384\nnow ok\nuntil dialog 147",
+            LOAD.trim_end()
+        );
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let manager = season.manager().unwrap();
+        let club = &season.clubs[&manager.club.unwrap()];
+        assert_eq!(manager.formations[club.formation].1, club.lineup.spots);
+        let records = state.records.as_ref().unwrap();
+        let record = &records.managers[records.human_slot(season.current).unwrap()];
+        assert_eq!(record.formations()[club.formation].1, club.lineup.spots);
     }
 
     #[test]

@@ -30,7 +30,7 @@ const CAPTION_TEXT: u16 = 1431;
 const CAPTION_KIND: u16 = 4361;
 /// The boxes on the pitch, and where its spots start, in the dialog.
 const BOXES: u16 = 9940;
-const PITCH: Vec2 = Vec2::new(10.0, 22.0);
+const PITCH: Vec2 = Vec2::new(11.0, 22.0);
 const BOX_SIZE: Vec2 = Vec2::new(99.0, 24.0);
 
 /// Puts the dialog together: its caption and a box for every spot.

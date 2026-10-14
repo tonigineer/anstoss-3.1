@@ -108,6 +108,9 @@ pub enum Args {
     Record(u16),
     /// A text by its id, with a player's name for its `%s`.
     TextFor(u16, u16),
+    /// A text by its id, with the name of one of the current manager's
+    /// formations for its `%s`.
+    TextForFormation(u16, usize),
     /// What changed of a player's contentment with the trainer, told with a
     /// text with his name.
     Change {
