@@ -574,7 +574,13 @@ record! {
     0x184 => confidence, set_confidence: i16;
     0x186 => confidence_ups, set_confidence_ups: [u8; 2];
     0x188 => confidence_swings, set_confidence_swings: [i8; 2];
+    /// His options: the line-up's view in bits 0 to 3 (0 the pitch, else
+    /// the list), the screen his turn starts on in bits 6 and 7.
+    0x212c => options, set_options: u32;
 }
+
+/// The bits of a manager's options that choose the line-up's view.
+const LINE_UP_VIEW: u32 = 0xf;
 
 /// A manager's formations: a name of ten bytes and the eleven's spots, x
 /// and y in pitch pixels, each (the manager object's +0x118).
@@ -599,6 +605,17 @@ impl Manager {
     pub fn set_formation_spots(&mut self, formation: usize, spots: [(i16, i16); 11]) {
         let at = FORMATIONS_AT + formation * FORMATION_SIZE + FORMATION_NAME;
         self.put(at, spots.map(|(x, y)| [x, y]));
+    }
+
+    /// Whether his line-up shows as a list (`FUN_006a5ba7`).
+    pub fn list_view(&self) -> bool {
+        self.options() & LINE_UP_VIEW != 0
+    }
+
+    /// Switches his line-up's view, as the turn does after the view's
+    /// switch: the list is 1 (`FUN_006a5bcb`).
+    pub fn set_list_view(&mut self, list: bool) {
+        self.set_options(self.options() & !LINE_UP_VIEW | u32::from(list));
     }
 
     /// The board's confidence as the screens show it, from 0 to 100.

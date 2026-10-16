@@ -20,4 +20,8 @@ pub struct GameState {
     pub save: Option<String>,
     /// The records of the game loaded, to be written back when it is saved.
     pub records: Option<Records>,
+    /// The squad in the order the player info is to page through it, by
+    /// place, when the screen that opens it has its own: the line-up list's
+    /// rows. Taken by the player info.
+    pub paging: Option<Vec<usize>>,
 }

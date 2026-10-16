@@ -65,6 +65,10 @@ pub struct ListState {
     /// shows: where from the list's left edge, and which graphic.
     pub inks: Vec<Option<[u8; 3]>>,
     pub row_icons: Vec<Vec<(f32, u16)>>,
+    /// The icons drawn with their pure black left out: those the game gives
+    /// its list with a colour key (`FUN_007a95f6` with −1), not the
+    /// abilities'.
+    pub keyed: Vec<u16>,
     /// Rows marked as chosen besides the selected one, drawn as it is.
     pub marked: Vec<bool>,
     /// The box a row's player shows while he is dragged from the list.
@@ -86,6 +90,7 @@ impl Default for ListState {
             aligns: Vec::new(),
             inks: Vec::new(),
             row_icons: Vec::new(),
+            keyed: Vec::new(),
             marked: Vec::new(),
             row_boxes: Vec::new(),
             keys: Vec::new(),
@@ -232,12 +237,15 @@ impl ListState {
             // The text sits at the list's left edge, a pixel above the row.
             let at = (x, top - 1);
             columns(font, frame, at, cells, &self.tabs, &self.aligns, color, right);
-            // So do the icons.
-            // With their pure black left out, as the game's list draws them.
+            // So do the icons, the keyed ones without their pure black.
             for &(left, id) in self.row_icons.get(self.scroll + row).into_iter().flatten() {
                 if let Some(icon) = paint.image(id) {
-                    let icon = crate::game::transparent_black(icon.clone());
-                    paste(frame, &icon, Vec2::new(x as f32 + left, at.1 as f32));
+                    let at = Vec2::new(x as f32 + left, at.1 as f32);
+                    if self.keyed.contains(&id) {
+                        paste(frame, &crate::game::transparent_black(icon.clone()), at);
+                    } else {
+                        paste(frame, icon, at);
+                    }
                 }
             }
         }

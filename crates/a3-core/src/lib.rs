@@ -20,6 +20,7 @@ pub mod newgame;
 pub mod opponent;
 pub mod random;
 pub mod records;
+pub mod refit;
 pub mod season;
 pub mod squadlist;
 pub mod state;

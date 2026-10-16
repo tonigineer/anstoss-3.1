@@ -892,6 +892,49 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_list_view_takes_players_in_and_out_as_the_originals_does() {
+        let game = game();
+        let dialog = &game.dialogs[&429];
+        let text = |runner: &Runner, id: u16| {
+            runner.host.view().text(crate::screens::control(dialog, id).unwrap()).to_owned()
+        };
+        // As the original shows Union's line-up as a list on day 62: the
+        // parts the pitch view reckoned, all eleven in.
+        let then = "now choose 5266 0\nuntil dialog 429";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        assert_eq!(text(&runner, 5277), "Derzeit sind 11 Spieler aufgestellt!");
+        let parts = [2549, 2550, 2551, 2552, 2555].map(|id| text(&runner, id));
+        assert_eq!(parts, ["9.5", "31.1", "34.4", "22.9", "97.9"]);
+        assert_eq!(text(&runner, 2556), "3.8");
+        // The keeper out (the bench is full), then the spare keeper in: he
+        // takes the empty slot, the parts stay as they were.
+        let then = format!("{then}\nnow row 2509 0\nuntil dialog 429");
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        assert_eq!(text(&runner, 5277), "Derzeit sind 10 Spieler aufgestellt!");
+        assert_eq!(text(&runner, 2556), "3.6");
+        let then = format!("{then}\nnow row 2509 24\nuntil dialog 429");
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        assert_eq!(text(&runner, 5277), "Derzeit sind 11 Spieler aufgestellt!");
+        assert_eq!(text(&runner, 2556), "3.7");
+        assert_eq!(text(&runner, 2549), "9.5");
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+        let keeper = club.lineup.field[0].map(|p| club.players[p].last_name.clone());
+        assert_eq!(keeper.as_deref(), Some("Klaus"));
+        // The view is kept with the manager, in his record too: the switch
+        // goes back to the pitch.
+        assert!(season.manager().unwrap().list_view);
+        assert!(state.records.as_ref().unwrap().managers[0].list_view());
+        drop(state);
+        let then = format!("{then}\nnow choose 5266 0\nuntil dialog 147");
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        let state = runner.host.state();
+        assert!(!state.season.as_ref().unwrap().manager().unwrap().list_view);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_talk_is_booked_in_the_planner() {
         let game = game();
         // The keeper's menu on the first day of a week: the talk is its

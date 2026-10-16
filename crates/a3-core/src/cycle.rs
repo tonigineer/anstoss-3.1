@@ -52,6 +52,8 @@ pub mod dialogs {
     /// The grand office of the grandest clubs.
     pub const GRAND_OFFICE: u16 = 504;
     pub const LINEUP: u16 = 147;
+    /// The line-up as a list, for a manager who switched to it.
+    pub const LINEUP_LIST: u16 = 429;
     pub const DRESSING_ROOM: u16 = 302;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
     /// A talk with a player, on the day it was booked for.
@@ -131,6 +133,9 @@ pub enum Args {
     /// A text by its id, with the name of one of the current manager's
     /// formations for its `%s`.
     TextForFormation(u16, usize),
+    /// The list view's question whether one of the current manager's
+    /// formations is to keep the eleven's spots, in its own words.
+    KeepFormation(usize),
     /// What changed of a player's contentment with the trainer, told with a
     /// text with his name.
     Change {
@@ -505,7 +510,9 @@ impl Cycle {
         let Some(mut screen) = self.season(|s| self.turn_screen(s)) else { return Ok(()) };
         loop {
             match self.ask(Request::new(screen))? {
-                Reply::Goto(next) => screen = next,
+                Reply::Goto(next) => {
+                    screen = self.season(|s| line_up_view(s, next)).unwrap_or(next);
+                }
                 // "Spiel beenden": the cycle ends, and with it the program.
                 Reply::Quit => return Err(Gone),
                 _ => return Ok(()),
@@ -527,7 +534,7 @@ impl Cycle {
                 OFFICE
             };
         }
-        if manager.club.is_some() { LINEUP } else { DRESSING_ROOM }
+        if manager.club.is_some() { line_up_view(season, LINEUP) } else { DRESSING_ROOM }
     }
 
     /// A saved game: read, and on with its weeks; for a network game, where
@@ -576,6 +583,13 @@ impl Cycle {
         }
         Ok(())
     }
+}
+
+/// The line-up in the view the current manager has it in: on the pitch or
+/// as a list (`FUN_006a5ba7`, every turn's hub); any other screen as it is.
+fn line_up_view(season: &Season, screen: u16) -> u16 {
+    let list = season.manager().is_some_and(|m| m.list_view);
+    if screen == LINEUP && list { LINEUP_LIST } else { screen }
 }
 
 /// Where the game itself would begin, which is not built yet; back to the

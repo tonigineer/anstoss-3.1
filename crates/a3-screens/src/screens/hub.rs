@@ -5,8 +5,10 @@
 //!
 //! The line-up shows the club's formation on the pitch, a box for every
 //! spot, the bench beside it and the whole squad below, with what the team
-//! counts for in goal, defence, midfield and attack. The whistle at the end
-//! of the bar ends the turn.
+//! counts for in goal, defence, midfield and attack. A manager may switch it
+//! to a list (dialog 429), where a click takes a player in or out and a
+//! small pitch shows the eleven. The whistle at the end of the bar ends the
+//! turn.
 
 use std::collections::HashMap;
 
@@ -22,7 +24,7 @@ use a3_core::world::Player;
 use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
-pub use a3_core::cycle::dialogs::{DRESSING_ROOM, LINEUP};
+pub use a3_core::cycle::dialogs::{DRESSING_ROOM, LINEUP, LINEUP_LIST};
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 use super::calendar::FIXTURE_AHEAD;
@@ -105,6 +107,30 @@ const BENCH_ORIGIN: Vec2 = Vec2::new(530.0, 53.0);
 const BENCH_STEP: f32 = 26.0;
 /// The squad list, its two rows of column titles, the "Spz."/"Auto." and
 /// "Aufgaben im Spiel" buttons.
+/// The list view's small pitch: a marker for each slot of the eleven, at
+/// a spot's x shrunk by 2.8 (the float at 0x81e40c) and its y, from this
+/// corner; a disc for the kind of the spot (`s_tor01.bmp` … `s_ang01.bmp`);
+/// and the line below it, how many players are in the eleven.
+const MARKERS: u16 = 2510;
+const MARKER_ORIGIN: (i32, i32) = (465, 30);
+const MARKER_SHRINK: f32 = 2.8;
+const KEEPER_MARKER: u16 = 2773;
+const DEFENCE_MARKER: u16 = 2772;
+const MIDFIELD_MARKER: u16 = 2771;
+const ATTACK_MARKER: u16 = 2770;
+const STATUS_LINE: u16 = 5277;
+const PLAYERS_SET: [u16; 3] = [4686, 4687, 4688];
+/// A marker's number: white where the player fits, blue on a side
+/// position of his, green for an all-rounder, red anywhere else.
+const FITS_INK: [u8; 3] = [255, 255, 255];
+const SIDE_INK: [u8; 3] = [30, 110, 255];
+const ALLROUNDER_INK: [u8; 3] = [0, 255, 0];
+const MISFIT_INK: [u8; 3] = [255, 0, 0];
+/// The "Allrounder" bit of a player's first traits (text 1154).
+const ALLROUNDER: i64 = 0x100;
+/// The hanging striker's position, which every player of the attacking
+/// kinds fits (0x8a50ac lists them).
+const HANGING_STRIKER: u8 = 17;
 const SQUAD: u16 = 2509;
 const TITLES: u16 = 5514;
 const SPECIAL: u16 = 2572;
@@ -124,6 +150,8 @@ const KEEP_ITEM: usize = 2;
 /// The segments that open the medical department, and what the game tells
 /// of the next opponent.
 const MEDICAL_ITEM: usize = 6;
+/// The segment that switches between the pitch and the list.
+const SWITCH_ITEM: usize = 0;
 const OPPONENT_ITEM: usize = 7;
 const KEEP_FORMATION: u16 = 5071;
 const KEEP_QUESTION: u16 = u16::MAX - 1;
@@ -188,6 +216,9 @@ const PRISON: u8 = 13;
 const UFO: u8 = 14;
 /// The mark of a player suspended by the club, in his absence's kind.
 const MARKED: u8 = 0x10;
+/// A mark in a player's contract's terms the list view shows with icon 15.
+const TERMS_MARK: u16 = 0x10;
+const TERMS_ICON: u8 = 15;
 /// The list's colours: the line-up black, the bench blue, the rest of the
 /// squad green.
 const PLAYING_INK: [u8; 3] = [0, 0, 0];
@@ -222,7 +253,7 @@ const QUIT_QUESTION: u16 = u16::MAX;
 /// the frame, and on the line-up the boxes where the first formation and the
 /// bench put them.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
-    for id in [LINEUP, DRESSING_ROOM] {
+    for id in [LINEUP, LINEUP_LIST, DRESSING_ROOM] {
         let Some(dialog) = dialogs.get_mut(&id) else { continue };
         dialog.controls.retain(|c| c.id != Some(OK_BUTTON));
         let first_titles = dialog.controls.iter().find(|c| c.id == Some(TITLES)).map(|c| c.rect);
@@ -248,7 +279,15 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
                 control.rect = Rect::from_corners(at, at + BOX_SIZE);
             }
         }
-        if id == LINEUP {
+        if id == LINEUP_LIST {
+            // The small pitch's markers, which the screen moves and labels.
+            for control in &mut dialog.controls {
+                if control.id.is_some_and(|id| (MARKERS..MARKERS + FIELD as u16).contains(&id)) {
+                    control.kind = Kind::Marker;
+                }
+            }
+        }
+        if line_up(id) {
             // The menu a right click on a player opens, over everything.
             let menu = Control {
                 kind: Kind::Menu,
@@ -300,17 +339,17 @@ pub struct MenuBar {
 
 impl Screen for MenuBar {
     fn ids(&self) -> &[u16] {
-        &[LINEUP, DRESSING_ROOM]
+        &[LINEUP, LINEUP_LIST, DRESSING_ROOM]
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(season) = &cx.state.season else { return };
         let Some(manager) = season.manager() else { return };
-        let caption = if view.id == LINEUP { LINEUP_CAPTION } else { DRESSING_CAPTION };
+        let caption = if line_up(view.id) { LINEUP_CAPTION } else { DRESSING_CAPTION };
         set(view, dialog, CAPTION_ID, manager_title(game, season, caption));
 
-        let open = if view.id == LINEUP { LINEUP_SYMBOL } else { DRESSING_SYMBOL };
+        let open = if line_up(view.id) { LINEUP_SYMBOL } else { DRESSING_SYMBOL };
         if let Some(state) = control(dialog, BAR_ID).and_then(|b| view.bar_mut(b)) {
             state.chosen = open;
             state.off = if manager.club.is_none() {
@@ -332,13 +371,28 @@ impl Screen for MenuBar {
                 options.actions = true;
             }
         }
-        if view.id == LINEUP
+        // The list drops who may not play from the eleven and the bench
+        // as it opens (`FUN_00502195`, `FUN_00696631`).
+        let own = manager.club;
+        if view.id == LINEUP_LIST
+            && let Some(club) = own
+            && let Some(state) = cx.state.season.as_mut().and_then(|s| s.clubs.get_mut(&club))
+        {
+            for p in 0..state.players.len() {
+                if !autolineup::may_play(&state.status.get(p).copied().unwrap_or_default()) {
+                    state.lineup.remove(p);
+                }
+            }
+        }
+        let Some(season) = &cx.state.season else { return };
+        let Some(manager) = season.manager() else { return };
+        if line_up(view.id)
             && let Some(club) = manager.club
             && let Some(state) = season.clubs.get(&club)
         {
             // Sorted as it opens, "Name" lit (`CMannschaftsaufstellung`'s
-            // constructor).
-            self.sort = Sort::default();
+            // constructor, `CMannaufListe`'s).
+            self.sort = Sort { list: view.id == LINEUP_LIST, ..Sort::default() };
             self.kept = [0; 2];
             if let Some(titles) = control(dialog, TITLES).and_then(|i| view.options_mut(i)) {
                 titles.chosen = self.sort.column;
@@ -367,7 +421,12 @@ impl Screen for MenuBar {
                 Some(DUTIES) => {
                     matches!(
                         item,
-                        FORMATION_ITEM | KEEP_ITEM | TAKERS_ITEM | MEDICAL_ITEM | OPPONENT_ITEM
+                        SWITCH_ITEM
+                            | FORMATION_ITEM
+                            | KEEP_ITEM
+                            | TAKERS_ITEM
+                            | MEDICAL_ITEM
+                            | OPPONENT_ITEM
                     )
                 }
                 Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
@@ -390,6 +449,13 @@ impl Screen for MenuBar {
             {
                 match self.menu.get(item) {
                     Some(Command::Info) => {
+                        // The list's info pages through its rows as the
+                        // list box keeps them: backwards (`AddHead`).
+                        if view.id == LINEUP_LIST {
+                            let rows = control(cx.dialog, SQUAD).and_then(|l| view.list(l));
+                            let rows = rows.map(|l| l.keys.iter().rev().copied().collect());
+                            cx.state.paging = rows;
+                        }
                         self.popup = Some(playerinfo::CURRENT);
                         return Outcome::Popup(Request::with(
                             playerinfo::CURRENT,
@@ -428,13 +494,15 @@ impl Screen for MenuBar {
             }
             return Outcome::Stay;
         }
+        // The list box's own menu has no talk (`CListBoxSpielerInfo`).
         if let Target::Menu(grip) = target {
-            if view.id == LINEUP {
+            if line_up(view.id) {
                 let day = cx.state.season.as_ref().map_or(0, |s| s.day);
+                let talk = view.id == LINEUP && day % WEEK != WEEK - 1;
                 self.menu = MENU
                     .iter()
                     .map(|&(command, _)| command)
-                    .filter(|&c| c != Command::Talk || day % WEEK != WEEK - 1)
+                    .filter(|&c| c != Command::Talk || talk)
                     .collect();
                 self.menu_player = open_menu(cx, view, grip, &self.menu);
             }
@@ -446,39 +514,65 @@ impl Screen for MenuBar {
             }
             return Outcome::Stay;
         }
+        // A click on a row of the list view takes its player in or out
+        // (`OnSelChange`).
+        if let Target::Row { control: c, row } = target
+            && view.id == LINEUP_LIST
+            && cx.dialog.controls[c].id == Some(SQUAD)
+        {
+            let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
+            if let Some(player) = player {
+                let sort = self.sort;
+                change_lineup(cx, view, Boxes::Refill, sort, |tables, club, _| {
+                    a3_core::refit::click(tables, club, player);
+                });
+            }
+            return Outcome::Stay;
+        }
         if let Target::Button(c) = target
-            && view.id == LINEUP
+            && line_up(view.id)
             && cx.dialog.controls[c].id == Some(ROWS_BUTTON)
         {
             self.switch_rows(cx, view, c);
             return Outcome::Stay;
         }
         let Target::Option { control: c, item } = target else { return Outcome::Stay };
-        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == FORMATION_ITEM {
+        // The other view: the manager keeps to it, and the turn opens it at
+        // once (`EndDialog(100)`, `FUN_00650b84`). The pitch view's parts
+        // stay with the club, as the list shows them.
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == SWITCH_ITEM {
+            switch_view(cx, view.id == LINEUP);
+            return Outcome::Close(Reply::Goto(LINEUP));
+        }
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == FORMATION_ITEM {
             self.popup = Some(FORMATIONS);
             return Outcome::Popup(Request::new(FORMATIONS));
         }
-        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == KEEP_ITEM {
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == KEEP_ITEM {
             let formation = club_state(cx).map_or(0, |c| c.formation);
             self.popup = Some(KEEP_QUESTION);
-            let args = Args::TextForFormation(KEEP_FORMATION, formation);
+            let args = if view.id == LINEUP_LIST {
+                Args::KeepFormation(formation)
+            } else {
+                Args::TextForFormation(KEEP_FORMATION, formation)
+            };
             return Outcome::Popup(Request::with(QUESTION, args));
         }
         // The next opponent's info, if there is one (`FUN_00510540`).
-        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == OPPONENT_ITEM {
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == OPPONENT_ITEM {
             let Some((dialog, opponent)) = next_opponent(cx) else { return Outcome::Stay };
             self.popup = Some(dialog);
             return Outcome::Popup(Request::with(dialog, Args::Club(opponent.0, opponent.1)));
         }
-        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == MEDICAL_ITEM {
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == MEDICAL_ITEM {
             self.popup = Some(medical::MEDICAL);
             return Outcome::Popup(Request::new(medical::MEDICAL));
         }
-        if view.id == LINEUP && cx.dialog.controls[c].id == Some(DUTIES) && item == TAKERS_ITEM {
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == TAKERS_ITEM {
             self.popup = Some(duties::TAKERS);
             return Outcome::Popup(Request::new(duties::TAKERS));
         }
-        if view.id == LINEUP && cx.dialog.controls[c].id == Some(SPECIAL) {
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(SPECIAL) {
             if item == SPECIAL_ITEM {
                 self.popup = Some(special::SPECIAL);
                 return Outcome::Popup(Request::new(special::SPECIAL));
@@ -490,7 +584,7 @@ impl Screen for MenuBar {
         }
         // A column title sorts the list by its column (`FUN_0050fd07`);
         // nothing else changes.
-        if view.id == LINEUP && matches!(cx.dialog.controls[c].id, Some(TITLES | SECOND_TITLES)) {
+        if line_up(view.id) && matches!(cx.dialog.controls[c].id, Some(TITLES | SECOND_TITLES)) {
             self.sort.click(item);
             change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
             return Outcome::Stay;
@@ -512,7 +606,7 @@ impl Screen for MenuBar {
         match item {
             // Training is never set for the coming week, so the game asks.
             WHISTLE => Outcome::Popup(Request::with(QUESTION, Args::Text(NO_TRAINING))),
-            LINEUP_SYMBOL if view.id != LINEUP => Outcome::Close(Reply::Goto(LINEUP)),
+            LINEUP_SYMBOL if !line_up(view.id) => Outcome::Close(Reply::Goto(LINEUP)),
             DRESSING_SYMBOL if view.id != DRESSING_ROOM => {
                 Outcome::Close(Reply::Goto(DRESSING_ROOM))
             }
@@ -555,6 +649,10 @@ impl Screen for MenuBar {
             {
                 self.popup = Some(next);
                 Outcome::Popup(Request::new(next))
+            }
+            // The list box's menu fills nothing again.
+            (Some(discipline::BONUS | discipline::FINE), _) if view.id == LINEUP_LIST => {
+                Outcome::Stay
             }
             // A bonus or a fine may have changed the players' morale; the
             // takers their duties, a deposed captain his morale. The boxes
@@ -654,6 +752,35 @@ fn next_opponent(cx: &Cx) -> Option<(u16, (usize, usize))> {
 fn club_state<'a>(cx: &'a Cx) -> Option<&'a ClubState> {
     let season = cx.state.season.as_ref()?;
     season.clubs.get(&season.manager()?.club?)
+}
+
+/// Whether a screen is the line-up, on the pitch or as a list.
+fn line_up(id: u16) -> bool {
+    matches!(id, LINEUP | LINEUP_LIST)
+}
+
+/// The current manager's line-up switched to the list or back to the
+/// pitch, with him and in his record. Leaving the pitch, the club keeps the
+/// parts the pitch view reckoned last (club +0x94), which the list shows.
+fn switch_view(cx: &mut Cx, list: bool) {
+    let pitch = &cx.game.rules.pitch;
+    let state = &mut *cx.state;
+    let Some(season) = state.season.as_mut() else { return };
+    let current = season.current;
+    let Some(manager) = season.managers.get_mut(current) else { return };
+    manager.list_view = list;
+    if list
+        && let Some(club) = manager.club
+        && let Some(club) = season.clubs.get_mut(&club)
+    {
+        club.strengths = Some(pitch.parts(&club.lineup, &club.players, &club.fitness));
+    }
+    if let Some(records) = state.records.as_mut()
+        && let Some(slot) = records.human_slot(current)
+        && let Some(record) = records.managers.get_mut(slot)
+    {
+        record.set_list_view(list);
+    }
 }
 
 /// Changes the current manager's line-up and shows it again.
@@ -825,9 +952,11 @@ fn seasons(game: &Game, club: &ClubState, records: Option<&Records>) -> Vec<squa
         .map(|p| {
             let status = club.status.get(p).copied().unwrap_or_default();
             let nation = bytes(&code(status.nations[0]).unwrap_or_default());
+            let nation_name = bytes(game.world.nation(status.nations[0].into()));
             let Some(r) = records.and_then(|records| records.player(status.id)) else {
                 return squadlist::Season {
                     nation,
+                    nation_name,
                     form: NO_FORM,
                     content: 1,
                     ..Default::default()
@@ -840,6 +969,7 @@ fn seasons(game: &Game, club: &ClubState, records: Option<&Records>) -> Vec<squa
                 if status.id > LAST_REAL_ID { 1 } else { mood::content_level(mood::parts(r)) };
             squadlist::Season {
                 nation,
+                nation_name,
                 form,
                 appearances: i32::from(r.league_matches()),
                 goals: i32::from(r.goals()[0]),
@@ -903,8 +1033,13 @@ fn show_lineup(
             at: None,
         }
     };
+    let list_view = view.id == LINEUP_LIST;
+    if list_view {
+        show_markers(view, dialog, game, state);
+    }
     let duties = a3_core::duties::on_pitch(players, &state.duties, &lineup.field);
-    for (i, (&spot, &player)) in lineup.spots.iter().zip(&lineup.field).enumerate() {
+    let spots = if list_view { &[][..] } else { &lineup.spots[..] };
+    for (i, (&spot, &player)) in spots.iter().zip(&lineup.field).enumerate() {
         let Some(c) = control(dialog, FIELD_BOXES + i as u16) else { continue };
         let position = pitch.position(spot);
         let shown = match player {
@@ -926,7 +1061,7 @@ fn show_lineup(
         view.set_player(c, shown);
     }
     // The bench shows no duties.
-    let bench = if boxes == Boxes::Refill { &lineup.bench[..] } else { &[] };
+    let bench = if boxes == Boxes::Refill && !list_view { &lineup.bench[..] } else { &[] };
     for (i, &player) in bench.iter().enumerate() {
         let Some(c) = control(dialog, BENCH_BOXES + i as u16) else { continue };
         let shown = player.map_or_else(PlayerBox::default, |p| filled(p, players[p].positions[0]));
@@ -949,9 +1084,11 @@ fn show_lineup(
         state.rows.clear();
         state.inks.clear();
         state.row_icons.clear();
+        state.keyed = STATUS_ICONS.into_iter().chain(CONTENT_ICONS).collect();
         state.row_boxes.clear();
         for p in order {
-            state.row_boxes.push(Some(filled(p, players[p].positions[0])));
+            // The list view's rows are not dragged.
+            state.row_boxes.push((!list_view).then(|| filled(p, players[p].positions[0])));
             let player = &players[p];
             let [main, second, third] = player.positions;
             let sides = match (second, third) {
@@ -960,7 +1097,8 @@ fn show_lineup(
                 (s, t) => format!("{}/{}", abbreviation(s), abbreviation(t)),
             };
             let form = lineup::form(fitness(p));
-            let ink = if out(&status(p)) {
+            let terms = records.and_then(|r| r.player(status(p).id)).map_or(0, |r| r.terms());
+            let ink = if out(&status(p), list_view) {
                 OUT_INK
             } else if lineup.playing(p) {
                 PLAYING_INK
@@ -1012,13 +1150,69 @@ fn show_lineup(
             state.inks.push(Some(ink));
             let mut icons: Vec<(f32, u16)> =
                 ABILITY_COLUMNS.into_iter().zip(pitch.ability_icons(player)).collect();
-            if let Some(icon) = status_icon(&status(p)) {
+            let icon = if list_view {
+                list_status_icon(&status(p), terms)
+            } else {
+                status_icon(&status(p))
+            };
+            if let Some(icon) = icon {
                 icons.push((STATUS_COLUMN, STATUS_ICONS[usize::from(icon - 1)]));
             }
             state.row_icons.push(icons);
         }
     }
-    show_comparison(view, dialog, game, season, state, records);
+    // The list view shows the parts the club had as it opened.
+    let own_parts = if list_view { state.strengths } else { None };
+    show_comparison(view, dialog, game, season, state, records, own_parts);
+}
+
+/// The list view's small pitch (`FUN_00503420`): a marker for each slot of
+/// the eleven on its spot, the player's shirt number on it in an ink for how
+/// he fits there; below, how many players stand in the eleven.
+fn show_markers(view: &mut View, dialog: &Dialog, game: &Game, state: &ClubState) {
+    let pitch = &game.rules.pitch;
+    let lineup = &state.lineup;
+    for (i, (&spot, &player)) in lineup.spots.iter().zip(&lineup.field).enumerate() {
+        let Some(c) = control(dialog, MARKERS + i as u16) else { continue };
+        let image = match pitch.kind_under(spot) {
+            1 => KEEPER_MARKER,
+            2..=5 => DEFENCE_MARKER,
+            6..=9 => MIDFIELD_MARKER,
+            _ => ATTACK_MARKER,
+        };
+        let x = (f64::from(spot.0) / f64::from(MARKER_SHRINK)).trunc() as i32;
+        let at =
+            Vec2::new((MARKER_ORIGIN.0 + x) as f32, (MARKER_ORIGIN.1 + i32::from(spot.1)) as f32);
+        let (text, ink) = match player.and_then(|p| state.players.get(p)) {
+            None => (" ".to_owned(), FITS_INK),
+            Some(player) => {
+                let position = pitch.position(spot);
+                let kind = pitch.kind(position);
+                let [main, second, third] = player.positions;
+                let hanging = position == HANGING_STRIKER
+                    && player.positions.iter().any(|&k| pitch.hanging(k));
+                let ink = if main == position || hanging || main == kind {
+                    FITS_INK
+                } else if second == kind || third == kind {
+                    SIDE_INK
+                } else if player.traits[0] & ALLROUNDER != 0 {
+                    ALLROUNDER_INK
+                } else {
+                    MISFIT_INK
+                };
+                (player.shirt.to_string(), ink)
+            }
+        };
+        view.controls[c].state =
+            ControlState::Marker(Some(crate::controls::marker::Marker { image, at, text, ink }));
+    }
+    let set_players = lineup.field.iter().flatten().filter(|&&p| p < state.players.len()).count();
+    let line = match set_players {
+        0 => game.text(PLAYERS_SET[0]).to_owned(),
+        1 => game.text(PLAYERS_SET[1]).to_owned(),
+        n => game.text(PLAYERS_SET[2]).replacen("%d", &n.to_string(), 1),
+    };
+    set(view, dialog, STATUS_LINE, line);
 }
 
 /// A player's form against the one the list showed last.
@@ -1100,13 +1294,60 @@ fn status_icon(status: &Status) -> Option<u8> {
 }
 
 /// Whether the list writes a player in red: out for a while, suspended, or
-/// at the end of his contract — unless his strength is hidden.
-fn out(status: &Status) -> bool {
+/// at the end of his contract — unless his strength is hidden, or, in the
+/// list view, not known yet (`FUN_00696b4c`).
+fn out(status: &Status, list_view: bool) -> bool {
+    let excused = if list_view { status.strength_unknown } else { status.strength_hidden };
     status.long > 0
         || status.suspended != 0
         || status.injured >= WEEK_DAYS as i32
         || status.away > 0
-        || status.contract.is_some_and(|years| years <= 0) && !status.strength_hidden
+        || status.contract.is_some_and(|years| years <= 0) && !excused
+}
+
+/// The status the list view's rows show (`FUN_00503b7e`): as the pitch
+/// view's, but a mark of the contract's terms first, a player marked at
+/// home shows the risky one's icon, and the contract's end is excused by a
+/// strength not known yet.
+fn list_status_icon(status: &Status, terms: u16) -> Option<u8> {
+    if status.away > 0 && status.away_kind & MARKED != 0 {
+        return Some(SUSPENDED);
+    }
+    let mut icon = None;
+    if terms & TERMS_MARK != 0 {
+        icon = Some(TERMS_ICON);
+    }
+    if status.knocked {
+        icon = Some(KNOCKED);
+    }
+    if status.dumbbell {
+        icon = Some(DUMBBELL);
+    }
+    if status.long > 0 {
+        icon = Some(DOPING);
+    } else if status.suspended != 0 {
+        icon = Some(RED_CARD);
+    } else if status.injured >= WEEK_DAYS as i32 {
+        icon = Some(INJURED);
+    } else if status.injured > 0 {
+        icon = Some(RISKY);
+    }
+    let contracted = status.contract.is_none_or(|years| years > 0) || status.strength_unknown;
+    if status.away == 0 && contracted {
+        if status.away_kind & MARKED != 0 {
+            icon = Some(RISKY);
+        }
+    } else if status.away == 0 {
+        icon = Some(ABSENT);
+    } else {
+        icon = Some(match status.away_kind & 0xf {
+            2 => NATIONAL,
+            5 => PRISON,
+            7 => UFO,
+            _ => ABSENT,
+        });
+    }
+    icon
 }
 
 /// The panel that holds the line-up against the next opponent's, if the
@@ -1120,6 +1361,7 @@ fn show_comparison(
     season: &Season,
     state: &ClubState,
     records: Option<&Records>,
+    own_parts: Option<[i32; PARTS]>,
 ) {
     let pitch = &game.rules.pitch;
     let players = &state.players;
@@ -1152,7 +1394,7 @@ fn show_comparison(
         );
     };
     let ids = (OWN_PARTS, OWN_TOTAL, OWN_FORM);
-    side(view, &state.lineup, players, &state.fitness, None, ids);
+    side(view, &state.lineup, players, &state.fitness, own_parts, ids);
 
     let next = season
         .next_match(&game.world, &game.calendar, own)

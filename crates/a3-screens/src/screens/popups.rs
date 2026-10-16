@@ -33,6 +33,12 @@ impl Screen for Question {
                 let name = manager.and_then(|m| m.formations.get(formation)).map(|f| f.0.as_str());
                 Some(cx.game.text(text).replacen("%s", name.unwrap_or_default(), 1))
             }
+            Args::KeepFormation(formation) => {
+                let manager = cx.state.season.as_ref().and_then(|s| s.manager());
+                let name = manager.and_then(|m| m.formations.get(formation)).map(|f| f.0.as_str());
+                let question = &cx.game.rules.pitch.keep_question;
+                Some(question.replacen("%s", name.unwrap_or_default(), 1))
+            }
             _ => None,
         };
         if let Some(text) = text {

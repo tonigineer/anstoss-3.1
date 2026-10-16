@@ -81,6 +81,13 @@ pub const NEUTRAL_MOOD: i32 = 10;
 pub const FULL_MORALE: i32 = 100;
 const MORALE_TOP: i32 = 110;
 /// Whether a nation is of the European Union, by nation code.
+/// The kinds a hanging striker's spot suits on the list view's small pitch
+/// (10 where it does), and the list view's question whether its formation
+/// keeps the eleven's spots, which has no quotes round the name.
+const HANGING_AT: u32 = 0x8a50ac;
+const HANGING: i16 = 10;
+const KEEP_QUESTION_AT: u32 = 0x884990;
+const KEEP_QUESTION_LENGTH: usize = 0x80;
 const EUROPEAN_AT: u32 = 0x89e0b8;
 const NATIONS: usize = 0x80;
 
@@ -106,6 +113,8 @@ pub struct Tables {
     pub co_trainer: crate::autolineup::CoTrainerTables,
     /// The nations of the European Union, whose players are no foreigners.
     pub european: Vec<bool>,
+    hanging: Vec<bool>,
+    pub keep_question: String,
 }
 
 impl Tables {
@@ -150,6 +159,15 @@ impl Tables {
                 .collect(),
             co_trainer: crate::autolineup::CoTrainerTables::load(exe)?,
             european: exe.bytes(EUROPEAN_AT, NATIONS)?.iter().map(|&b| b != 0).collect(),
+            hanging: exe
+                .u16s(HANGING_AT, KINDS)?
+                .into_iter()
+                .map(|v| v as i16 == HANGING)
+                .collect(),
+            keep_question: {
+                let text = exe.bytes(KEEP_QUESTION_AT, KEEP_QUESTION_LENGTH)?;
+                a3_files::sav::cp1252(text.split(|&b| b == 0).next().unwrap_or_default())
+            },
         })
     }
 
@@ -195,8 +213,16 @@ impl Tables {
         self.area(spot).map_or(GOALKEEPER, |a| self.area_kinds[a])
     }
 
-    fn kind(&self, position: u8) -> u8 {
+    /// The kind of position a position is (the table at 0x89e23c).
+    pub fn kind(&self, position: u8) -> u8 {
         self.kinds.get(usize::from(position)).copied().unwrap_or(GOALKEEPER)
+    }
+
+    /// Whether a kind of position suits a hanging striker's spot on the
+    /// list view's small pitch: the wide midfielders, the attacking one
+    /// and the striker.
+    pub fn hanging(&self, kind: u8) -> bool {
+        self.hanging.get(usize::from(kind)).copied().unwrap_or(false)
     }
 
     /// How much of his strength a player brings on a position, in tenths.
@@ -318,7 +344,10 @@ impl Tables {
         for (spot, player) in lineup.on_field() {
             let Some(p) = players.get(player) else { continue };
             let value = self.strength_at(p, fitness_of(fitness, player), self.kind_at(spot));
-            let row = self.down.iter().position(|&y| y >= spot.1).unwrap_or(DOWN - 1);
+            // The band of the grid the spot's height lies in: before the
+            // first line below it, the last band past the last line (the
+            // lookup `FUN_00696b76` builds, `FUN_006a18c2` reads).
+            let row = self.down.iter().skip(1).position(|&y| spot.1 < y).unwrap_or(DOWN - 1);
             let weights = self.parts.get(row).copied().unwrap_or_default();
             for (part, &weight) in parts.iter_mut().zip(&weights) {
                 *part += value * i32::from(weight);

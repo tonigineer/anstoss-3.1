@@ -88,7 +88,8 @@ impl Screen for PlayerInfo {
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
         if let Args::Player(player) = args {
             let Some(club) = club_state(cx) else { return };
-            self.order = a3_core::squadlist::by_position(&club.players);
+            let by_position = a3_core::squadlist::by_position(&club.players);
+            self.order = cx.state.paging.take().unwrap_or(by_position);
             self.at = self.order.iter().position(|&p| p == player).unwrap_or(0);
         }
         for id in [PLAYERS, PAGES] {

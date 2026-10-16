@@ -11,6 +11,7 @@ pub mod combo;
 pub mod edit;
 pub mod header;
 pub mod list;
+pub mod marker;
 pub mod menu;
 pub mod options;
 pub mod paint;
@@ -36,6 +37,7 @@ use self::combo::ComboState;
 use self::edit::EditState;
 use self::header::HeaderState;
 use self::list::ListState;
+use self::marker::Marker;
 use self::menu::MenuState;
 use self::options::OptionsState;
 use self::paint::PaintState;
@@ -66,6 +68,8 @@ pub enum ControlState {
     Options(OptionsState),
     /// What a player's box shows, once the flow has filled it.
     Player(Option<PlayerBox>),
+    /// What a marker of the small pitch shows, once the screen has put it.
+    Marker(Option<Marker>),
     Check(CheckState),
     Combo(ComboState),
     Menu(MenuState),
@@ -115,6 +119,7 @@ impl ControlView {
             Kind::Edit { .. } => ControlState::Edit(EditState { text: text() }),
             Kind::Options { items, .. } => ControlState::Options(OptionsState::new(items)),
             Kind::Player => ControlState::Player(None),
+            Kind::Marker => ControlState::Marker(None),
             Kind::Check => ControlState::Check(CheckState { checked: false, text: text() }),
             Kind::Combo => ControlState::Combo(ComboState::default()),
             Kind::PushButton { .. } => ControlState::Button(ButtonState::default()),
@@ -208,6 +213,7 @@ impl ControlState {
             Self::Anim(anim) => (anim.frames.clone(), true),
             Self::Bar(_) => (bar::IMAGES.to_vec(), false),
             Self::Player(player) => player_box::graphics(player.as_ref()),
+            Self::Marker(marker) => (marker.iter().map(|m| m.image).collect(), true),
             Self::List(list) => list.graphics(),
             _ => (Vec::new(), false),
         }
@@ -226,12 +232,13 @@ impl ControlState {
             Self::Edit(e) => e.draw(frame, paint),
             Self::Options(o) => o.draw(frame, paint),
             Self::Player(Some(p)) => p.draw(frame, paint),
+            Self::Marker(Some(m)) => m.draw(frame, paint),
             Self::Check(c) => c.draw(frame, paint),
             Self::Menu(m) => m.draw(frame, paint),
             Self::Bar(b) => b.draw(frame, paint),
             Self::Paint(p) => p.draw(frame, paint),
             Self::Combo(c) => c.draw(frame, paint),
-            Self::Spin(_) | Self::Player(None) | Self::Other => {}
+            Self::Spin(_) | Self::Player(None) | Self::Marker(None) | Self::Other => {}
         }
     }
 
@@ -260,9 +267,11 @@ impl ControlState {
             Self::Player(Some(player)) => {
                 out.push((Target::Control(index), geometry.map(player.rect(control))))
             }
+            // The markers have no handler: a click on one does nothing.
             Self::Header(_)
             | Self::Bitmap(_)
             | Self::Player(None)
+            | Self::Marker(_)
             | Self::Paint(_)
             | Self::Other => {}
         }

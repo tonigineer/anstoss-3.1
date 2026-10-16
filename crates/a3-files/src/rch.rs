@@ -117,6 +117,9 @@ pub enum Kind {
     /// A player's box on the pitch or the bench of the line-up, the game's
     /// `CMannStatic`, which draws itself.
     Player,
+    /// A marker on the list view's small pitch, one of the game's bitmap
+    /// buttons the screen moves, pictures and labels itself.
+    Marker,
     /// The menu bar the game puts along the bottom of its main screens, its
     /// `CLeiste`: a strip of symbols, which draws itself.
     Bar {

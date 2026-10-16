@@ -192,6 +192,7 @@ impl Medical {
         }
         list.rows = rows;
         list.row_icons = icons;
+        list.keyed = vec![INJECTION_ICON, OPERATION_ICON];
         list.keys = players;
     }
 }

@@ -397,6 +397,9 @@ pub struct Manager {
     /// with the menu bar (0, the default), from the office (1) or a text
     /// menu (2).
     pub menu: u8,
+    /// Whether his line-up shows as a list (dialog 429) rather than on the
+    /// pitch (147), as he last switched it.
+    pub list_view: bool,
     /// The formations he chooses from.
     pub formations: Vec<lineup::Formation>,
 }
@@ -469,6 +472,7 @@ impl Season {
                     confidence,
                     offers: Vec::new(),
                     menu: 0,
+                    list_view: false,
                     formations: rules.pitch.new_formations(),
                 }
             })

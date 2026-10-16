@@ -29,17 +29,19 @@ const WEEK: i32 = 7;
 /// column the list is sorted by, and which of its orders "Name" has:
 /// alphabetical (0), the eleven and the bench first (1, the order the
 /// screen opens with), the bench first (2), those in neither first (3),
-/// those out first (4).
+/// those out first (4). The list view (dialog 429) compares two columns
+/// its own way (`list`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Sort {
     pub stats: bool,
     pub column: usize,
     pub names: usize,
+    pub list: bool,
 }
 
 impl Default for Sort {
     fn default() -> Self {
-        Self { stats: false, column: 0, names: 1 }
+        Self { stats: false, column: 0, names: 1, list: false }
     }
 }
 
@@ -69,11 +71,13 @@ pub struct Name {
 }
 
 /// What the season's row compares of a player besides his fitness: his
-/// nation's three letters, his form this season in tenths ("DForm"), his
-/// appearances and goals, how content he is (0 happy to 3 wanting to go).
+/// nation's three letters — or its whole name, as the list view compares
+/// it — his form this season in tenths ("DForm"), his appearances and
+/// goals, how content he is (0 happy to 3 wanting to go).
 #[derive(Clone, Default, Debug)]
 pub struct Season {
     pub nation: Vec<u8>,
+    pub nation_name: Vec<u8>,
     pub form: i32,
     pub appearances: i32,
     pub goals: i32,
@@ -108,6 +112,7 @@ pub fn order(
         exchange_sort(rows, |p, q| match sort.column {
             0 => by_name(club, names, sort.names, p, q),
             1 => club.players[p].positions[0] < club.players[q].positions[0],
+            2 if sort.list => season(p).nation_name < season(q).nation_name,
             2 => season(p).nation < season(q).nation,
             3 => season(p).form > season(q).form,
             4 => lineup::condition(fitness(p)) > lineup::condition(fitness(q)),
@@ -151,6 +156,17 @@ fn before(
     match sort.column {
         0 => by_name(club, names, sort.names, p, q),
         1 => a.positions[0] < b.positions[0],
+        // The list view's: plainly by the two positions, none first.
+        2 if sort.list => {
+            let ([_, p2, p3], [_, q2, q3]) = (a.positions, b.positions);
+            if q2 == 0 {
+                false
+            } else if p2 != q2 {
+                p2 < q2
+            } else {
+                q3 != 0 && p3 < q3
+            }
+        }
         2 => {
             let ([_, p2, p3], [_, q2, q3]) = (a.positions, b.positions);
             match (p2, q2) {
@@ -271,7 +287,7 @@ mod tests {
         sort.click(4);
         assert_eq!(sort.column, 4);
         sort.click(REGULAR);
-        assert_eq!(sort, Sort { stats: true, column: 0, names: 1 });
+        assert_eq!(sort, Sort { stats: true, column: 0, names: 1, list: false });
         sort.click(STATS_COLUMNS);
         assert_eq!(sort.column, 0);
     }
@@ -280,10 +296,10 @@ mod tests {
     fn name_steps_through_its_orders() {
         let mut sort = Sort::default();
         sort.click(4);
-        assert_eq!(sort, Sort { stats: false, column: 4, names: 1 });
+        assert_eq!(sort, Sort { stats: false, column: 4, names: 1, list: false });
         for names in [2, 3, 4, 0, 1] {
             sort.click(0);
-            assert_eq!(sort, Sort { stats: false, column: 0, names });
+            assert_eq!(sort, Sort { stats: false, column: 0, names, list: false });
         }
     }
 }

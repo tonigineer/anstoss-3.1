@@ -272,18 +272,27 @@ const NEVER_KEY: i32 = 0x1000;
 
 /// A system's part: how many of four kinds it has, and their spots.
 #[derive(Clone, Debug, Default)]
-pub struct Part {
+pub(crate) struct Part {
     pub counts: [i16; 4],
     pub spots: Vec<(i16, i16)>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct CoTrainerTables {
-    most: Vec<i16>,
+    pub(crate) most: Vec<i16>,
     defences: Vec<Vec<Part>>,
     midfields: Vec<Vec<Part>>,
-    attacks: Vec<Vec<(i16, i16)>>,
+    pub(crate) attacks: Vec<Vec<(i16, i16)>>,
+    /// Every size of defence, one to five, and of midfield, one to eight,
+    /// as the list view's re-fit reads them (`crate::refit`).
+    pub(crate) every_defence: Vec<Vec<Part>>,
+    pub(crate) every_midfield: Vec<Vec<Part>>,
 }
+
+/// Where every size of defence and midfield is, from one.
+const EVERY_DEFENCE_AT: [u32; 5] = [0x877530, 0x8775c8, 0x8776b8, 0x8777a8, 0x877840];
+const EVERY_MIDFIELD_AT: [u32; 8] =
+    [0x877860, 0x877890, 0x877a88, 0x877c80, 0x877ff8, 0x8782c8, 0x878498, 0x8784c4];
 
 impl CoTrainerTables {
     pub fn load(exe: &a3_files::exe::Exe) -> std::io::Result<Self> {
@@ -320,6 +329,14 @@ impl CoTrainerTables {
                 .map(|&at| parts(at, MIDFIELD_ROW))
                 .collect::<Result<_, _>>()?,
             attacks,
+            every_defence: EVERY_DEFENCE_AT
+                .iter()
+                .map(|&at| parts(at, DEFENCE_ROW))
+                .collect::<Result<_, _>>()?,
+            every_midfield: EVERY_MIDFIELD_AT
+                .iter()
+                .map(|&at| parts(at, MIDFIELD_ROW))
+                .collect::<Result<_, _>>()?,
         })
     }
 }
