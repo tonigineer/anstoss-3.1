@@ -14,6 +14,7 @@ use crate::medical::{self, MedicalTables};
 use crate::random::Random;
 use crate::records::{self, Globals, Records, Team};
 use crate::season::{ClubState, Fitness, Manager, Season, Status};
+use crate::tactics::{FOUL, PICKS, Pick, Tactics};
 use crate::world::Player;
 use crate::{autolineup, cohesion, duties};
 
@@ -117,6 +118,10 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
     let duties = extra.map_or_else(Default::default, |e| {
         e.duty_lists().map(|list| duties::from_ids(&ids, &list))
     });
+    let mut tactics = Tactics::of(team, extra);
+    if let Some(extra) = extra {
+        tactics.picks = picks(records, data, team, &ids, extra.picks());
+    }
     let pitch = &data.rules.pitch;
     let country = usize::from(team.country());
     let counted = pitch.european.get(country).copied().unwrap_or(false);
@@ -131,6 +136,7 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
         line_up_flags,
         foreigner_rule,
         duties,
+        tactics,
         ..state
     };
     // A game saved in the middle of a matchday goes on with its matches: the
@@ -139,6 +145,32 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
         autolineup::before_match(pitch, &mut club);
     }
     club
+}
+
+/// The tactics' players, by their ids: the own two in the squad, the
+/// opponent's two in the next opponent's.
+fn picks(
+    records: &Records,
+    data: &Data,
+    team: &Team,
+    own: &[u16],
+    ids: [u16; PICKS],
+) -> [Option<Pick>; PICKS] {
+    let world = &data.world;
+    let own_club = world.slot_of(team.country().into()).map(|slot| (slot, team.number().into()));
+    let next = (team.next_country(), u16::try_from(team.next_number()).ok());
+    let (theirs, their_club) = match next {
+        (country @ 1.., Some(number)) => (
+            records.team(country.into(), number).map(Team::players).unwrap_or_default(),
+            world.slot_of(country.into()).map(|slot| (slot, usize::from(number))),
+        ),
+        _ => (Vec::new(), None),
+    };
+    std::array::from_fn(|i| {
+        let (squad, club) = if i < FOUL { (own, own_club) } else { (&theirs[..], their_club) };
+        let place = squad.iter().position(|&id| id == ids[i] && id != 0)?;
+        Some(Pick { club: club?, place })
+    })
 }
 
 /// Where the cycle goes on after loading, for a game saved during a

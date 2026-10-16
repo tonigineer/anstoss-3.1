@@ -16,8 +16,9 @@
 //! Actions, separated by `;`, act on the dialog's controls by their ids in
 //! the dialog file: `ok`, `cancel`, `press <button>`, `click <static or
 //! animation>`, `click bar <symbol>`, `choose <options> <item>`,
-//! `row <list> <row>`, `cell <list> <row> <column>`, `type <field> <text>`, `spin <spinner> up|down`,
-//! `slide <slider> <value>`, and `wait` until the screen moves on by
+//! `row <list> <row>`, `cell <list> <row> <column>`, `type <field> <text>`,
+//! `spin <spinner> up|down` (a slider's arrows too), `slide <slider>
+//! <value>`, `rclick <control>`, and `wait` until the screen moves on by
 //! itself. A dialog the script has no actions for stops it, as does an
 //! action for a control the dialog does not have.
 //!
@@ -417,7 +418,7 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
             let control = find(id)?;
             match controls.controls[control].kind {
                 Kind::Check => Target::Check(control),
-                Kind::Combo => Target::Combo(control),
+                Kind::Combo { .. } => Target::Combo(control),
                 _ => Target::Control(control),
             }
         }
@@ -428,7 +429,13 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::Choose(id, item) => Target::Option { control: find(id)?, item },
         Action::Row(id, row) => Target::Row { control: find(id)?, row },
         Action::Cell(id, row, column) => Target::Cell { control: find(id)?, row, column },
-        Action::Spin(id, up) => Target::Spin { control: find(id)?, up },
+        Action::Spin(id, up) => {
+            let control = find(id)?;
+            match controls.controls[control].kind {
+                Kind::Slider { .. } => Target::SliderStep { control, up },
+                _ => Target::Spin { control, up },
+            }
+        }
         Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
         Action::Drag(from, to) => {
             let grip = |spot: Spot| grip(controls, dialog, spot);
@@ -931,6 +938,53 @@ mod tests {
         let runner = on_save(&game, "Toni", &then).unwrap();
         let state = runner.host.state();
         assert!(!state.season.as_ref().unwrap().manager().unwrap().list_view);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_tactics_show_and_keep_what_the_originals_do() {
+        let game = game();
+        let dialog = &game.dialogs[&271];
+        let text = |runner: &Runner, id: u16| {
+            runner.host.view().text(crate::screens::control(dialog, id).unwrap()).to_owned()
+        };
+        // As the original shows Union's tactics before Wolfsburg away.
+        let then = "now choose 9930 2\nuntil dialog 271";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        assert_eq!(text(&runner, 3735), "1.FC Union Berlin (A, 6.) - VfL Wolfsburg (H, 9.)");
+        assert_eq!(text(&runner, 3736), "Schiedsrichter: Schmidt (Komp. 8, H. 5)");
+        let labels = [6278, 6277, 6276, 3754].map(|id| text(&runner, id));
+        assert_eq!(
+            labels,
+            ["Spielweise: Vorsichtig", "Härte: Normal", "Einsatz: Normal", "Zeitspiel: nie"]
+        );
+        assert_eq!([text(&runner, 3741), text(&runner, 5518)], ["Stärke: 3", "0 €"]);
+        // Every kind of control once, as the original took them; then away
+        // to the line-up and back.
+        let then = format!(
+            "{then}\nnow press 3737; rclick 3738; press 3739; press 3756; press 3739; press 3757\n\
+             now choose 3762 5; choose 3742 0; choose 5517 0; choose 6293 0; choose 5517 0\n\
+             now spin 5519 up; spin 5519 up; spin 5519 up; spin 5520 up; spin 5522 down; \
+             spin 5521 down\nnow choose 9930 0\nuntil dialog 147\nnow choose 9930 2\n\
+             until dialog 271"
+        );
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        let labels = [6278, 6277, 6276, 3754].map(|id| text(&runner, id));
+        assert_eq!(
+            labels,
+            ["Spielweise: Normal", "Härte: Rauh", "Einsatz: 150%", "Zeitspiel: immer"]
+        );
+        assert_eq!(text(&runner, 5518), "30 €");
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        // Union's team record.
+        let team = &records.teams[84];
+        assert_eq!([team.style(), team.hardness(), team.effort()], [3, 1, 0]);
+        // "Zeitspiel" immer, tricks, the offside trap, "Langsamer
+        // Spielaufbau", the middle; passing as the original's dump has it.
+        assert_eq!(team.tactic_flags(), 0x1 | 0x4 | 0x8 | 5 << 7 | 0x800);
+        assert_eq!(team.passing(), 0x6054);
+        assert_eq!(records.extras[0].special_bonus(), 30);
     }
 
     #[test]

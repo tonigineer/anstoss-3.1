@@ -13,7 +13,7 @@ use a3_files::bitmap_font::BitmapFont;
 use a3_files::rch::{Align, Control, Dialog, PLAIN_FONT};
 
 use crate::controls::bitmap::Picture;
-use crate::controls::{bar, combo, list, slider};
+use crate::controls::{bar, list, slider, spin};
 use crate::fonts::Fonts;
 use crate::game::{Game, transparent_black};
 use crate::pointer::Target;
@@ -98,10 +98,10 @@ impl Classic {
             }
         }
         let mut widgets = HashMap::new();
-        let combo = [combo::LIST_HANDLE];
         let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS);
         let lists = list::HANDLES.into_iter().chain(list::TRACKS);
-        let named = [SCROLL_UP, SCROLL_DOWN].into_iter().chain(lists).chain(combo).chain(sliders);
+        let named =
+            [SCROLL_UP, SCROLL_DOWN].into_iter().chain(lists).chain(sliders).chain(spin::ARROWS);
         for name in named {
             match game.picture(name) {
                 // A TGA brings its own alpha, shadows in black.

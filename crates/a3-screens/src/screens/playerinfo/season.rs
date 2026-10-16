@@ -6,6 +6,7 @@
 //! Some of it only for a country whose matches the game follows; else a
 //! dash.
 
+use a3_core::cards;
 use a3_core::records::Player as Record;
 
 use super::current::{INJURY, injury_text};
@@ -129,37 +130,14 @@ pub(super) fn show(s: &Shown, view: &mut View) {
 }
 
 /// Whether one more yellow card suspends him, in the league, the cup and
-/// the European cups, by the rules of his country (`FUN_0074612e`,
-/// `FUN_007464a4`, `FUN_00746611`).
+/// the European cups, by the rules of his country.
 fn one_more_suspends(s: &Shown, r: &Record) -> [bool; 3] {
     let Some(records) = s.records else { return [false; 3] };
-    let country = r.club()[0];
-    let [league_rule, cup_rule] = records.countries.card_rules(usize::from(country));
-    let league = r.league_cards()[0];
+    let country = u16::from(r.club()[0]);
     // The original asks the level of the country's club numbered as the
     // country.
-    let level = records.team(country.into(), country.into()).map_or(0, |t| t.level());
-    let league_warned = match league_rule {
-        0 => league % 5 == 4,
-        1 => league & 3 == 3,
-        2 => league == 3 || league >= 6 && league.is_multiple_of(3),
-        3 => league == 3 || league == 6 || league >= 8,
-        4 => level < 2 && league % 5 == 4,
-        5 => league % 7 == 6,
-        6 => league == 4 || league >= 6 && league.is_multiple_of(4),
-        _ => league % 5 == 4,
-    };
-    // A cup counts the league's cards in the country 16.
-    let cup = if country == 0x10 { league } else { r.cup_cards()[0] };
-    let cup_warned = match cup_rule {
-        1 => cup & 3 == 3,
-        2 => cup == 3 || cup >= 6 && cup % 3 == 0,
-        3 => cup == 3 || cup == 6 || cup >= 8,
-        5 => cup != 0,
-        _ => cup % 5 == 4,
-    };
-    let europe = r.europe_cards()[0];
-    [league_warned, cup_warned, europe == 2 || europe >= 4 && europe.is_multiple_of(2)]
+    let level = records.team(country, country).map_or(0, |t| t.level());
+    [cards::league(records, country, level, r), cards::cup(records, country, r), cards::europe(r)]
 }
 
 /// Why and how long he is suspended in the league: a doping ban, a ban of

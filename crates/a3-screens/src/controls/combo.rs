@@ -9,26 +9,32 @@
 use bevy_math::{Rect, Vec2};
 use image::{Rgba, RgbaImage, imageops};
 
-use a3_files::rch::Control;
+use a3_files::rch::{Control, Kind};
 
 use crate::classic::{Paint, TEXT, fill, paste};
+use crate::controls::list::HANDLES;
 use crate::pointer::{Geometry, Target};
 
-/// The pictures the game loads for it by name: the list's arrows and the
-/// long bar its handle is cut from.
+/// The pictures the game loads for it by name: the list's arrows; the long
+/// bars its handle is cut from are the lists' ([`HANDLES`]), by the colour
+/// in its style's bits 4 to 6 (`FUN_0079b97a`).
 pub(crate) const LIST_UP: &str = "Pfeile/PfeilO1.bmp";
 pub(crate) const LIST_DOWN: &str = "Pfeile/PfeilU1.bmp";
-pub(crate) const LIST_HANDLE: &str = "ScrGrossGelb.bmp";
+const HANDLE_COLOUR: u8 = 0x70;
+const HANDLE_SHIFT: u8 = 4;
 
 const ROW: i32 = 16;
-/// The list drops from this far below the field's top, and is this tall.
+/// The list starts this far below the field's top; its window reaches as
+/// far below the field as the combo box says.
 const LIST_TOP: i32 = 20;
-const LIST_HEIGHT: i32 = 102;
+/// Only the arrow at the field's right end drops the list
+/// (`OnLButtonDown_007989d9`).
+const ARROW: f32 = 20.0;
 /// The scrollbar's strip and its arrows.
 const BAR: i32 = 20;
 /// Where the texts start: in the field, in a row.
 const FIELD_TEXT: i32 = 2;
-const ROW_TEXT: i32 = 3;
+const ROW_TEXT: i32 = 2;
 const LIST: Rgba<u8> = Rgba([220, 216, 225, 255]);
 const STRIP: Rgba<u8> = Rgba([225, 216, 220, 255]);
 const CHOSEN: Rgba<u8> = Rgba([176, 176, 176, 255]);
@@ -58,20 +64,30 @@ pub struct ComboState {
     /// Whether the list is down, and its first row shown.
     pub open: bool,
     pub scroll: usize,
+    /// A disabled combo box does not drop its list.
+    pub disabled: bool,
 }
 
 impl ComboState {
+    /// How tall the dropped list is.
+    fn height(control: &Control) -> i32 {
+        let drop = match control.kind {
+            Kind::Combo { drop, .. } => i32::from(drop),
+            _ => 0,
+        };
+        drop + control.rect.height() as i32 - LIST_TOP
+    }
+
     /// The dropped list, in classic pixels.
     fn list(control: &Control) -> Rect {
         let r = control.rect;
         let top = r.min.y + LIST_TOP as f32;
-        Rect::new(r.min.x, top, r.max.x, top + LIST_HEIGHT as f32)
+        Rect::new(r.min.x, top, r.max.x, top + Self::height(control) as f32)
     }
 
-    /// How many rows the list shows whole.
+    /// How many rows the list shows.
     fn rows(control: &Control) -> usize {
-        let _ = control;
-        ((LIST_HEIGHT - 1) / ROW) as usize
+        (Self::height(control) / ROW).max(1) as usize
     }
 
     fn scrolls(&self, control: &Control) -> bool {
@@ -80,7 +96,7 @@ impl ComboState {
 
     /// Opens or closes the list, opened on the chosen row.
     pub fn toggle(&mut self, control: &Control) {
-        self.open = !self.open;
+        self.open = !self.open && !self.disabled;
         if self.open {
             let last = self.items.len().saturating_sub(Self::rows(control));
             self.scroll = self.selected.unwrap_or(0).min(last);
@@ -127,14 +143,17 @@ impl ComboState {
         let l = Self::list(control);
         let (x0, y0, x1, y1) = (l.min.x as i32, l.min.y as i32, l.max.x as i32, l.max.y as i32);
         let (w, h) = (x1 - x0, y1 - y0);
-        fill(frame, x0, y0, w, h, LIST);
+        // The line above the bottom edge stays unpainted, and the edge's
+        // lines end short of the bottom right corner, as the game draws
+        // them (`FUN_0079a0b2`).
+        fill(frame, x0, y0, w, h - 2, LIST);
         fill(frame, x0, y0, 1, h, EDGE);
-        fill(frame, x1 - 1, y0, 1, h, EDGE);
-        fill(frame, x0, y1 - 1, w, 1, EDGE);
+        fill(frame, x1 - 1, y0, 1, h - 1, EDGE);
+        fill(frame, x0, y1 - 1, w - 1, 1, EDGE);
         let scrolls = self.scrolls(control);
         let right = if scrolls { x1 - 1 - BAR } else { x1 - 1 };
-        // The rows, clipped at the bottom edge.
-        let mut rows = RgbaImage::from_pixel((right - x0 - 1).max(1) as u32, (h - 2) as u32, LIST);
+        // The rows, clipped above that line.
+        let mut rows = RgbaImage::from_pixel((right - x0 - 1).max(1) as u32, (h - 3) as u32, LIST);
         let font = paint.font();
         for (i, text) in self.items.iter().enumerate().skip(self.scroll) {
             let top = ((i - self.scroll) as i32) * ROW;
@@ -159,7 +178,7 @@ impl ComboState {
             if let Some(down) = paint.widget(LIST_DOWN) {
                 paste(frame, down, Vec2::new(bar as f32, (y1 - 1 - BAR) as f32));
             }
-            if let Some(long) = paint.widget(LIST_HANDLE) {
+            if let Some(long) = paint.widget(handle_bar(control)) {
                 // As long as the rows shown are of all, cut from the long
                 // bar as a slider's handle is.
                 let track = h - 2 * BAR;
@@ -184,7 +203,10 @@ impl ComboState {
         out: &mut Vec<(Target, Rect)>,
     ) {
         if !self.open {
-            out.push((Target::Combo(index), geometry.rect(control)));
+            let r = geometry.rect(control);
+            let arrow = r.width() * ARROW / control.rect.width();
+            let rect = Rect::new(r.max.x - arrow, r.min.y, r.max.x, r.max.y);
+            out.push((Target::Combo(index), rect));
         }
     }
 
@@ -219,4 +241,13 @@ impl ComboState {
             out.push((Target::Scroll { control: index, up: false }, geometry.map(down)));
         }
     }
+}
+
+/// The long bar a combo box's handle is cut from, by its colour.
+fn handle_bar(control: &Control) -> &'static str {
+    let colour = match control.kind {
+        Kind::Combo { style, .. } => usize::from((style & HANDLE_COLOUR) >> HANDLE_SHIFT),
+        _ => HANDLES.len() - 1,
+    };
+    HANDLES[colour.min(HANDLES.len() - 1)]
 }

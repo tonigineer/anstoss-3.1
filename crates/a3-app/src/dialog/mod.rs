@@ -496,10 +496,17 @@ fn press(
     mut pending: ResMut<Pending>,
 ) {
     let Ok(&Hotspot { target, zoom, dialog }) = hotspots.get(press.entity) else { return };
-    // The right button opens the menu of what it is on.
+    // The right button opens the menu of what it is on; it steps a
+    // stepping button back.
     if press.button == PointerButton::Secondary && dialog == view.id {
-        if let Some(grip) = Grip::of(target) {
-            pending.0.push((Target::Menu(grip), 1));
+        let grip = Grip::of(target).or(match target {
+            Target::Button(button) if is_stepping(&game, view.id, button) => {
+                Some(Grip::Control(button))
+            }
+            _ => None,
+        });
+        if let Some(grip) = grip {
+            pending.0.push((Target::Menu(grip), press.count));
         }
         return;
     }
@@ -559,6 +566,13 @@ fn press(
 }
 
 /// Whether a control of a dialog is the menu bar.
+fn is_stepping(game: &Game, id: u16, control: usize) -> bool {
+    game.dialogs
+        .get(&id)
+        .and_then(|d| d.controls.get(control))
+        .is_some_and(|c| matches!(c.kind, Kind::States { .. }))
+}
+
 fn is_bar(game: &Game, id: u16, control: usize) -> bool {
     game.dialogs
         .get(&id)
@@ -745,7 +759,9 @@ fn act(
 ) {
     for (target, clicks) in std::mem::take(&mut pending.0) {
         let from = host.id;
-        let change = host.0.input(&game, target, clicks >= 2);
+        // Windows takes every second click of a quick run for a double
+        // click, the third for a single one again.
+        let change = host.0.input(&game, target, clicks >= 2 && clicks % 2 == 0);
         if shows.change(&game, change, from, host.id) {
             return;
         }

@@ -55,6 +55,8 @@ pub mod dialogs {
     /// The line-up as a list, for a manager who switched to it.
     pub const LINEUP_LIST: u16 = 429;
     pub const DRESSING_ROOM: u16 = 302;
+    /// The club's tactics, the bar's third symbol.
+    pub const TACTICS: u16 = 271;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
     /// A talk with a player, on the day it was booked for.
     pub const TALK: u16 = 461;

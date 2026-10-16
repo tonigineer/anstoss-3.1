@@ -114,14 +114,16 @@ impl ControlView {
             }),
             Kind::Bitmap => ControlState::Bitmap(BitmapState::default()),
             Kind::Anim => ControlState::Anim(AnimState::default()),
-            Kind::Spin => ControlState::Spin(Value::default()),
+            Kind::Spin { .. } => ControlState::Spin(Value::default()),
             Kind::Slider { .. } => ControlState::Slider(Value::default()),
             Kind::Edit { .. } => ControlState::Edit(EditState { text: text() }),
-            Kind::Options { items, .. } => ControlState::Options(OptionsState::new(items)),
+            Kind::Options { items, style, .. } => {
+                ControlState::Options(OptionsState::new(items, *style))
+            }
             Kind::Player => ControlState::Player(None),
             Kind::Marker => ControlState::Marker(None),
             Kind::Check => ControlState::Check(CheckState { checked: false, text: text() }),
-            Kind::Combo => ControlState::Combo(ComboState::default()),
+            Kind::Combo { .. } => ControlState::Combo(ComboState::default()),
             Kind::PushButton { .. } => ControlState::Button(ButtonState::default()),
             Kind::Menu => ControlState::Menu(MenuState::default()),
             Kind::Bar { .. } => ControlState::Bar(BarState::default()),
@@ -229,6 +231,7 @@ impl ControlState {
             Self::Bitmap(b) => b.draw(frame, paint),
             Self::Anim(a) => a.draw(frame, paint),
             Self::Slider(v) => slider::draw(v, frame, paint),
+            Self::Spin(_) => spin::draw(frame, paint),
             Self::Edit(e) => e.draw(frame, paint),
             Self::Options(o) => o.draw(frame, paint),
             Self::Player(Some(p)) => p.draw(frame, paint),
@@ -238,7 +241,7 @@ impl ControlState {
             Self::Bar(b) => b.draw(frame, paint),
             Self::Paint(p) => p.draw(frame, paint),
             Self::Combo(c) => c.draw(frame, paint),
-            Self::Spin(_) | Self::Player(None) | Self::Marker(None) | Self::Other => {}
+            Self::Player(None) | Self::Marker(None) | Self::Other => {}
         }
     }
 

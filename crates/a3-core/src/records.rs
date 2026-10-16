@@ -416,6 +416,25 @@ record! {
     0x12e => level, set_level: u8;
     /// The team's mood ("Stimmung"), 0 to 200 (`FUN_007147ce`).
     0xc4 => mood, set_mood: u8;
+    /// Its tactics ([`crate::tactics`]; the club object's +0xa0, +0xa8 …
+    /// +0xac): the offside trap's strength, how it plays, its effort and
+    /// hardness, the flags; and its passing, which the game keeps here
+    /// only.
+    0xc6 => offside, set_offside: u8;
+    0xcc => style, set_style: u8;
+    0xcd => effort, set_effort: u8;
+    0xce => hardness, set_hardness: u8;
+    0xd0 => tactic_flags, set_tactic_flags: u16;
+    0xd2 => passing, set_passing: u16;
+    /// Its next match (the club object's +0xb46 …): the opponent's country,
+    /// 0 none, and number there; where it is played, 0 or less at home; its
+    /// kind (2 the league, 3 and 4 the cup, 5 to 10 the European cups); and
+    /// its referee, 0 none.
+    0x252 => next_country, set_next_country: u8;
+    0x254 => next_number, set_next_number: i16;
+    0x256 => next_venue, set_next_venue: i16;
+    0x258 => next_kind, set_next_kind: u8;
+    0x25a => referee, set_referee: i16;
     /// Kept between 10 and 50, 30 at first (meaning not traced).
     0x138 => spirit, set_spirit: u8;
     /// This season: bonuses paid the first team, fines taken from players.
@@ -487,6 +506,11 @@ record! {
     0xcc => duty_lists, set_duty_lists: [[u16; 35]; 6];
     /// A count cohesion takes twice (`FUN_0069d5a7`; meaning not traced).
     0x2564 => together, set_together: i16;
+    /// The tactics' players, by id (0 none): one to spare, one to collect a
+    /// yellow card, the opponent's to foul and to provoke; and the special
+    /// win bonus ([`crate::tactics`]).
+    0x38a => picks, set_picks: [u16; 4];
+    0x394 => special_bonus, set_special_bonus: i32;
     /// The line-up's special settings (`CMannaufSpezial`): bit 1 the
     /// co-trainer lines the team up before a match in a system of his
     /// choosing, bit 2 in the one it stands in.
@@ -504,6 +528,11 @@ impl Extra {
             + 2 * i32::from(self.together())
     }
 }
+
+/// The referees, by id (the save's blocks of their records, 0x20 before
+/// their fields).
+const REFEREE_AT: u32 = 0x19f4ed8;
+const REFEREES: usize = 240;
 
 /// The people who are not players: computer clubs' trainers and managers
 /// and more (0x54 bytes at `DAT_00be3920` + id × 0x54, ids 1 to 1499).
@@ -965,6 +994,15 @@ impl Records {
             [0, one] | [one, 0] => self.name(one).to_owned(),
             [first, last] => format!("{} {}", self.name(first), self.name(last)),
         }
+    }
+
+    /// A referee by id, 1 to 240: his name, competence and hardness
+    /// (`FUN_0063161e`; 0x34 bytes at `DAT_019f4ef8` + id × 0x34).
+    pub fn referee(&self, id: i16) -> Option<(&str, u8, u8)> {
+        let id = usize::try_from(id).ok().filter(|id| (1..=REFEREES).contains(id))?;
+        let bytes = self.block(&format!("{REFEREE_AT:#x}[{id}]"))?;
+        let name = u16::from_le_bytes([*bytes.get(2)?, *bytes.get(3)?]);
+        Some((self.name(name), *bytes.get(5)?, *bytes.get(6)?))
     }
 
     /// A name from the pool.

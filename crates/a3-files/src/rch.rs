@@ -74,8 +74,12 @@ pub enum Kind {
     Bitmap,
     /// The game's `AniStatic`: a picture that can play a series of frames.
     Anim,
-    /// The tiny up/down arrows next to a number.
-    Spin,
+    /// The tiny up/down arrows next to a number: its colour, and the
+    /// game's style bits (0x40 small arrows of their own).
+    Spin {
+        color: u16,
+        style: u16,
+    },
     /// A horizontal scrollbar: arrows at both ends, a handle in between, in
     /// one of the game's colours (0 blue, 1 red, 3 green, 4 yellow).
     Slider {
@@ -95,12 +99,19 @@ pub enum Kind {
     Options {
         image: u16,
         items: Vec<Item>,
+        /// Bits of the game's own: [`TOGGLE_OPTIONS`].
+        style: u16,
     },
     /// A box to tick, with its label beside it.
     Check,
     /// A field that shows one of a list of texts, the list dropping down
-    /// under it to choose another: the game's `CMyComboBox`.
-    Combo,
+    /// under it to choose another: the game's `CMyComboBox`. How far the
+    /// list drops below the field's window (`+0xfc`), and its style: bits 4
+    /// to 6 the colour of its scrollbar's handle (`+0x315`).
+    Combo {
+        drop: u16,
+        style: u8,
+    },
     /// A button that steps through states, a picture each, at every click:
     /// the game's `CMyPushButton` with states (its kind 3).
     States {
@@ -198,6 +209,16 @@ const TITLE: usize = 0x1e;
 /// A bitmap button's style bits: the dialog's picture shows until it is
 /// held (0x100), and its text is drawn on it (0x200).
 const PUSH_STYLE: u16 = 0x300;
+/// Where a group of options keeps its style (`CMyHighButton` +0x2e6), in
+/// words of its extra data; and its bit that lets a click on the chosen
+/// option clear it (`OnLButtonDown_007a6d03`).
+const OPTIONS_STYLE: usize = 11;
+pub const TOGGLE_OPTIONS: u16 = 0x400;
+/// Where a combo box keeps how far its list drops (in words) and its style
+/// (in bytes) in its extra data.
+const COMBO_DROP: usize = 14;
+const COMBO_STYLE: usize = 31;
+const DEFAULT_DROP: u16 = 100;
 
 fn parse_dialog(record: &[u8]) -> Option<Dialog> {
     let size = Vec2::new(u32_at(record, 0x10).ok()? as f32, u32_at(record, 0x14).ok()? as f32);
@@ -292,11 +313,18 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         6 => Kind::Anim,
         7 => Kind::Bitmap,
         8 if w > h => Kind::Slider { style: u16s(0)? },
-        8 => Kind::Spin,
+        8 => Kind::Spin { color: u16s(0).unwrap_or(0), style: u16s(2).unwrap_or(0) },
         9 => Kind::Header { columns: columns(extra, HEADER_COLUMNS) },
         10 => Kind::Edit { max_len: usize::from(u16s(4)?).clamp(1, 64) },
-        11 => Kind::Options { image: u16s(1)?, items: parse_items(extra, usize::from(u16s(0)?)) },
-        5 => Kind::Combo,
+        11 => Kind::Options {
+            image: u16s(1)?,
+            items: parse_items(extra, usize::from(u16s(0)?)),
+            style: u16s(OPTIONS_STYLE).unwrap_or(0),
+        },
+        5 => Kind::Combo {
+            drop: u16s(COMBO_DROP).unwrap_or(DEFAULT_DROP),
+            style: extra.get(COMBO_STYLE).copied().unwrap_or(0),
+        },
         13 => Kind::Check,
         14 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
         15 => Kind::Paint,

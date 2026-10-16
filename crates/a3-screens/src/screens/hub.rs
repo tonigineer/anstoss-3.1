@@ -24,7 +24,7 @@ use a3_core::world::Player;
 use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
-pub use a3_core::cycle::dialogs::{DRESSING_ROOM, LINEUP, LINEUP_LIST};
+pub use a3_core::cycle::dialogs::{DRESSING_ROOM, LINEUP, LINEUP_LIST, TACTICS};
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 use super::calendar::FIXTURE_AHEAD;
@@ -46,10 +46,14 @@ const SYMBOL: f32 = 32.0;
 /// The bar's symbols by number: the line-up, the training the game keeps
 /// shut on Saturdays, the national team, the dressing room and the whistle.
 const LINEUP_SYMBOL: usize = 0;
+pub(crate) const TACTICS_SYMBOL: usize = 2;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
+/// The screens the bar's symbols lead to, as far as they are built.
+const BAR_SCREENS: [(usize, u16); 3] =
+    [(LINEUP_SYMBOL, LINEUP), (TACTICS_SYMBOL, TACTICS), (DRESSING_SYMBOL, DRESSING_ROOM)];
 /// What the game takes for Saturday.
 const SATURDAY: usize = 6;
 const WEEK_DAYS: usize = 7;
@@ -300,25 +304,85 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
             };
             dialog.controls.push(menu);
         }
-        let items = rules
-            .bar_symbols
-            .iter()
-            .map(|&x| Item {
-                rect: Rect::new(f32::from(x), 0.0, f32::from(x) + SYMBOL, BAR.height()),
-                text_at: Vec2::ZERO,
-                text: String::new(),
-            })
-            .collect();
-        dialog.controls.push(Control {
-            kind: Kind::Bar { items },
-            rect: BAR,
-            align: Align::Left,
-            text: String::new(),
-            id: Some(BAR_ID),
-            font: a3_files::rch::PLAIN_FONT,
-            ink: [0; 3],
-        });
+        add_bar(dialog, rules);
     }
+}
+
+/// The menu bar along the bottom of a main screen.
+pub(crate) fn add_bar(dialog: &mut Dialog, rules: &Rules) {
+    let items = rules
+        .bar_symbols
+        .iter()
+        .map(|&x| Item {
+            rect: Rect::new(f32::from(x), 0.0, f32::from(x) + SYMBOL, BAR.height()),
+            text_at: Vec2::ZERO,
+            text: String::new(),
+        })
+        .collect();
+    dialog.controls.push(Control {
+        kind: Kind::Bar { items },
+        rect: BAR,
+        align: Align::Left,
+        text: String::new(),
+        id: Some(BAR_ID),
+        font: a3_files::rch::PLAIN_FONT,
+        ink: [0; 3],
+    });
+}
+
+/// The bar as a screen opens: its own symbol chosen, the symbols the
+/// manager cannot use off — all but a few without a club, training on
+/// Saturdays, the national team without one —, the tips.
+pub(crate) fn open_bar(cx: &Cx, view: &mut View, own: usize) {
+    let game = cx.game;
+    let Some(season) = &cx.state.season else { return };
+    let Some(manager) = season.manager() else { return };
+    let Some(state) = control(cx.dialog, BAR_ID).and_then(|b| view.bar_mut(b)) else { return };
+    state.chosen = own;
+    state.off = if manager.club.is_none() {
+        game.rules.bar_without_club.clone()
+    } else {
+        vec![false; BAR_SYMBOLS]
+    };
+    if season.day % WEEK_DAYS == SATURDAY {
+        SATURDAY_CLOSED.iter().for_each(|&s| state.off[s] = true);
+    }
+    if manager.national_team.is_none() {
+        state.off[NATIONAL_SYMBOL] = true;
+    }
+    state.tips = game.rules.bar_tips.iter().map(|&t| game.text(t as u16).to_owned()).collect();
+}
+
+/// Whether a target is a symbol of the bar.
+pub(crate) fn on_bar(dialog: &Dialog, target: Target) -> Option<usize> {
+    match target {
+        Target::Option { control: c, item } if dialog.controls[c].id == Some(BAR_ID) => Some(item),
+        _ => None,
+    }
+}
+
+/// Whether a symbol of the bar does something yet.
+pub(crate) fn bar_works(item: usize) -> bool {
+    item == WHISTLE || BAR_SCREENS.iter().any(|&(symbol, _)| symbol == item)
+}
+
+/// A symbol of the bar clicked: the screen it leads to, unless it is the
+/// one shown; the whistle asks first, as no training is set for the coming
+/// week, and a yes ends the turn ([`WHISTLE_ANSWERED`]).
+pub(crate) fn bar_click(cx: &Cx, view: &View, item: usize, own: usize) -> Outcome {
+    if item == WHISTLE {
+        return Outcome::Popup(Request::with(QUESTION, Args::Text(NO_TRAINING)));
+    }
+    if item == own {
+        return Outcome::Stay;
+    }
+    if let Some(&(_, screen)) = BAR_SCREENS.iter().find(|&&(symbol, _)| symbol == item) {
+        return Outcome::Close(Reply::Goto(screen));
+    }
+    let bar = control(cx.dialog, BAR_ID).and_then(|b| view.bar(b));
+    let tip = bar.and_then(|b| b.tips.get(item)).cloned().unwrap_or_default();
+    info!("{tip}: not built yet");
+    Outcome::Stay
 }
 
 /// The line-up and the dressing room, with the menu bar; its symbols lead
@@ -349,23 +413,7 @@ impl Screen for MenuBar {
         let caption = if line_up(view.id) { LINEUP_CAPTION } else { DRESSING_CAPTION };
         set(view, dialog, CAPTION_ID, manager_title(game, season, caption));
 
-        let open = if line_up(view.id) { LINEUP_SYMBOL } else { DRESSING_SYMBOL };
-        if let Some(state) = control(dialog, BAR_ID).and_then(|b| view.bar_mut(b)) {
-            state.chosen = open;
-            state.off = if manager.club.is_none() {
-                game.rules.bar_without_club.clone()
-            } else {
-                vec![false; BAR_SYMBOLS]
-            };
-            if season.day % WEEK_DAYS == SATURDAY {
-                SATURDAY_CLOSED.iter().for_each(|&s| state.off[s] = true);
-            }
-            if manager.national_team.is_none() {
-                state.off[NATIONAL_SYMBOL] = true;
-            }
-            state.tips =
-                game.rules.bar_tips.iter().map(|&t| game.text(t as u16).to_owned()).collect();
-        }
+        open_bar(cx, view, own_symbol(view.id));
         for id in [SPECIAL, DUTIES, DRESSING_OPTIONS] {
             if let Some(options) = control(dialog, id).and_then(|i| view.options_mut(i)) {
                 options.actions = true;
@@ -414,7 +462,7 @@ impl Screen for MenuBar {
             }
             let Target::Option { control: c, item } = target else { return false };
             match dialog.controls[c].id {
-                Some(BAR_ID) => matches!(item, LINEUP_SYMBOL | DRESSING_SYMBOL | WHISTLE),
+                Some(BAR_ID) => bar_works(item),
                 Some(SPECIAL) => true,
                 Some(TITLES) => item < squadlist::COLUMNS,
                 Some(SECOND_TITLES) => item < squadlist::STATS_COLUMNS,
@@ -494,6 +542,15 @@ impl Screen for MenuBar {
             }
             return Outcome::Stay;
         }
+        // The "i" button switches to the other row, also on a right click,
+        // which steps it back.
+        if let Target::Menu(Grip::Control(c)) | Target::Button(c) = target
+            && line_up(view.id)
+            && cx.dialog.controls[c].id == Some(ROWS_BUTTON)
+        {
+            self.switch_rows(cx, view, c);
+            return Outcome::Stay;
+        }
         // The list box's own menu has no talk (`CListBoxSpielerInfo`).
         if let Target::Menu(grip) = target {
             if line_up(view.id) {
@@ -527,13 +584,6 @@ impl Screen for MenuBar {
                     a3_core::refit::click(tables, club, player);
                 });
             }
-            return Outcome::Stay;
-        }
-        if let Target::Button(c) = target
-            && line_up(view.id)
-            && cx.dialog.controls[c].id == Some(ROWS_BUTTON)
-        {
-            self.switch_rows(cx, view, c);
             return Outcome::Stay;
         }
         let Target::Option { control: c, item } = target else { return Outcome::Stay };
@@ -603,20 +653,7 @@ impl Screen for MenuBar {
             }
             return Outcome::Stay;
         }
-        match item {
-            // Training is never set for the coming week, so the game asks.
-            WHISTLE => Outcome::Popup(Request::with(QUESTION, Args::Text(NO_TRAINING))),
-            LINEUP_SYMBOL if !line_up(view.id) => Outcome::Close(Reply::Goto(LINEUP)),
-            DRESSING_SYMBOL if view.id != DRESSING_ROOM => {
-                Outcome::Close(Reply::Goto(DRESSING_ROOM))
-            }
-            LINEUP_SYMBOL | DRESSING_SYMBOL => Outcome::Stay,
-            _ => {
-                let tip = view.bar(c).and_then(|b| b.tips.get(item)).cloned().unwrap_or_default();
-                info!("{tip}: not built yet");
-                Outcome::Stay
-            }
-        }
+        bar_click(cx, view, item, own_symbol(view.id))
     }
 
     /// Yes to ending the turn without training set; a formation chosen.
@@ -752,6 +789,11 @@ fn next_opponent(cx: &Cx) -> Option<(u16, (usize, usize))> {
 fn club_state<'a>(cx: &'a Cx) -> Option<&'a ClubState> {
     let season = cx.state.season.as_ref()?;
     season.clubs.get(&season.manager()?.club?)
+}
+
+/// The bar's symbol of a screen with the bar.
+fn own_symbol(id: u16) -> usize {
+    if line_up(id) { LINEUP_SYMBOL } else { DRESSING_SYMBOL }
 }
 
 /// Whether a screen is the line-up, on the pitch or as a list.

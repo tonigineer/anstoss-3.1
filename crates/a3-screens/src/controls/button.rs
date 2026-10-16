@@ -21,15 +21,32 @@ pub struct ButtonState {
     /// those to have ready for them.
     pub images: Option<(u16, u16)>,
     pub ready: Vec<u16>,
+    /// A stepping button's state: which of its pictures it shows.
+    pub step: usize,
 }
 
 impl ButtonState {
+    /// A stepping button of `count` states clicked: on to the next, round
+    /// to the first; with the right button back, round to the last
+    /// (`CMyPushButton::OnLButtonUp_007aae5c`, `OnRButtonUp_007ab045`).
+    pub fn step_on(&mut self, count: usize, back: bool) {
+        self.step = match (back, self.step) {
+            (false, step) if step + 1 < count => step + 1,
+            (false, _) => 0,
+            (true, 0) => count.saturating_sub(1),
+            (true, step) => step - 1,
+        };
+    }
+
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let (normal, hover, labelled) = match &paint.control.kind {
             &Kind::Button { normal, hover } => (normal, hover, false),
             &Kind::PushButton { normal, hover } => (normal, hover, true),
-            // Its first state's picture, which does not light up.
-            Kind::States { pictures } if !pictures.is_empty() => (pictures[0], pictures[0], false),
+            // Its state's picture, which does not light up.
+            Kind::States { pictures } if !pictures.is_empty() => {
+                let picture = pictures[self.step.min(pictures.len() - 1)];
+                (picture, picture, false)
+            }
             _ => return,
         };
         let (normal, hover) = self.images.unwrap_or((normal, hover));
@@ -71,7 +88,8 @@ fn file_graphics(control: &Control) -> (Vec<u16>, bool) {
     match &control.kind {
         &Kind::Button { normal, hover } => (vec![normal, hover], true),
         &Kind::PushButton { normal, hover } => (vec![normal, hover], false),
-        Kind::States { pictures } => (pictures.clone(), true),
+        // A stepping button's pictures keep their black (`FUN_007aac2f`).
+        Kind::States { pictures } => (pictures.clone(), false),
         _ => (Vec::new(), true),
     }
 }

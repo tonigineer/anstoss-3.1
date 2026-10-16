@@ -290,7 +290,7 @@ fn on_bar(background: &RgbaImage, r: Rect) -> bool {
 fn steppers(dialog: &Dialog) -> Vec<(usize, usize)> {
     let controls = &dialog.controls;
     (0..controls.len())
-        .filter(|&i| matches!(controls[i].kind, Kind::Spin))
+        .filter(|&i| matches!(controls[i].kind, Kind::Spin { .. }))
         .filter_map(|spin| {
             let s = controls[spin].rect;
             let value = (0..controls.len()).find(|&i| {

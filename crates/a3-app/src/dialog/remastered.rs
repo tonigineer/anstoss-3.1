@@ -442,7 +442,7 @@ pub(super) fn spawn(
                 spawn_bar(commands, images, game, root, &layout, index, control, items.len(), fonts)
             }
             Kind::Edit { .. } => spawn_field(commands, root, index, at, fonts),
-            Kind::Options { image: 0, items } => {
+            Kind::Options { image: 0, items, .. } => {
                 let Some(options) = state.as_options() else { continue };
                 for (item, it) in items.iter().enumerate() {
                     let target = Target::Option { control: index, item };
@@ -523,7 +523,7 @@ pub(super) fn spawn(
                         .add_child(label);
                 }
             }
-            Kind::Spin => match layout.steppers.iter().find(|s| s.spin == index) {
+            Kind::Spin { .. } => match layout.steppers.iter().find(|s| s.spin == index) {
                 Some(stepper) => {
                     let minus = Target::Spin { control: index, up: false };
                     let plus = Target::Spin { control: index, up: true };

@@ -448,7 +448,7 @@ fn show_talks(view: &mut View, dialog: &Dialog, game: &Game, offer: &Offer) {
         actions.actions = true;
     }
     // Spinners have no range of their own here; the demand sets the limits.
-    for spin in indices(dialog, |k| matches!(k, Kind::Spin)) {
+    for spin in indices(dialog, |k| matches!(k, Kind::Spin { .. })) {
         if let Some(spin) = view.value_mut(spin) {
             spin.range = (i32::MIN, i32::MAX);
         }

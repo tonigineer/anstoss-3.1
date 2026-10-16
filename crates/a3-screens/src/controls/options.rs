@@ -6,7 +6,7 @@
 use bevy_math::{Rect, Vec2};
 use image::{Rgba, RgbaImage, imageops};
 
-use a3_files::rch::{Control, Item, Kind};
+use a3_files::rch::{Control, Item, Kind, TOGGLE_OPTIONS};
 
 use crate::classic::{Paint, TEXT, TEXT_HOVER, centred};
 use crate::pointer::{Geometry, Target};
@@ -21,9 +21,12 @@ const LABEL_INSET: f32 = 9.0;
 /// The dot marking a chosen radio option.
 const DOT_COLOR: Rgba<u8> = Rgba([100, 100, 100, 255]);
 
+/// What [`OptionsState::chosen`] is with no option chosen.
+pub const NONE: usize = usize::MAX;
+
 #[derive(Clone, Default, Debug)]
 pub struct OptionsState {
-    /// The chosen option.
+    /// The chosen option, or [`NONE`].
     pub chosen: usize,
     /// The options' labels.
     pub labels: Vec<String>,
@@ -34,13 +37,20 @@ pub struct OptionsState {
     pub off: Vec<bool>,
     /// A picture of its own under the options (`FUN_007a743a`).
     pub background: Option<u16>,
+    /// A click on the chosen option clears it.
+    pub toggle: bool,
 }
 
 impl OptionsState {
-    pub(crate) fn new(items: &[Item]) -> Self {
+    pub(crate) fn new(items: &[Item], style: u16) -> Self {
         // The dialog file breaks a label into lines with "\n".
         let labels = items.iter().map(|i| i.text.replace("\\n", "\n")).collect();
-        Self { labels, ..Self::default() }
+        Self { labels, toggle: style & TOGGLE_OPTIONS != 0, ..Self::default() }
+    }
+
+    /// The chosen option, if one is.
+    pub fn selected(&self) -> Option<usize> {
+        (self.chosen != NONE).then_some(self.chosen)
     }
 
     pub fn item_on(&self, item: usize) -> bool {
@@ -53,7 +63,9 @@ impl OptionsState {
         if !self.item_on(item) {
             return false;
         }
-        if !self.actions {
+        if self.toggle && self.chosen == item {
+            self.chosen = NONE;
+        } else if !self.actions {
             self.chosen = item;
         }
         true
@@ -66,7 +78,7 @@ impl OptionsState {
 
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let control = paint.control;
-        let Kind::Options { image, items } = &control.kind else { return };
+        let Kind::Options { image, items, .. } = &control.kind else { return };
         let r = control.rect;
         let (x, y) = (r.min.x as i32, r.min.y as i32);
         // Cut to the control, as its window cuts it.
@@ -86,10 +98,19 @@ impl OptionsState {
             if *image == 0 {
                 dot(frame, bullet_centre(control, item));
             } else if let Some(strip) = paint.image(*image) {
-                // The chosen option shows its part of the button strip.
+                // The chosen option shows its part of the button strip, cut
+                // to the group's window.
                 let (ix, iy) = (it.rect.min.x as u32, it.rect.min.y as u32);
-                let w = (it.rect.width() as u32).min(strip.width().saturating_sub(ix));
-                let h = (it.rect.height() as u32).min(strip.height().saturating_sub(iy));
+                let room = (r.width() as u32, r.height() as u32);
+                let w = (it.rect.width() as u32)
+                    .min(strip.width().saturating_sub(ix))
+                    .min(room.0.saturating_sub(ix));
+                let h = (it.rect.height() as u32)
+                    .min(strip.height().saturating_sub(iy))
+                    .min(room.1.saturating_sub(iy));
+                if w == 0 || h == 0 {
+                    continue;
+                }
                 let part = imageops::crop_imm(strip, ix, iy, w, h).to_image();
                 imageops::overlay(frame, &part, (x + ix as i32).into(), (y + iy as i32).into());
             }
@@ -97,6 +118,10 @@ impl OptionsState {
         let Some(font) = paint.font() else { return };
         let cell = font.height() as f32;
         for (item, (it, label)) in items.iter().zip(&self.labels).enumerate() {
+            // An option outside the group's window does not show.
+            if !inside(control, it) {
+                continue;
+            }
             let pointed = paint.pointed(Target::Option { control: paint.index, item });
             let color = if pointed { TEXT_HOVER } else { TEXT };
             if *image == 0 {
@@ -136,12 +161,13 @@ impl OptionsState {
         geometry: &dyn Geometry,
         out: &mut Vec<(Target, Rect)>,
     ) {
-        let Kind::Options { image, items } = &control.kind else { return };
+        let Kind::Options { image, items, .. } = &control.kind else { return };
         let r = control.rect;
         let lead = if *image == 0 { 2.0 } else { 0.0 };
-        for (item, it) in items.iter().enumerate().filter(|&(i, _)| self.item_on(i)) {
+        let shown = |&(i, it): &(usize, &Item)| self.item_on(i) && inside(control, it);
+        for (item, it) in items.iter().enumerate().filter(shown) {
             let min = r.min + it.rect.min - Vec2::new(lead, 0.0);
-            let rect = Rect::from_corners(min, r.min + it.rect.max);
+            let rect = Rect::from_corners(min, (r.min + it.rect.max).min(r.max));
             out.push((Target::Option { control: index, item }, geometry.map(rect)));
         }
     }
@@ -155,6 +181,12 @@ pub(crate) fn graphics(state: &OptionsState, control: &Control) -> (Vec<u16>, bo
         ids.push(image);
     }
     (ids, false)
+}
+
+/// Whether an option starts inside its group's window, which cuts what
+/// lies outside it.
+fn inside(control: &Control, item: &Item) -> bool {
+    item.rect.min.x < control.rect.width() && item.rect.min.y < control.rect.height()
 }
 
 /// Centre of the painted bullet of an option, in classic pixels.

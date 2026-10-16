@@ -134,7 +134,7 @@ fn bullets(dialog: &Dialog) -> Vec<Vec2> {
         .controls
         .iter()
         .filter_map(|c| match &c.kind {
-            Kind::Options { image: 0, items } => {
+            Kind::Options { image: 0, items, .. } => {
                 Some((0..items.len()).map(move |i| bullet_centre(c, i)))
             }
             _ => None,
@@ -198,9 +198,11 @@ fn own_mask(dialog: &Dialog, art: &RgbaImage, photo: bool) -> GrayImage {
             Kind::ListBox { .. } => paint(r, LIST_FRAME, Some(LIST_INSIDE)),
             // Buttons of a strip, with whatever the picture has around them.
             Kind::Options { image, .. } if *image != 0 => paint(r, BOX_MARGIN, None),
-            Kind::Edit { .. } | Kind::Spin | Kind::Bitmap | Kind::Player | Kind::Bar { .. } => {
-                paint(r, BOX_MARGIN, None)
-            }
+            Kind::Edit { .. }
+            | Kind::Spin { .. }
+            | Kind::Bitmap
+            | Kind::Player
+            | Kind::Bar { .. } => paint(r, BOX_MARGIN, None),
             // Labels are underlined from the left edge.
             Kind::Static if !photo => {
                 paint(Rect::new(0.0, r.min.y, r.max.x, r.max.y + 4.0), BOX_MARGIN, None)

@@ -107,6 +107,8 @@ pub struct Rules {
     pub discipline: crate::discipline::DisciplineTables,
     /// Injuries: which allow an injection.
     pub medical: crate::medical::MedicalTables,
+    /// The tactics screen's states and its special win bonus.
+    pub tactics: crate::tactics::TacticsTables,
 }
 
 impl Rules {
@@ -142,6 +144,7 @@ impl Rules {
             words: crate::words::Words::load(exe)?,
             discipline: crate::discipline::DisciplineTables::load(exe)?,
             medical: crate::medical::MedicalTables::load(exe)?,
+            tactics: crate::tactics::TacticsTables::load(exe)?,
         })
     }
 
@@ -266,6 +269,8 @@ pub struct ClubState {
     /// Who takes the set pieces and who is captain, in the manager's order
     /// ([`crate::duties`]); none for a club without a human manager.
     pub duties: crate::duties::Lists,
+    /// How the team plays, as the tactics screen sets it.
+    pub tactics: crate::tactics::Tactics,
 }
 
 /// How a player is: fit and fresh, in hundredths, and in what spirits.
@@ -360,6 +365,7 @@ impl ClubState {
             strengths: None,
             week,
             duties: Default::default(),
+            tactics: Default::default(),
         }
     }
 }

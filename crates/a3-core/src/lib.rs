@@ -5,6 +5,7 @@
 
 pub mod autolineup;
 pub mod calendar;
+pub mod cards;
 pub mod cohesion;
 pub mod cycle;
 pub mod data;
@@ -24,6 +25,7 @@ pub mod refit;
 pub mod season;
 pub mod squadlist;
 pub mod state;
+pub mod tactics;
 pub mod talk;
 pub mod value;
 pub mod words;

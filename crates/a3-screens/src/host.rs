@@ -12,9 +12,10 @@ use tracing::warn;
 
 use a3_core::cycle;
 use a3_core::state::GameState;
+use a3_files::rch::{Dialog, Kind};
 
 use crate::game::Game;
-use crate::pointer::Target;
+use crate::pointer::{Grip, Target};
 use crate::screens::{Cx, Outcome, Reply, Request, Screen, registry};
 use crate::view::View;
 
@@ -126,6 +127,9 @@ impl Host {
         if crate::screens::is_corner_button(dialog, target) {
             return Change::Same;
         }
+        if double && takes_no_double(dialog, target) {
+            return Change::Same;
+        }
         if !self.view_mut().press(dialog, target) {
             return Change::Same;
         }
@@ -231,5 +235,19 @@ impl Host {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let mut cx = Cx { game, dialog, state: &mut state };
         call(self.screens[*screen].as_mut(), &mut cx, view)
+    }
+}
+
+/// Whether the second click of a double click does nothing on a target: on
+/// the game's groups of options and stepping buttons, which have no handler
+/// for it (`CMyHighButton`, `CMyPushButton`).
+fn takes_no_double(dialog: &Dialog, target: Target) -> bool {
+    let kind = |c: usize| &dialog.controls[c].kind;
+    match target {
+        Target::Option { control, .. } => matches!(kind(control), Kind::Options { .. }),
+        Target::Button(c) | Target::Menu(Grip::Control(c)) => {
+            matches!(kind(c), Kind::States { .. })
+        }
+        _ => false,
     }
 }
