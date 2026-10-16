@@ -15,6 +15,7 @@ pub mod finances;
 pub mod jobs;
 pub mod lineup;
 pub mod load;
+pub mod marking;
 pub mod medical;
 pub mod mood;
 pub mod newgame;

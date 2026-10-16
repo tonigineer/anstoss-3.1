@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use bevy_math::{Rect, Vec2};
 use tracing::info;
 
-use a3_core::lineup::{self, BENCH, FIELD, Lineup, PARTS, Place};
+use a3_core::lineup::{self, ALLROUNDER, BENCH, FIELD, Lineup, PARTS, Place};
 use a3_core::load;
 use a3_core::records::Records;
 use a3_core::season::{BAR_SYMBOLS, ClubState, Rules, Season, Status};
@@ -24,7 +24,7 @@ use a3_core::world::Player;
 use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
-pub use a3_core::cycle::dialogs::{DRESSING_ROOM, LINEUP, LINEUP_LIST, TACTICS};
+pub use a3_core::cycle::dialogs::{COMPARISON, DRESSING_ROOM, LINEUP, LINEUP_LIST, TACTICS};
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 use super::calendar::FIXTURE_AHEAD;
@@ -46,14 +46,19 @@ const SYMBOL: f32 = 32.0;
 /// The bar's symbols by number: the line-up, the training the game keeps
 /// shut on Saturdays, the national team, the dressing room and the whistle.
 const LINEUP_SYMBOL: usize = 0;
+pub(crate) const COMPARISON_SYMBOL: usize = 1;
 pub(crate) const TACTICS_SYMBOL: usize = 2;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 3] =
-    [(LINEUP_SYMBOL, LINEUP), (TACTICS_SYMBOL, TACTICS), (DRESSING_SYMBOL, DRESSING_ROOM)];
+const BAR_SCREENS: [(usize, u16); 4] = [
+    (LINEUP_SYMBOL, LINEUP),
+    (COMPARISON_SYMBOL, COMPARISON),
+    (TACTICS_SYMBOL, TACTICS),
+    (DRESSING_SYMBOL, DRESSING_ROOM),
+];
 /// What the game takes for Saturday.
 const SATURDAY: usize = 6;
 const WEEK_DAYS: usize = 7;
@@ -130,8 +135,6 @@ const FITS_INK: [u8; 3] = [255, 255, 255];
 const SIDE_INK: [u8; 3] = [30, 110, 255];
 const ALLROUNDER_INK: [u8; 3] = [0, 255, 0];
 const MISFIT_INK: [u8; 3] = [255, 0, 0];
-/// The "Allrounder" bit of a player's first traits (text 1154).
-const ALLROUNDER: i64 = 0x100;
 /// The hanging striker's position, which every player of the attacking
 /// kinds fits (0x8a50ac lists them).
 const HANGING_STRIKER: u8 = 17;
@@ -565,7 +568,7 @@ impl Screen for MenuBar {
             }
             return Outcome::Stay;
         }
-        if let Target::Drop { from, to } = target {
+        if let Target::Drop { from, to, .. } = target {
             if view.id == LINEUP {
                 drop_player(cx, view, from, to, self.sort);
             }
@@ -1054,27 +1057,8 @@ fn show_lineup(
     let players = &state.players;
     let lineup = &state.lineup;
     let fitness = |p: usize| lineup::fitness_of(&state.fitness, p);
-    let abbreviation = |kind: u8| {
-        let id = pitch.abbreviations.get(usize::from(kind)).copied().unwrap_or(0);
-        game.text(id as u16).to_owned()
-    };
-    let name = |p: &Player| match p.first_name.chars().next() {
-        Some(initial) => format!("{}, {initial}.", p.last_name),
-        None => p.last_name.clone(),
-    };
-    let filled = |p: usize, position: u8| {
-        let player = &players[p];
-        PlayerBox {
-            name: name(player),
-            position: abbreviation(player.positions[0]),
-            strength: tenths(pitch.strength_at(player, fitness(p), position)),
-            fit: pitch.fit(player, position),
-            icons: pitch.ability_icons(player),
-            duty: None,
-            filled: true,
-            at: None,
-        }
-    };
+    let filled = |p: usize, position: u8| filled_box(game, &players[p], fitness(p), position);
+    let abbreviation = |kind: u8| abbreviation(game, kind);
     let list_view = view.id == LINEUP_LIST;
     if list_view {
         show_markers(view, dialog, game, state);
@@ -1466,6 +1450,42 @@ fn show_comparison(
     side(view, &theirs.lineup, &theirs.players, &theirs.fitness, theirs.strengths, ids);
 }
 
+/// A player's box as the line-up fills it (`CMannStatic`): his name, his
+/// main position, his strength on the spot's position, in the colour of how
+/// he fits it, and his abilities.
+pub(crate) fn filled_box(
+    game: &Game,
+    player: &Player,
+    fitness: a3_core::season::Fitness,
+    position: u8,
+) -> PlayerBox {
+    let pitch = &game.rules.pitch;
+    PlayerBox {
+        name: name(player),
+        position: abbreviation(game, player.positions[0]),
+        strength: tenths(pitch.strength_at(player, fitness, position)),
+        fit: pitch.fit(player, position),
+        icons: pitch.ability_icons(player),
+        duty: None,
+        filled: true,
+        at: None,
+    }
+}
+
+/// A position's short name: "IV".
+fn abbreviation(game: &Game, kind: u8) -> String {
+    let id = game.rules.pitch.abbreviations.get(usize::from(kind)).copied().unwrap_or(0);
+    game.text(id as u16).to_owned()
+}
+
+/// A player as boxes and lists name him: "Name, F.".
+fn name(player: &Player) -> String {
+    match player.first_name.chars().next() {
+        Some(initial) => format!("{}, {initial}.", player.last_name),
+        None => player.last_name.clone(),
+    }
+}
+
 /// Tenths as the game prints them: "7.3".
 fn tenths(value: i32) -> String {
     format!("{:.1}", value as f32 / 10.0)
@@ -1483,6 +1503,9 @@ mod tests {
     use crate::classic::{self, Classic};
     use crate::controls::{ControlState, bar, player_box};
     use crate::screens::compose;
+
+    /// The first of the three trainings, not built yet.
+    const TRAINING_SYMBOL: usize = 3;
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
@@ -1508,11 +1531,12 @@ mod tests {
         let mut view = View::new(LINEUP, dialog);
         let mut cx = Cx { game: &game, dialog, state: &mut state };
         MenuBar::default().open(&mut cx, &mut view, Args::None);
-        // Crossed out: the bar's symbols that lead nowhere yet, not the
-        // line-up's, the dressing room's or the whistle.
+        // Crossed out: the bar's symbols that lead nowhere yet — the first
+        // training's —, not the line-up's, the dressing room's or the
+        // whistle.
         let bar = control(dialog, BAR_ID).unwrap();
         let crossed = |item| view.inert.contains(&Target::Option { control: bar, item });
-        assert!(crossed(1) && !crossed(LINEUP_SYMBOL));
+        assert!(crossed(TRAINING_SYMBOL) && !crossed(LINEUP_SYMBOL));
         assert!(!crossed(DRESSING_SYMBOL) && !crossed(WHISTLE));
         // The rest of the test looks at the picture without the crosses.
         view.inert.clear();

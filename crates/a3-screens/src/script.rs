@@ -18,9 +18,11 @@
 //! animation>`, `click bar <symbol>`, `choose <options> <item>`,
 //! `row <list> <row>`, `cell <list> <row> <column>`, `type <field> <text>`,
 //! `spin <spinner> up|down` (a slider's arrows too), `slide <slider>
-//! <value>`, `rclick <control>`, and `wait` until the screen moves on by
-//! itself. A dialog the script has no actions for stops it, as does an
-//! action for a control the dialog does not have.
+//! <value>`, `rclick <control>`, `drag <box or row> <box or row>|off` (a
+//! box or row is `<control>` or `<list> row <row>`), and `wait` until the
+//! screen moves on by itself; or on the dialog's pixels: `click at <x>
+//! <y>`, `drag at <x> <y> to <x> <y>`. A dialog the script has no actions
+//! for stops it, as does an action for a control the dialog does not have.
 //!
 //! Dialogs go by their ids in the game's dialog file, as the original knows
 //! them: the week is dialog 2, though the replica puts it together under ids
@@ -30,11 +32,12 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
 use a3_files::rch::{Dialog, Kind};
+use bevy_math::Vec2;
 
 use crate::controls::button::{cancel_button, ok_button};
 use crate::game::Game;
 use crate::host::{Change, Host};
-use crate::pointer::{Grip, Target};
+use crate::pointer::{Grip, Pixels, Target};
 use crate::screens::calendar::{WEEK, is_week};
 use crate::screens::control;
 
@@ -83,6 +86,10 @@ pub(crate) enum Action {
     /// Drags a control (a player's box) or a list's row onto another, or off
     /// them all.
     Drag(Spot, Option<Spot>),
+    /// Drags whatever is at one point of the dialog to another.
+    DragAt((i16, i16), (i16, i16)),
+    /// Clicks whatever is at a point of the dialog.
+    ClickAt((i16, i16)),
     /// A right click on a control or a list's row.
     RightClick(Spot),
     Wait,
@@ -241,6 +248,11 @@ fn parse_action(action: &str) -> Option<Action> {
             (spot, []) => Action::RightClick(spot),
             _ => return None,
         },
+        ["click", "at", x, y] => Action::ClickAt((x.parse().ok()?, y.parse().ok()?)),
+        ["drag", "at", x0, y0, "to", x1, y1] => {
+            let at = |x: &str, y: &str| Some((x.parse().ok()?, y.parse().ok()?));
+            Action::DragAt(at(x0, y0)?, at(x1, y1)?)
+        }
         ["drag", ref rest @ ..] => {
             let (from, rest) = spot(rest)?;
             match rest {
@@ -377,11 +389,51 @@ impl<'a> Runner<'a> {
                 return Ok(());
             }
             Action::Wait => return self.wait(shown),
-            _ => target_of(controls, named(shown), action)?,
+            Action::DragAt(from, to) => self.drag_at(shown, from, to)?,
+            Action::ClickAt(at) => self.click_at(shown, at)?,
+            _ => match target_of(controls, named(shown), action)? {
+                // The pointer goes from the middle of one to the other's.
+                Target::Drop { from, to, .. } => {
+                    let view = self.host.view();
+                    let middle = |grip: Grip| {
+                        let rects = crate::pointer::targets(controls, view, &Pixels);
+                        let rect = rects.into_iter().find(|&(t, _)| Grip::of(t) == Some(grip));
+                        rect.map_or(Vec2::ZERO, |(_, r)| r.center())
+                    };
+                    let d = to.map_or(Vec2::ZERO, |to| middle(to) - middle(from));
+                    Target::Drop { from, to, moved: (d.x as i16, d.y as i16) }
+                }
+                target => target,
+            },
         };
         let change = self.host.input(game, target, false);
         self.change(change);
         Ok(())
+    }
+
+    /// What a drag from one point of the dialog `shown` to another takes
+    /// hold of and lets go of on, and how far it goes.
+    fn drag_at(&self, shown: u16, from: (i16, i16), to: (i16, i16)) -> Result<Target, Error> {
+        let controls = &self.game.dialogs[&shown];
+        let rects = crate::pointer::targets(controls, self.host.view(), &Pixels);
+        let under = |(x, y): (i16, i16)| {
+            let at = Vec2::new(f32::from(x), f32::from(y));
+            rects.iter().rev().filter(|(_, r)| r.contains(at)).find_map(|&(t, _)| Grip::of(t))
+        };
+        let grip =
+            under(from).ok_or_else(|| Error::Unsupported(named(shown), format!("{from:?}")))?;
+        let moved = (to.0 - from.0, to.1 - from.1);
+        Ok(Target::Drop { from: grip, to: under(to).filter(|&g| g != grip), moved })
+    }
+
+    /// What a click at a point of the dialog `shown` acts on: the topmost
+    /// target there.
+    fn click_at(&self, shown: u16, (x, y): (i16, i16)) -> Result<Target, Error> {
+        let controls = &self.game.dialogs[&shown];
+        let at = Vec2::new(f32::from(x), f32::from(y));
+        let rects = crate::pointer::targets(controls, self.host.view(), &Pixels);
+        let found = rects.iter().rev().find(|(_, r)| r.contains(at)).map(|&(t, _)| t);
+        found.ok_or_else(|| Error::Unsupported(named(shown), format!("a click at {x} {y}")))
     }
 
     /// Lets time pass until the screen `shown` moves on by itself.
@@ -439,11 +491,14 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
         Action::Drag(from, to) => {
             let grip = |spot: Spot| grip(controls, dialog, spot);
-            Target::Drop { from: grip(from)?, to: to.map(grip).transpose()? }
+            Target::Drop { from: grip(from)?, to: to.map(grip).transpose()?, moved: (0, 0) }
         }
         Action::RightClick(spot) => Target::Menu(grip(controls, dialog, spot)?),
         Action::Type(id, _) => Target::Edit(find(id)?),
         Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
+        Action::DragAt(..) | Action::ClickAt(_) => {
+            return Err(Error::Unsupported(dialog, "an action by pixels".into()));
+        }
     })
 }
 
@@ -595,7 +650,7 @@ mod tests {
             season.clubs[&season.manager().unwrap().club.unwrap()].lineup.clone()
         };
         let drop = |runner: &mut Runner, from: Grip, to: Option<Grip>| {
-            runner.host.input(&game, Target::Drop { from, to }, false);
+            runner.host.input(&game, Target::Drop { from, to, moved: (0, 0) }, false);
         };
         let before = lineup(&runner);
         // Two boxes on the pitch swap their players …
@@ -985,6 +1040,53 @@ mod tests {
         assert_eq!(team.tactic_flags(), 0x1 | 0x4 | 0x8 | 5 << 7 | 0x800);
         assert_eq!(team.passing(), 0x6054);
         assert_eq!(records.extras[0].special_bonus(), 30);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_comparison_marks_man_for_man_as_the_original_does() {
+        let game = game();
+        let dialog = &game.dialogs[&78];
+        let text = |runner: &Runner, id: u16| {
+            runner.host.view().text(crate::screens::control(dialog, id).unwrap()).to_owned()
+        };
+        let texts = |runner: &Runner, ids: &[u16]| -> Vec<String> {
+            ids.iter().map(|&id| text(runner, id)).collect()
+        };
+        // As the original shows Union against Wolfsburg.
+        let then = "now choose 9930 1\nuntil dialog 78";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        assert_eq!(
+            text(&runner, 9920),
+            "ANSTOSS 3 - Gegenüberstellung 1.FC Union Berlin (unten) - VfL Wolfsburg (oben)"
+        );
+        let own = texts(&runner, &[5612, 5613, 5614, 5615, 5616, 5617]);
+        assert_eq!(own, ["9", "20", "84", "84", "3.8", "6"]);
+        let theirs = texts(&runner, &[1744, 1745, 1746, 1747, 1748, 1749]);
+        assert_eq!(theirs, ["8", "11", "45", "68", "5.7", "8"]);
+        let parts = texts(&runner, &[1730, 5661, 1732, 1733, 1734, 1735, 1736, 1737]);
+        assert_eq!(parts, ["9.5", "31.1", "34.4", "22.9", "9.2", "27.4", "38.2", "23.4"]);
+        // Of the save's three pairs one marker has left the eleven.
+        assert_eq!(runner.host.view().lines.len(), 2);
+        // The original's moves: a defender onto a striker, a defender onto
+        // a midfielder, two midfielders onto midfielders, a click on the
+        // first defender; a defender forward at set pieces, the strikers
+        // no longer marked; away to the line-up and back.
+        let then = format!(
+            "{then}\nnow drag at 143 404 to 379 214\nnow drag at 379 404 to 63 158\n\
+             now drag at 261 351 to 203 179\nnow drag at 319 299 to 319 179\n\
+             now click at 143 404\nnow click 5619\nnow click at 560 376\nnow click 5662\n\
+             now choose 9930 0\nuntil dialog 147\nnow choose 9930 1\nuntil dialog 78"
+        );
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        assert_eq!(runner.host.view().lines.len(), 2);
+        let state = runner.host.state();
+        let team = &state.records.as_ref().unwrap().teams[84];
+        // Moscardo marks Majer, Haberer Svanberg.
+        assert_eq!(team.markers()[..3], [8378, 0, 3275]);
+        assert_eq!(team.marked()[..3], [1616, 0, 1617]);
+        assert_eq!(team.set_piece(), 3262);
+        assert_eq!(team.passing(), 0x609b & !0x4000);
     }
 
     #[test]

@@ -243,6 +243,7 @@ mod tests {
             traits: [0, 0],
             birthday: None,
             shirt: 0,
+            feet: 0,
         };
         let lineup = Lineup { spots: [(0, 0); FIELD], field: [None; FIELD], bench: [None; BENCH] };
         let mut club = ClubState::new(vec![player; injured.len()], lineup, Vec::new(), 0);

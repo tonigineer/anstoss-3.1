@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::data::Data;
 use crate::lineup::{BENCH, FIELD, Lineup};
+use crate::marking::Marking;
 use crate::medical::{self, MedicalTables};
 use crate::random::Random;
 use crate::records::{self, Globals, Records, Team};
@@ -137,6 +138,9 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
         foreigner_rule,
         duties,
         tactics,
+        marking: Marking::of(team),
+        areas: team.areas(),
+        set_piece: team.set_piece(),
         ..state
     };
     // A game saved in the middle of a matchday goes on with its matches: the
@@ -192,6 +196,7 @@ fn player(records: &Records, record: &records::Player) -> Player {
         traits: record.traits().map(|t| i64::from(t) << 1),
         birthday: record.birthday(),
         shirt: record.shirt(),
+        feet: record.manner() >> FEET_SHIFT & FEET,
     }
 }
 
@@ -206,6 +211,9 @@ fn fitness(record: &records::Player) -> Fitness {
     }
 }
 
+/// Which foot a player plays with, in his record's manner.
+const FEET_SHIFT: u8 = 2;
+const FEET: u8 = 3;
 /// Bits of a player's record for knocks he plays with.
 const KNOCKS: u16 = 0xe000;
 /// The contract's year, in the low twelve bits.

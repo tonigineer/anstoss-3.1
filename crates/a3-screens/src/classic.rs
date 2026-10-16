@@ -13,7 +13,7 @@ use a3_files::bitmap_font::BitmapFont;
 use a3_files::rch::{Align, Control, Dialog, PLAIN_FONT};
 
 use crate::controls::bitmap::Picture;
-use crate::controls::{bar, list, slider, spin};
+use crate::controls::{bar, check, list, slider, spin};
 use crate::fonts::Fonts;
 use crate::game::{Game, transparent_black};
 use crate::pointer::Target;
@@ -100,8 +100,11 @@ impl Classic {
         let mut widgets = HashMap::new();
         let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS);
         let lists = list::HANDLES.into_iter().chain(list::TRACKS);
-        let named =
-            [SCROLL_UP, SCROLL_DOWN].into_iter().chain(lists).chain(sliders).chain(spin::ARROWS);
+        let named = [SCROLL_UP, SCROLL_DOWN, check::TICK]
+            .into_iter()
+            .chain(lists)
+            .chain(sliders)
+            .chain(spin::ARROWS);
         for name in named {
             match game.picture(name) {
                 // A TGA brings its own alpha, shadows in black.
@@ -134,6 +137,14 @@ impl Classic {
     /// frame.
     pub fn draw(&self, dialog: &Dialog, view: &View, caret: bool, phase: f32) -> RgbaImage {
         let mut frame = self.background.clone();
+        let lines = |frame: &mut RgbaImage| {
+            for &([x0, y0, x1, y1], [r, g, b]) in &view.lines {
+                line(frame, (x0, y0), (x1, y1), Rgba([r, g, b, 255]));
+            }
+        };
+        if !view.lines_on_top {
+            lines(&mut frame);
+        }
         let scene = is_scene(view.id);
         for (index, (control, shown)) in dialog.controls.iter().zip(&view.controls).enumerate() {
             if shown.hidden {
@@ -141,6 +152,9 @@ impl Classic {
             }
             let paint = Paint { classic: self, view, index, control, caret, phase, scene };
             shown.state.draw(&mut frame, &paint);
+        }
+        if view.lines_on_top {
+            lines(&mut frame);
         }
         // The player held by the pointer goes with it.
         if let Some((size, dragged)) = view.dragged_box(dialog) {
@@ -247,6 +261,54 @@ pub(crate) fn centred(left: i32, width: i32, text: i32) -> i32 {
 
 pub(crate) fn paste(frame: &mut RgbaImage, picture: &RgbaImage, at: Vec2) {
     imageops::overlay(frame, picture, at.x as i64, at.y as i64);
+}
+
+/// A line from one point towards another, as the game's Direct3D renderer
+/// has them rasterised (`sgl_DrawLine`; seen under Wine): every column — or
+/// row, for a steep line — whose middle the line spans, and in it the pixel
+/// the line passes through, with the line moved half a pixel down and, for
+/// a flat line, 63/128 of a pixel across, for a steep one half a pixel.
+/// So a flat line keeps its left end and a steep one its top end; where a
+/// steep line runs between two pixels it takes the right one.
+pub(crate) fn line(frame: &mut RgbaImage, from: (i32, i32), to: (i32, i32), color: Rgba<u8>) {
+    // In 256ths of a pixel.
+    const UNIT: i64 = 256;
+    const FLAT_ACROSS: i64 = 126;
+    const STEEP_ACROSS: i64 = 128;
+    const DOWN: i64 = 128;
+    let flat = (to.0 - from.0).abs() >= (to.1 - from.1).abs();
+    let across = if flat { FLAT_ACROSS } else { STEEP_ACROSS };
+    let (x0, y0) = (i64::from(from.0) * UNIT + across, i64::from(from.1) * UNIT + DOWN);
+    let (x1, y1) = (i64::from(to.0) * UNIT + across, i64::from(to.1) * UNIT + DOWN);
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let mut put = |x: i64, y: i64| {
+        if let (Ok(x), Ok(y)) = (u32::try_from(x), u32::try_from(y))
+            && x < frame.width()
+            && y < frame.height()
+        {
+            frame.put_pixel(x, y, color);
+        }
+    };
+    // Along the longer way a pixel where its middle lies within the line;
+    // across, the one the line passes through there.
+    let (major, minor, d_major, d_minor) =
+        if flat { ((x0, x1), y0, dx, dy) } else { ((y0, y1), x0, dy, dx) };
+    if d_major == 0 {
+        return;
+    }
+    let (lo, hi) = (major.0.min(major.1), major.0.max(major.1));
+    for step in lo.div_euclid(UNIT) - 1..=hi.div_euclid(UNIT) + 1 {
+        let middle = step * UNIT + UNIT / 2;
+        if !(lo <= middle && middle < hi) {
+            continue;
+        }
+        let (mut num, mut den) = (minor * d_major + (middle - major.0) * d_minor, UNIT * d_major);
+        if den < 0 {
+            (num, den) = (-num, -den);
+        }
+        let across = num.div_euclid(den);
+        if flat { put(step, across) } else { put(across, step) }
+    }
 }
 
 pub(crate) fn fill(frame: &mut RgbaImage, x: i32, y: i32, w: i32, h: i32, color: Rgba<u8>) {

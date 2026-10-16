@@ -55,6 +55,9 @@ pub mod dialogs {
     /// The line-up as a list, for a manager who switched to it.
     pub const LINEUP_LIST: u16 = 429;
     pub const DRESSING_ROOM: u16 = 302;
+    /// The comparison with the next opponent, man for man, the bar's
+    /// second symbol.
+    pub const COMPARISON: u16 = 78;
     /// The club's tactics, the bar's third symbol.
     pub const TACTICS: u16 = 271;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];

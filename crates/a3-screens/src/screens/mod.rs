@@ -5,6 +5,7 @@
 //! screen below it. The [`crate::host`] keeps them open.
 
 pub mod calendar;
+pub mod comparison;
 pub mod discipline;
 pub mod duties;
 pub mod formations;
@@ -127,6 +128,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(talk::TalkScreen::default()),
         Box::new(talk::Mates::default()),
         Box::new(tactics::TacticsScreen::default()),
+        Box::new(comparison::Comparison::default()),
     ]
 }
 
@@ -146,6 +148,7 @@ pub fn compose(game: &mut Game) {
     playerinfo::compose(&mut game.dialogs);
     discipline::compose(&mut game.dialogs);
     tactics::compose(&mut game.dialogs, &game.data.rules);
+    comparison::compose(&mut game.dialogs, &game.data.rules);
     corner_buttons(&mut game.dialogs);
 }
 

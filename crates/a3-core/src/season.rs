@@ -17,7 +17,7 @@ use a3_files::exe::Exe;
 use crate::calendar::{self, Calendar};
 use crate::duties;
 use crate::jobs::Offer;
-use crate::lineup::{self, FULL_MORALE, Lineup, NEUTRAL_MOOD, Tables};
+use crate::lineup::{self, FIELD, FULL_MORALE, Lineup, NEUTRAL_MOOD, Tables};
 use crate::random::Random;
 use crate::world::{GOALKEEPER, Player, STRIKER, World};
 
@@ -271,6 +271,12 @@ pub struct ClubState {
     pub duties: crate::duties::Lists,
     /// How the team plays, as the tactics screen sets it.
     pub tactics: crate::tactics::Tactics,
+    /// Who of the eleven marks whom of the next opponent's, where each
+    /// acts, and who goes forward at set pieces (a player's id, 0 none), as
+    /// the comparison with the opponent sets them.
+    pub marking: crate::marking::Marking,
+    pub areas: [crate::marking::Area; FIELD],
+    pub set_piece: u16,
 }
 
 /// How a player is: fit and fresh, in hundredths, and in what spirits.
@@ -366,6 +372,9 @@ impl ClubState {
             week,
             duties: Default::default(),
             tactics: Default::default(),
+            marking: Default::default(),
+            areas: Default::default(),
+            set_piece: 0,
         }
     }
 }

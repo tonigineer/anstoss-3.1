@@ -286,6 +286,16 @@ impl<'a> Original<'a> {
         if let Action::Wait = action {
             return self.wait(up);
         }
+        if let Action::ClickAt((x, y)) = *action {
+            self.click(Vec2::new(f32::from(x), f32::from(y)))?;
+            sleep(PAUSE);
+            return Ok(());
+        }
+        if let Action::DragAt((x0, y0), (x1, y1)) = *action {
+            self.probe.ask(format!("drag {x0} {y0} {x1} {y1}").as_bytes())?;
+            sleep(PAUSE);
+            return Ok(());
+        }
         let dialog = self.game.dialogs.get(&up.id).ok_or(Error::NoActions(up.id))?;
         let target = target_of(dialog, up.id, action)?;
         let view = View::new(up.id, dialog);
@@ -326,7 +336,7 @@ impl<'a> Original<'a> {
             sleep(PAUSE);
             return Ok(());
         }
-        if let Target::Drop { from, to } = target {
+        if let Target::Drop { from, to, .. } = target {
             // Off the boxes is on the list, which takes a player out as
             // well; a free spot of the pitch would move the box instead.
             let to = match to {

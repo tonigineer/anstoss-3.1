@@ -35,6 +35,12 @@ pub struct View {
     pub inert: Vec<Target>,
     /// A player's box or row held by the pointer, and where the pointer is.
     pub dragging: Option<Dragging>,
+    /// Lines the screen draws on the dialog's picture, under its controls:
+    /// from one point to another, in a colour; or over them, where the
+    /// original drew them again without its controls drawing themselves
+    /// anew.
+    pub lines: Vec<([i32; 4], [u8; 3])>,
+    pub lines_on_top: bool,
 }
 
 /// What the pointer drags, and where it is, in classic pixels.
@@ -90,6 +96,8 @@ impl View {
             tip: None,
             inert: Vec::new(),
             dragging: None,
+            lines: Vec::new(),
+            lines_on_top: false,
         }
     }
 

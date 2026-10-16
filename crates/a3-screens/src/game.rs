@@ -26,6 +26,9 @@ pub struct Game {
     texts: HashMap<u16, String>,
     graphics: HashMap<u16, String>,
     archive: Mutex<Archive>,
+    /// The second graphics archive, `Archives/grafik1.cpr`, which holds a
+    /// few the first does not (the check boxes' ticks …).
+    more: Option<Mutex<Archive>>,
     /// The flags' archive, `Archives/flaggen.cpr` (`klein/Flag14.bmp` …).
     flags: Option<Mutex<Archive>>,
     /// The game's fonts, read when first drawn with.
@@ -65,6 +68,7 @@ impl Game {
             },
             graphics: rch::load_graphics(&dir.join("deb/ListeDerGrafik.rh"))?,
             archive: Mutex::new(Archive::open(&dir.join("Archives/grafik.cpr"))?),
+            more: Archive::open(&dir.join("Archives/grafik1.cpr")).ok().map(Mutex::new),
             flags: Archive::open(&dir.join("Archives/flaggen.cpr")).ok().map(Mutex::new),
             fonts: OnceLock::new(),
         })
@@ -188,12 +192,13 @@ impl Game {
 
     /// A graphic from the archive by its path.
     pub fn picture(&self, path: &str) -> Result<RgbaImage, Box<dyn Error>> {
-        let found = self.archive.lock().unwrap().read(path);
-        let bytes = match (found, &self.flags) {
-            (Ok(bytes), _) => bytes,
-            (Err(_), Some(flags)) => flags.lock().unwrap().read(path)?,
-            (Err(err), None) => return Err(err.into()),
-        };
+        let mut found = self.archive.lock().unwrap().read(path);
+        for other in [&self.more, &self.flags].into_iter().flatten() {
+            if found.is_err() {
+                found = other.lock().unwrap().read(path);
+            }
+        }
+        let bytes = found?;
         // A TGA does not say what it is.
         let picture = if path.to_lowercase().ends_with(".tga") {
             image::load_from_memory_with_format(&bytes, ImageFormat::Tga)?

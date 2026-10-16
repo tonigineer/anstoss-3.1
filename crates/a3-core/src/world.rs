@@ -187,6 +187,9 @@ pub struct Player {
     pub traits: [i64; 2],
     pub birthday: Option<NaiveDate>,
     pub shirt: u8,
+    /// Which foot he plays with (`FUN_00706303`): 1 or 2, or 3 both, who
+    /// then fits the other side as well; 0 not known.
+    pub feet: u8,
 }
 
 pub struct League {
@@ -338,6 +341,7 @@ impl Player {
             traits: [number(PLAYER_TRAITS), number(PLAYER_TRAITS + 1)],
             birthday: NaiveDate::parse_from_str(&text(PLAYER_BIRTHDAY), "%d.%m.%Y").ok(),
             shirt: number(PLAYER_SHIRT).clamp(0, 255) as u8,
+            feet: 0,
         }
     }
 

@@ -32,10 +32,12 @@ impl Grip {
 /// Something a pointer or key can act on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Target {
-    /// Something dragged and let go of on another place, or on none.
+    /// Something dragged and let go of on another place, or on none, and
+    /// how far the pointer moved on the way, in classic pixels.
     Drop {
         from: Grip,
         to: Option<Grip>,
+        moved: (i16, i16),
     },
     /// A right click on a box or a row: the menu of what it holds.
     Menu(Grip),

@@ -55,6 +55,10 @@ pub const SPECIALS: usize = 8;
 /// most.
 pub const PASSING: [(u16, i32); 3] = [(0, 6), (3, 6), (6, 4)];
 const PASSING_FIELD: u16 = 7;
+/// The passing word's bits the comparison with the opponent sets: the
+/// strikers and the playmakers are marked man for man ([`crate::marking`]).
+pub const MARK_STRIKERS: u16 = 0x4000;
+pub const MARK_PLAYMAKERS: u16 = 0x2000;
 
 /// The players the tactics name: one to spare, one to collect a yellow
 /// card, the opponent's to foul and to provoke.
@@ -191,6 +195,19 @@ impl Tactics {
             self.flags |= flag;
         } else {
             self.flags &= !flag;
+        }
+    }
+
+    /// Whether one of the passing word's bits is set, and setting it.
+    pub fn marks(&self, bit: u16) -> bool {
+        self.passing & bit != 0
+    }
+
+    pub fn set_marks(&mut self, bit: u16, on: bool) {
+        if on {
+            self.passing |= bit;
+        } else {
+            self.passing &= !bit;
         }
     }
 

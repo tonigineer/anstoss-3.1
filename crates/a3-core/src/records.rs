@@ -461,6 +461,22 @@ record! {
     /// Where the eleven stand, in pitch pixels: the formation's spots, or
     /// where the manager moved a box (the club object's +0xae6).
     0x194 => spots, set_spots: [[i16; 2]; 11];
+    /// Man-marking ([`crate::marking`]; the club object's +0xabe, +0xad2):
+    /// the ids of up to ten of the eleven, and of the opponent's players
+    /// each marks.
+    0x16c => markers, set_markers: [u16; 10];
+    0x180 => marked, set_marked: [u16; 10];
+    /// Where each of the eleven acts, in pitch pixels from his spot: left,
+    /// up, right, down (the club object's +0xb12).
+    0x1c0 => areas, set_areas: [[u8; 4]; 11];
+    /// The player who goes forward at set pieces, by id, 0 none (the club
+    /// object's +0xb3e).
+    0x1ec => set_piece, set_set_piece: u16;
+    /// The respect the team is held in, 0 to 200 (the club object's +0x92).
+    0xb6 => respect, set_respect: i16;
+    /// The team's will to win as it stands, before the manager's part,
+    /// [`Team::will_to_win`] (`FUN_0069ee6d`).
+    0x958 => will_base, set_will_base: i16;
     /// Season tickets: the target the preseason sells towards, and how many
     /// are sold (the club object's +0x22c and +0x498).
     0x4a4 => ticket_target, set_ticket_target: i32;
@@ -471,10 +487,17 @@ record! {
 const SQUAD: usize = 0x1f2;
 /// Where its name is, and how long it may be.
 const TEAM_NAME: (usize, usize) = (0x20, 0x7c);
+/// The most a team's will to win may be.
+const WILL_MOST: i16 = 200;
 
 impl Team {
     pub fn name(&self) -> String {
         text(&self.0[TEAM_NAME.0 - HEADER..], TEAM_NAME.1)
+    }
+
+    /// The team's will to win, 0 to 200 (`FUN_0069ee6d`).
+    pub fn will(&self) -> i16 {
+        self.will_base().wrapping_add(self.will_to_win()).clamp(0, WILL_MOST)
     }
 
     /// The ids of its players.

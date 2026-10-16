@@ -251,6 +251,7 @@ mod tests {
             traits: [0, 0],
             birthday: None,
             shirt: 0,
+            feet: 0,
         }
     }
 

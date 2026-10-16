@@ -60,7 +60,20 @@ const KEEPER_BITS: usize = 9;
 /// How much of his strength a player brings on another kind of position
 /// than his main one, in tenths: by main position, then the other kind.
 const FIT_AT: u32 = 0x8a4ec0;
+/// The same for a two-footed player, who fits the other side as well
+/// (0x8a4fb8).
+const BOTH_FEET_FIT_AT: u32 = 0x8a4fb8;
 const KINDS: usize = 11;
+/// On the hanging striker's position (17) a player counts fully whose
+/// positions are of the attacking kinds (0x8a50ac, by kind).
+const HANGING_STRIKER: u8 = 17;
+const FORWARD_FIT_AT: u32 = 0x8a50ac;
+/// Who plays with both feet.
+const BOTH_FEET: u8 = 3;
+/// The "Allrounder" bit of a player's first traits (text 1154): on any
+/// other position he still brings 80 %.
+pub const ALLROUNDER: i64 = 0x100;
+const ALLROUNDER_FIT: i32 = 8;
 /// How much a player counts for the goalkeeper, the defence, the midfield
 /// and the attack, in percent, by the line down the pitch he stands on.
 const PARTS_AT: u32 = 0x8a5258;
@@ -106,6 +119,8 @@ pub struct Tables {
     pub position_names: Vec<u32>,
     pub abbreviations: Vec<u32>,
     fit: Vec<i16>,
+    both_feet_fit: Vec<i16>,
+    forward_fit: Vec<i16>,
     parts: Vec<[u8; PARTS]>,
     ability_icons: Vec<u16>,
     /// The co-trainer's free system: how many of each kind he puts up at
@@ -151,6 +166,12 @@ impl Tables {
             position_names: exe.u32s(POSITION_NAMES_AT, POSITIONS)?,
             abbreviations: exe.u32s(ABBREVIATIONS_AT, POSITIONS)?,
             fit: exe.u16s(FIT_AT, KINDS * KINDS)?.into_iter().map(|v| v as i16).collect(),
+            both_feet_fit: exe
+                .u16s(BOTH_FEET_FIT_AT, KINDS * KINDS)?
+                .into_iter()
+                .map(|v| v as i16)
+                .collect(),
+            forward_fit: exe.u16s(FORWARD_FIT_AT, KINDS)?.into_iter().map(|v| v as i16).collect(),
             parts: parts.chunks(PART_ROW).map(|r| [r[0], r[1], r[2], r[3]]).collect(),
             ability_icons: exe
                 .u32s(ABILITY_ICONS_AT, ABILITY_ICONS + DUTY_ICONS)?
@@ -225,19 +246,43 @@ impl Tables {
         self.hanging.get(usize::from(kind)).copied().unwrap_or(false)
     }
 
-    /// How much of his strength a player brings on a position, in tenths.
+    /// How much of his strength a player brings on a position, in tenths
+    /// (`FUN_006a123c`): all on his main kind; on the hanging striker's
+    /// position all if one of his positions attacks; in goal or out of
+    /// it a tenth; nine on his side positions — ten for a two-footed one
+    /// where the other side suits him fully —; elsewhere eight for an
+    /// allrounder, else as the tables have it.
     pub fn fit(&self, player: &Player, position: u8) -> i32 {
         let kind = self.kind(position);
         let [main, second, third] = player.positions;
         if main == kind {
+            return FULL_FIT;
+        }
+        let table = |table: &[i16], at: usize| table.get(at).map_or(0, |&f| i32::from(f));
+        if position == HANGING_STRIKER {
+            let forward = |kind: u8| table(&self.forward_fit, usize::from(kind));
+            let best = forward(main).max(forward(second)).max(forward(third));
+            if best >= SIDE_FIT {
+                return best;
+            }
+        }
+        if (main == GOALKEEPER) != (kind == GOALKEEPER) {
+            return GOAL_FIT;
+        }
+        let at = usize::from(main) * KINDS + usize::from(kind);
+        let both_feet = player.feet == BOTH_FEET;
+        if second != kind && third != kind {
+            if player.traits[0] & ALLROUNDER != 0 {
+                ALLROUNDER_FIT
+            } else if both_feet {
+                table(&self.both_feet_fit, at)
+            } else {
+                table(&self.fit, at)
+            }
+        } else if both_feet && table(&self.both_feet_fit, at) == FULL_FIT {
             FULL_FIT
-        } else if (main == GOALKEEPER) != (kind == GOALKEEPER) {
-            GOAL_FIT
-        } else if kind != 0 && (second == kind || third == kind) {
-            SIDE_FIT
         } else {
-            let at = usize::from(main) * KINDS + usize::from(kind);
-            self.fit.get(at).map_or(GOAL_FIT, |&f| i32::from(f))
+            SIDE_FIT
         }
     }
 
