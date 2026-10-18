@@ -159,10 +159,11 @@ impl Game {
         }
     }
 
-    /// A graphic by its id in `ListeDerGrafik.rh`, from `Archives/grafik.cpr`.
+    /// A graphic by its id in `ListeDerGrafik.rh`, from `Archives/grafik.cpr`
+    /// or the archives after it.
     pub fn graphic(&self, id: u16) -> Result<RgbaImage, Box<dyn Error>> {
         let path = self.graphics.get(&id).ok_or_else(|| format!("no graphic {id}"))?;
-        let bytes = self.archive.lock().unwrap().read(path)?;
+        let bytes = self.read(path)?;
         let format = if path.to_lowercase().ends_with(".bmp") {
             ImageFormat::Bmp
         } else {
@@ -190,15 +191,20 @@ impl Game {
         std::fs::read(found)
     }
 
-    /// A graphic from the archive by its path.
-    pub fn picture(&self, path: &str) -> Result<RgbaImage, Box<dyn Error>> {
+    /// A file from the first archive that holds it.
+    fn read(&self, path: &str) -> std::io::Result<Vec<u8>> {
         let mut found = self.archive.lock().unwrap().read(path);
         for other in [&self.more, &self.flags].into_iter().flatten() {
             if found.is_err() {
                 found = other.lock().unwrap().read(path);
             }
         }
-        let bytes = found?;
+        found
+    }
+
+    /// A graphic from the archives by its path.
+    pub fn picture(&self, path: &str) -> Result<RgbaImage, Box<dyn Error>> {
+        let bytes = self.read(path)?;
         // A TGA does not say what it is.
         let picture = if path.to_lowercase().ends_with(".tga") {
             image::load_from_memory_with_format(&bytes, ImageFormat::Tga)?

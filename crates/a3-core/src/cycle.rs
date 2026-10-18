@@ -60,6 +60,12 @@ pub mod dialogs {
     pub const COMPARISON: u16 = 78;
     /// The club's tactics, the bar's third symbol.
     pub const TACTICS: u16 = 271;
+    /// The week's training, the bar's fifth symbol: as text, or as
+    /// pictures for a manager who switched to them; the popup of its
+    /// units.
+    pub const SHORT_TRAINING: u16 = 346;
+    pub const TRAINING_PICTURES: u16 = 513;
+    pub const UNIT_CHOICE: u16 = 362;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
     /// A talk with a player, on the day it was booked for.
     pub const TALK: u16 = 461;
@@ -593,8 +599,12 @@ impl Cycle {
 /// The line-up in the view the current manager has it in: on the pitch or
 /// as a list (`FUN_006a5ba7`, every turn's hub); any other screen as it is.
 fn line_up_view(season: &Season, screen: u16) -> u16 {
-    let list = season.manager().is_some_and(|m| m.list_view);
-    if screen == LINEUP && list { LINEUP_LIST } else { screen }
+    let manager = season.manager();
+    match screen {
+        LINEUP if manager.is_some_and(|m| m.list_view) => LINEUP_LIST,
+        SHORT_TRAINING if manager.is_some_and(|m| m.training_pictures) => TRAINING_PICTURES,
+        _ => screen,
+    }
 }
 
 /// Where the game itself would begin, which is not built yet; back to the

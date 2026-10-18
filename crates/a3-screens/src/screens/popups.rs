@@ -10,6 +10,8 @@ use crate::view::View;
 const QUESTION_TEXT: u16 = 4738;
 const QUESTION_OK: u16 = 4741;
 const NOTICE_TEXT: u16 = 4730;
+/// The notice's caption (`CAlert`): "ANSTOSS 3 - Achtung!".
+const NOTICE_CAPTION: u16 = 2502;
 /// The ball of the question, playing its frames forth and back.
 const QUESTION_BALL: u16 = 4740;
 const QUESTION_BALL_FRAMES: std::ops::RangeInclusive<u16> = 1745..=1753;
@@ -68,6 +70,8 @@ impl Screen for Notice {
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
         ball(view, cx);
+        let caption = cx.game.text(NOTICE_CAPTION).to_owned();
+        set(view, cx.dialog, super::discipline::CAPTION_ID, caption);
         let text = match args {
             Args::Text(text) => cx.game.text(text).to_owned(),
             Args::TextFor(text, player) => {

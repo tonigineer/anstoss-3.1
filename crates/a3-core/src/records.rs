@@ -421,6 +421,20 @@ record! {
     /// hardness, the flags; and its passing, which the game keeps here
     /// only.
     0xc6 => offside, set_offside: u8;
+    /// What the team can of pressing and of beating the offside trap, 0
+    /// to 5, and of set pieces: free kicks in bits 0–2, corners 3–5,
+    /// throw-ins 6–8, dirty tricks 12–14 (the club object's +0x9f, +0xa1,
+    /// +0xa2; TRAINING-KURZ.md).
+    0xc5 => pressing, set_pressing: u8;
+    0xc7 => anti_offside, set_anti_offside: u8;
+    0xc8 => set_pieces, set_set_pieces: u16;
+    /// Before the next match: bit 0x800 a training camp, bit 0x1000 a
+    /// team meeting (the club object's +0xdf8).
+    0x308 => training_flags, set_training_flags: u32;
+    /// What watching players costs the club, 10,000 a player on its
+    /// observation list (the club object's +0x27c): how much it knows of
+    /// its opponents.
+    0x4f4 => observation_cost, set_observation_cost: i32;
     0xcc => style, set_style: u8;
     0xcd => effort, set_effort: u8;
     0xce => hardness, set_hardness: u8;
@@ -519,6 +533,9 @@ record! {
     /// club object's +0xcf0, +0xcfe, +0xd18, +0xd1a: the kinds 13, 20, 33
     /// and 34 of `FUN_00749508`).
     0x356 => sessions_13, set_sessions_13: i16;
+    /// The training plan: three sessions a day for six weeks, a unit each
+    /// ([`crate::training`]; the club object's +0xc0a).
+    0x270 => plan, set_plan: [u8; 126];
     0x364 => sessions_20, set_sessions_20: i16;
     0x37e => sessions_33, set_sessions_33: i16;
     0x380 => sessions_34, set_sessions_34: i16;
@@ -627,12 +644,31 @@ record! {
     0x186 => confidence_ups, set_confidence_ups: [u8; 2];
     0x188 => confidence_swings, set_confidence_swings: [i8; 2];
     /// His options: the line-up's view in bits 0 to 3 (0 the pitch, else
-    /// the list), the screen his turn starts on in bits 6 and 7.
+    /// the list), the screen his turn starts on in bits 6 and 7, the
+    /// short-term training as pictures in bit 8.
     0x212c => options, set_options: u32;
 }
 
 /// The bits of a manager's options that choose the line-up's view.
 const LINE_UP_VIEW: u32 = 0xf;
+/// The bit that shows his short-term training as pictures (dialog 513).
+const TRAINING_PICTURES: u32 = 0x100;
+
+/// A manager's week templates: a name of 30 bytes and a week's sessions
+/// each (the manager object's +0x38a).
+const TEMPLATES_AT: usize = 0x4d6;
+const TEMPLATE_SIZE: usize = 0x33;
+const TEMPLATE_NAME: usize = 30;
+pub const TEMPLATES: usize = 18;
+/// What he chose for each week of the game, counted from the first
+/// season's start (the manager object's +0x720): the template, 1 more
+/// than its number (0 none), and the player in individual training (0
+/// none).
+const WEEKS_AT: usize = 0x86c;
+const WEEK_SIZE: usize = 0x3a;
+const WEEK_TEMPLATE: usize = 4;
+const WEEK_PLAYER: usize = 6;
+pub const WEEKS: usize = 53;
 
 /// A manager's formations: a name of ten bytes and the eleven's spots, x
 /// and y in pitch pixels, each (the manager object's +0x118).
@@ -657,6 +693,39 @@ impl Manager {
     pub fn set_formation_spots(&mut self, formation: usize, spots: [(i16, i16); 11]) {
         let at = FORMATIONS_AT + formation * FORMATION_SIZE + FORMATION_NAME;
         self.put(at, spots.map(|(x, y)| [x, y]));
+    }
+
+    /// His week templates: their names and sessions.
+    pub fn templates(&self) -> Vec<(String, [u8; 21])> {
+        (0..TEMPLATES)
+            .map(|t| {
+                let at = TEMPLATES_AT + t * TEMPLATE_SIZE;
+                (text(&self.0[at..], TEMPLATE_NAME), self.get(at + TEMPLATE_NAME))
+            })
+            .collect()
+    }
+
+    /// The template and the player in individual training he chose for a
+    /// week.
+    pub fn week(&self, week: usize) -> (u16, u16) {
+        let at = WEEKS_AT + week.min(WEEKS - 1) * WEEK_SIZE;
+        (self.get(at + WEEK_TEMPLATE), self.get(at + WEEK_PLAYER))
+    }
+
+    pub fn set_week(&mut self, week: usize, (template, player): (u16, u16)) {
+        let at = WEEKS_AT + week.min(WEEKS - 1) * WEEK_SIZE;
+        self.put(at + WEEK_TEMPLATE, template);
+        self.put(at + WEEK_PLAYER, player);
+    }
+
+    /// Whether his short-term training shows as pictures (`FUN_006a5cd5`).
+    pub fn training_pictures(&self) -> bool {
+        self.options() & TRAINING_PICTURES != 0
+    }
+
+    pub fn set_training_pictures(&mut self, pictures: bool) {
+        let bit = if pictures { TRAINING_PICTURES } else { 0 };
+        self.set_options(self.options() & !TRAINING_PICTURES | bit);
     }
 
     /// Whether his line-up shows as a list (`FUN_006a5ba7`).
@@ -705,7 +774,7 @@ const PLANNER_ENTRIES_AT: usize = 0x24;
 
 record! {
     /// A manager's week planner: an appointment for every day of the season
-    /// (`0x1c39620` + slot × 0x297c).
+    /// (`0x1c39620` + slot × 0x297c); his year calendar is one too.
     Planner, 10588, base HEADER;
 }
 
@@ -727,6 +796,16 @@ impl Planner {
         Appointment { kind: self.get(at), flag: self.get(at + 1), player: self.get(at + 4) }
     }
 
+    /// The teams of a day's match in a year calendar, home first: their
+    /// countries and numbers.
+    pub fn teams(&self, day: usize) -> Option<[(u16, i16); 2]> {
+        if day >= PLANNER_DAYS {
+            return None;
+        }
+        let at = PLANNER_ENTRIES_AT + day * PLANNER_ENTRY;
+        Some([(self.get(at + 8), self.get(at + 0xa)), (self.get(at + 0xc), self.get(at + 0xe))])
+    }
+
     /// Books an appointment for a day; what else the day's entry held stays
     /// (`FUN_0072e973`).
     pub fn book(&mut self, day: usize, appointment: Appointment) {
@@ -738,6 +817,11 @@ impl Planner {
         }
     }
 }
+
+/// The human managers' year calendars, by slot (`0x1c2f030` + slot ×
+/// 0x297c, the same entries as the planners'): the kind of every day of
+/// the season — 6 a match, 7 a party, 8 an event.
+const CALENDAR_AT: u32 = 0x1c2f030;
 
 /// The block of globals around the date (`0xb5cb68`, its data from
 /// `0xb5cb88`).
@@ -898,6 +982,7 @@ pub struct Records {
     pub extras: Vec<Extra>,
     /// The human managers' week planners, by slot.
     pub planners: Vec<Planner>,
+    pub calendars: Vec<Planner>,
     pub luck: Luck,
     /// The pool of names the players' names point into.
     pub names: Vec<String>,
@@ -935,6 +1020,9 @@ impl Records {
         let planners = (0..MANAGERS)
             .map(|n| Planner::new(block(format!("{PLANNER_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
+        let calendars = (0..MANAGERS)
+            .map(|n| Planner::new(block(format!("{CALENDAR_AT:#x}[{n}]"))?))
+            .collect::<io::Result<_>>()?;
         let globals = Globals::new(block(format!("{GLOBALS_AT:#x}"))?)?;
         let luck = Luck::new(block(format!("{LUCK_AT:#x}"))?)?;
         let countries = Countries::new(block(format!("{COUNTRIES_AT:#x}"))?)?;
@@ -959,6 +1047,7 @@ impl Records {
             countries,
             extras,
             planners,
+            calendars,
             luck,
             names,
             persons,
@@ -989,6 +1078,9 @@ impl Records {
         }
         for (n, planner) in self.planners.iter().enumerate() {
             put(format!("{PLANNER_AT:#x}[{n}]"), 0, planner.bytes());
+        }
+        for (n, calendar) in self.calendars.iter().enumerate() {
+            put(format!("{CALENDAR_AT:#x}[{n}]"), 0, calendar.bytes());
         }
         put(format!("{GLOBALS_AT:#x}"), 0, self.globals.bytes());
         put(format!("{LUCK_AT:#x}"), 0, self.luck.bytes());

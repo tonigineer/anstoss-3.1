@@ -109,6 +109,8 @@ pub struct Rules {
     pub medical: crate::medical::MedicalTables,
     /// The tactics screen's states and its special win bonus.
     pub tactics: crate::tactics::TacticsTables,
+    /// The training's units, words and knowledge.
+    pub training: crate::training::TrainingTables,
 }
 
 impl Rules {
@@ -145,6 +147,7 @@ impl Rules {
             discipline: crate::discipline::DisciplineTables::load(exe)?,
             medical: crate::medical::MedicalTables::load(exe)?,
             tactics: crate::tactics::TacticsTables::load(exe)?,
+            training: crate::training::TrainingTables::load(exe)?,
         })
     }
 
@@ -277,6 +280,8 @@ pub struct ClubState {
     pub marking: crate::marking::Marking,
     pub areas: [crate::marking::Area; FIELD],
     pub set_piece: u16,
+    /// The training plan, and the camp and meeting before the next match.
+    pub training: crate::training::Training,
 }
 
 /// How a player is: fit and fresh, in hundredths, and in what spirits.
@@ -375,6 +380,7 @@ impl ClubState {
             marking: Default::default(),
             areas: Default::default(),
             set_piece: 0,
+            training: Default::default(),
         }
     }
 }
@@ -417,6 +423,12 @@ pub struct Manager {
     pub list_view: bool,
     /// The formations he chooses from.
     pub formations: Vec<lineup::Formation>,
+    /// His week templates, and the template and the player in individual
+    /// training he chose for each week of the game.
+    pub templates: Vec<crate::training::Template>,
+    pub weeks: Vec<(u16, u16)>,
+    /// Whether his short-term training shows as pictures (dialog 513).
+    pub training_pictures: bool,
 }
 
 /// A club's next match.
@@ -489,6 +501,9 @@ impl Season {
                     menu: 0,
                     list_view: false,
                     formations: rules.pitch.new_formations(),
+                    templates: Vec::new(),
+                    weeks: Vec::new(),
+                    training_pictures: false,
                 }
             })
             .collect();

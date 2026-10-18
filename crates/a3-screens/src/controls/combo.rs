@@ -9,9 +9,10 @@
 use bevy_math::{Rect, Vec2};
 use image::{Rgba, RgbaImage, imageops};
 
-use a3_files::rch::{Control, Kind};
+use a3_files::bitmap_font::BitmapFont;
+use a3_files::rch::{Align, Control, Kind};
 
-use crate::classic::{Paint, TEXT, fill, paste};
+use crate::classic::{Paint, TEXT, columns, fill, paste};
 use crate::controls::list::HANDLES;
 use crate::pointer::{Geometry, Target};
 
@@ -45,6 +46,28 @@ const END: i32 = 3;
 const LOWER_END: u32 = 0x1ba;
 /// The shortest the list's handle gets (`FUN_0079bb01`).
 const MIN_HANDLE: i32 = 7;
+
+/// A row's text: in the columns the combo box has, if more than one, the
+/// first `first` further in.
+fn draw_text(
+    font: &BitmapFont,
+    frame: &mut RgbaImage,
+    control: &Control,
+    at: (i32, i32),
+    first: i32,
+    text: &str,
+    right: i32,
+) {
+    match &control.kind {
+        Kind::Combo { columns: c, .. } if c.len() > 1 => {
+            let mut tabs: Vec<f32> = c.iter().map(|c| c.at).collect();
+            tabs[0] += first as f32;
+            let aligns: Vec<Option<(Align, f32)>> = c.iter().map(|c| c.align).collect();
+            columns(font, frame, at, text.split('\t'), &tabs, &aligns, TEXT, right);
+        }
+        _ => font.draw(frame, at.0 + first, at.1, text, TEXT, false),
+    }
+}
 
 /// A handle `length` long cut from a long upright bar: its upper end and
 /// middle, then its lower end (`FUN_007ae11d` for a list's).
@@ -130,7 +153,8 @@ impl ComboState {
         {
             // Centred top to bottom in whole pixels.
             let top = y + (r.height() as i32 - font.height() as i32) / 2;
-            font.draw(frame, x + FIELD_TEXT, top, text, TEXT, false);
+            let at = (x + FIELD_TEXT, top);
+            draw_text(font, frame, paint.control, at, 0, text, r.max.x as i32);
         }
     }
 
@@ -165,7 +189,10 @@ impl ComboState {
                 fill(&mut rows, 0, top, width, ROW, CHOSEN);
             }
             if let Some(font) = font {
-                font.draw(&mut rows, ROW_TEXT - 1, top, text, TEXT, false);
+                // The columns count from the row's edge, the first a
+                // pixel in.
+                let right = rows.width() as i32;
+                draw_text(font, &mut rows, control, (0, top), ROW_TEXT - 1, text, right);
             }
         }
         paste(frame, &rows, Vec2::new((x0 + 1) as f32, (y0 + 1) as f32));

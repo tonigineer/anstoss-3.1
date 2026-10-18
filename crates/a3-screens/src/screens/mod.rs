@@ -21,6 +21,7 @@ pub mod special;
 pub mod start;
 pub mod tactics;
 pub mod talk;
+pub mod training;
 
 use std::collections::HashMap;
 
@@ -129,6 +130,8 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(talk::Mates::default()),
         Box::new(tactics::TacticsScreen::default()),
         Box::new(comparison::Comparison::default()),
+        Box::new(training::ShortTraining::default()),
+        Box::new(training::UnitChoice),
     ]
 }
 
@@ -149,6 +152,7 @@ pub fn compose(game: &mut Game) {
     discipline::compose(&mut game.dialogs);
     tactics::compose(&mut game.dialogs, &game.data.rules);
     comparison::compose(&mut game.dialogs, &game.data.rules);
+    training::compose(&mut game.dialogs, &game.data.rules);
     corner_buttons(&mut game.dialogs);
 }
 

@@ -2,7 +2,7 @@
 //! on them. Push buttons have their text in the middle, on the dialog's
 //! picture, their own picture showing them held down.
 
-use image::RgbaImage;
+use image::{Rgba, RgbaImage};
 
 use a3_files::rch::{Control, Dialog, Kind};
 
@@ -23,6 +23,16 @@ pub struct ButtonState {
     pub ready: Vec<u16>,
     /// A stepping button's state: which of its pictures it shows.
     pub step: usize,
+    /// A text a bitmap button draws on its picture, in the middle top to
+    /// bottom (`CMyBitmapButton`'s paint, `0x796da7`).
+    pub label: Option<Label>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Label {
+    pub text: String,
+    pub ink: Rgba<u8>,
+    pub centred: bool,
 }
 
 impl ButtonState {
@@ -68,6 +78,16 @@ impl ButtonState {
             } else {
                 paste(frame, sprite, r.min);
             }
+        }
+        if let (Some(label), Some(font)) = (&self.label, paint.font()) {
+            let width = font.width(&label.text, false) as i32;
+            let left = if label.centred {
+                centred(r.min.x as i32, r.width() as i32, width)
+            } else {
+                r.min.x as i32
+            };
+            let top = r.min.y as i32 + (r.height() as i32 - font.height() as i32) / 2;
+            font.draw(frame, left, top, &label.text, label.ink, false);
         }
         if let (true, Some(font)) = (labelled, paint.font()) {
             let text = &paint.control.text;

@@ -16,6 +16,7 @@ use crate::random::Random;
 use crate::records::{self, Globals, Records, Team};
 use crate::season::{ClubState, Fitness, Manager, Season, Status};
 use crate::tactics::{FOUL, PICKS, Pick, Tactics};
+use crate::training::{Template, Training};
 use crate::world::Player;
 use crate::{autolineup, cohesion, duties};
 
@@ -45,6 +46,13 @@ pub fn season(records: &Records, data: &Data, random: Random) -> Season {
                 menu: 0,
                 list_view: m.list_view(),
                 formations: m.formations(),
+                templates: m
+                    .templates()
+                    .into_iter()
+                    .map(|(name, week)| Template { name, week })
+                    .collect(),
+                weeks: (0..records::WEEKS).map(|week| m.week(week)).collect(),
+                training_pictures: m.training_pictures(),
             }
         })
         .collect();
@@ -141,6 +149,10 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
         marking: Marking::of(team),
         areas: team.areas(),
         set_piece: team.set_piece(),
+        training: Training::new(
+            extra.map_or(Training::default().plan(), |e| e.plan()),
+            team.training_flags(),
+        ),
         ..state
     };
     // A game saved in the middle of a matchday goes on with its matches: the

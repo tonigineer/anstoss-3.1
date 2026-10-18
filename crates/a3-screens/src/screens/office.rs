@@ -9,10 +9,10 @@ use bevy_math::Vec2;
 use a3_core::season::{Match, Season};
 use a3_files::rch::{Dialog, Kind};
 
-use a3_core::cycle::dialogs::{GRAND_OFFICE, OFFICE, QUESTION};
+use a3_core::cycle::dialogs::{GRAND_OFFICE, OFFICE};
 
 use super::calendar::{WEEK_DAYS, bitmap};
-use super::{Args, Cx, Outcome, Reply, Request, Screen, control, indices, set};
+use super::{Args, Cx, Outcome, Reply, Screen, control, indices, set};
 use crate::controls::bitmap::Picture;
 use crate::game::Game;
 use crate::pointer::Target;
@@ -44,7 +44,6 @@ const HOME: u16 = 3664;
 const AWAY: u16 = 3665;
 const HOME_RANKED: u16 = 4242;
 const AWAY_RANKED: u16 = 4243;
-const NO_TRAINING: u16 = 3238;
 
 /// The office pennant carries the club's crest.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
@@ -77,8 +76,7 @@ impl Screen for Office {
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
         let Target::Button(button) = target else { return Outcome::Stay };
         if cx.dialog.controls[button].id == Some(OFFICE_DOOR) {
-            // Training is never set for the coming week, so the game asks.
-            return Outcome::Popup(Request::with(QUESTION, Args::Text(NO_TRAINING)));
+            return super::hub::whistle(cx);
         }
         Outcome::Stay
     }

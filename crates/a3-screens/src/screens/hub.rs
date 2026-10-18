@@ -24,7 +24,10 @@ use a3_core::world::Player;
 use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
-pub use a3_core::cycle::dialogs::{COMPARISON, DRESSING_ROOM, LINEUP, LINEUP_LIST, TACTICS};
+pub use a3_core::cycle::dialogs::{
+    COMPARISON, DRESSING_ROOM, LINEUP, LINEUP_LIST, SHORT_TRAINING, TACTICS, TRAINING_PICTURES,
+    UNIT_CHOICE,
+};
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 use super::calendar::FIXTURE_AHEAD;
@@ -48,15 +51,17 @@ const SYMBOL: f32 = 32.0;
 const LINEUP_SYMBOL: usize = 0;
 pub(crate) const COMPARISON_SYMBOL: usize = 1;
 pub(crate) const TACTICS_SYMBOL: usize = 2;
+pub(crate) const SHORT_TRAINING_SYMBOL: usize = 4;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 4] = [
+const BAR_SCREENS: [(usize, u16); 5] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
+    (SHORT_TRAINING_SYMBOL, SHORT_TRAINING),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
 /// What the game takes for Saturday.
@@ -370,11 +375,10 @@ pub(crate) fn bar_works(item: usize) -> bool {
 }
 
 /// A symbol of the bar clicked: the screen it leads to, unless it is the
-/// one shown; the whistle asks first, as no training is set for the coming
-/// week, and a yes ends the turn ([`WHISTLE_ANSWERED`]).
+/// one shown; the whistle ends the turn ([`whistle`]).
 pub(crate) fn bar_click(cx: &Cx, view: &View, item: usize, own: usize) -> Outcome {
     if item == WHISTLE {
-        return Outcome::Popup(Request::with(QUESTION, Args::Text(NO_TRAINING)));
+        return whistle(cx);
     }
     if item == own {
         return Outcome::Stay;
@@ -386,6 +390,17 @@ pub(crate) fn bar_click(cx: &Cx, view: &View, item: usize, own: usize) -> Outcom
     let tip = bar.and_then(|b| b.tips.get(item)).cloned().unwrap_or_default();
     info!("{tip}: not built yet");
     Outcome::Stay
+}
+
+/// The turn ends, but if the week has no training planned the game asks
+/// first, and only a yes ends it (`FUN_0074d706`).
+pub(crate) fn whistle(cx: &Cx) -> Outcome {
+    let season = cx.state.season.as_ref();
+    let club = season.and_then(|s| s.clubs.get(&s.manager()?.club?));
+    if club.is_some_and(|c| c.training.planned()) {
+        return Outcome::Close(Reply::Ok);
+    }
+    Outcome::Popup(Request::with(QUESTION, Args::Text(NO_TRAINING)))
 }
 
 /// The line-up and the dressing room, with the menu bar; its symbols lead

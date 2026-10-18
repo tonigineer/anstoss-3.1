@@ -107,10 +107,12 @@ pub enum Kind {
     /// A field that shows one of a list of texts, the list dropping down
     /// under it to choose another: the game's `CMyComboBox`. How far the
     /// list drops below the field's window (`+0xfc`), and its style: bits 4
-    /// to 6 the colour of its scrollbar's handle (`+0x315`).
+    /// to 6 the colour of its scrollbar's handle (`+0x315`); where its
+    /// rows' tab-separated columns are.
     Combo {
         drop: u16,
         style: u8,
+        columns: Vec<Column>,
     },
     /// A button that steps through states, a picture each, at every click:
     /// the game's `CMyPushButton` with states (its kind 3).
@@ -272,10 +274,13 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         return None;
     }
     let style = field(4)?;
+    // Four texts — the German label, the English, two notes, mostly empty
+    // —, four bytes, the id and its name.
     let (german, pos) = cstr(bytes, 32)?;
     let (_, pos) = cstr(bytes, pos)?;
     let (_, pos) = cstr(bytes, pos)?;
-    let pos = pos + 5;
+    let (_, pos) = cstr(bytes, pos)?;
+    let pos = pos + 4;
     let id = u16_at(bytes, pos)?;
     let (_, pos) = cstr(bytes, pos + 2)?;
     let extra = &bytes[skip_padding(bytes, pos)..];
@@ -324,6 +329,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         5 => Kind::Combo {
             drop: u16s(COMBO_DROP).unwrap_or(DEFAULT_DROP),
             style: extra.get(COMBO_STYLE).copied().unwrap_or(0),
+            columns: columns(extra, COMBO_COLUMNS),
         },
         13 => Kind::Check,
         14 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
@@ -372,6 +378,7 @@ pub struct Column {
 /// centred, 0x8000 right-aligned — and its width first.
 const LIST_COLUMNS: (usize, usize) = (12, 15);
 const HEADER_COLUMNS: (usize, usize) = (3, 4);
+const COMBO_COLUMNS: (usize, usize) = (12, 16);
 /// The most states a stepping button has.
 const MOST_STATES: u16 = 8;
 const MOST_COLUMNS: u16 = 50;

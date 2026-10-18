@@ -57,7 +57,7 @@ const SUSPEND_REALLY: u16 = 5322;
 const SUSPENDED_ANGRY: u16 = 5323;
 
 /// The caption a popup draws at its top, its title.
-const CAPTION_ID: u16 = 9924;
+pub(crate) const CAPTION_ID: u16 = 9924;
 
 /// Puts the titles of the popups this module shows, the small notices' and
 /// the week planner's in their captions.

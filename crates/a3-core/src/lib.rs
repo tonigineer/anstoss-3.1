@@ -28,6 +28,7 @@ pub mod squadlist;
 pub mod state;
 pub mod tactics;
 pub mod talk;
+pub mod training;
 pub mod value;
 pub mod words;
 pub mod world;

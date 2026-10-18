@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use bevy_math::{Rect, Vec2};
 use tracing::info;
 
-use a3_core::lineup::{self, FIELD, Lineup, PARTS};
+use a3_core::lineup::{self, FIELD, PARTS};
 use a3_core::marking;
 use a3_core::records::{Records, Team};
-use a3_core::season::{ClubState, Fitness, Rules};
+use a3_core::season::{ClubState, Rules};
 use a3_core::tactics::{MARK_PLAYMAKERS, MARK_STRIKERS};
 use a3_files::rch::{Dialog, Kind};
 
@@ -622,8 +622,8 @@ fn figures(club: &ClubState, team: Option<&Team>, cohesion: i32) -> [(String, i3
     let will = team.map_or(0, |t| i32::from(t.will()));
     let mood = team.map_or(0, |t| i32::from(t.mood()));
     let respect = team.map_or(0, |t| i32::from(t.respect()));
-    let condition = average(&club.lineup, &club.fitness, club.players.len(), lineup::condition);
-    let freshness = average(&club.lineup, &club.fitness, club.players.len(), lineup::freshness);
+    let condition = lineup::average(club, lineup::condition);
+    let freshness = lineup::average(club, lineup::freshness);
     let bar = |value: i32, most: i32| (value * BAR_HEIGHT / most).max(1);
     [
         ((will / 10).to_string(), bar(will, 200)),
@@ -633,20 +633,6 @@ fn figures(club: &ClubState, team: Option<&Team>, cohesion: i32) -> [(String, i3
         (format!("{:2.1}", cohesion as f32 / 10.0), bar(cohesion, 200)),
         ((respect / 10).to_string(), bar(respect, 200)),
     ]
-}
-
-/// The team's average of a player's figure: over the eleven and the bench,
-/// or the squad if neither has anyone, or 50 (`FUN_00676f16`).
-fn average(lineup: &Lineup, fitness: &[Fitness], squad: usize, of: fn(Fitness) -> i32) -> i32 {
-    let value = |p: usize| of(lineup::fitness_of(fitness, p));
-    let picked: Vec<i32> = lineup.squad().map(value).collect();
-    if !picked.is_empty() {
-        return picked.iter().sum::<i32>() / picked.len() as i32;
-    }
-    if squad == 0 {
-        return 50;
-    }
-    (0..squad).map(value).sum::<i32>() / squad as i32
 }
 
 fn show_figures(

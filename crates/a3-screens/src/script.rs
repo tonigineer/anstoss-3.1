@@ -1122,6 +1122,35 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_short_training_keeps_what_is_set() {
+        let game = game();
+        // On the week's last day: a template, a player in individual
+        // training, the camp; a past day refused; away and back.
+        let then = "now choose 9930 4\nuntil dialog 346\nnow choose 5035 4\nnow click 4427\n\
+                    now row 4427 3\nnow click 4425\nnow click 3831\nuntil dialog 380\nnow press 4731\n\
+                    until dialog 346\nnow choose 9930 0\nuntil dialog 147\nnow choose 9930 4\n\
+                    until dialog 346";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        assert!(runner.log.iter().any(|line| line == "screen 380"));
+        let dialog = &game.dialogs[&346];
+        let view = runner.host.view();
+        let text = |id: u16| view.text(crate::screens::control(dialog, id).unwrap()).to_owned();
+        assert_eq!(text(3831), "Spaziergang");
+        assert_eq!((text(3840), text(3842)), (String::new(), "Spiel".to_owned()));
+        let combo = crate::screens::control(dialog, 4427).unwrap();
+        assert_eq!(view.combo(combo).and_then(|c| c.selected), Some(3));
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        // "ES/Fähigkeiten VORB": training matches all week, from today.
+        let plan = records.extras[records.human_slot(0).unwrap()].plan();
+        assert_eq!((&plan[..3], &plan[18..21]), (&[26, 26, 26][..], &[33, 33, 33][..]));
+        let (template, player) = records.humans().next().unwrap().week(62 / 7);
+        assert!(template == 5 && player != 0);
+        assert_ne!(records.teams[84].training_flags() & a3_core::training::CAMP, 0);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_talk_is_booked_in_the_planner() {
         let game = game();
         // The keeper's menu on the first day of a week: the talk is its

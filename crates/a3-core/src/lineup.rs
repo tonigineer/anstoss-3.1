@@ -12,7 +12,7 @@ use std::io;
 
 use a3_files::exe::Exe;
 
-use crate::season::Fitness;
+use crate::season::{ClubState, Fitness};
 use crate::world::{GOALKEEPER, Player};
 
 pub const FIELD: usize = 11;
@@ -540,6 +540,21 @@ pub fn condition(fitness: Fitness) -> i32 {
 /// His freshness as a list shows it ("Fr", `FUN_006ff649`), 0 to 100.
 pub fn freshness(fitness: Fitness) -> i32 {
     (fitness.freshness.iter().sum::<i32>() / 100).clamp(0, 100)
+}
+
+/// The team's average of a player's figure: over the eleven and the bench,
+/// or the squad if neither has anyone, or 50 (`FUN_00676f16`).
+pub fn average(club: &ClubState, of: fn(Fitness) -> i32) -> i32 {
+    let value = |p: usize| of(fitness_of(&club.fitness, p));
+    let picked: Vec<i32> = club.lineup.squad().map(value).collect();
+    if !picked.is_empty() {
+        return picked.iter().sum::<i32>() / picked.len() as i32;
+    }
+    let squad = club.players.len();
+    if squad == 0 {
+        return 50;
+    }
+    (0..squad).map(value).sum::<i32>() / squad as i32
 }
 
 pub fn fitness_of(fitness: &[Fitness], player: usize) -> Fitness {
