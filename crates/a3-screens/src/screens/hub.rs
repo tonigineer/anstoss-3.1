@@ -1469,6 +1469,7 @@ pub(crate) fn filled_box(
         duty: None,
         filled: true,
         at: None,
+        area: None,
     }
 }
 

@@ -1,11 +1,13 @@
 //! A player's box on the pitch or the bench of the line-up, the game's
-//! `CMannStatic`, which draws itself.
+//! `CMannStatic`, which draws itself; or the action area a player of the
+//! eleven stands in, its `CGegenStatic`, which draws his box in it.
 
 use a3_files::rch::Control;
 use bevy_math::{Rect, Vec2};
 use image::{Rgba, RgbaImage, imageops};
 
-use crate::classic::{Paint, TEXT, centred};
+use crate::classic::{Paint, TEXT, centred, fill};
+use crate::pointer::{Geometry, Target};
 
 /// The box: blue with a player in it, yellow without.
 pub const FILLED: u16 = 1253;
@@ -21,6 +23,17 @@ const ICON_LEFT: i32 = 2;
 const ICON_STEP: i32 = 14;
 const ICON_TOP: i32 = 11;
 const INK: Rgba<u8> = Rgba([255, 255, 255, 255]);
+/// An action area shows the raster picture of the pitch (`BgRaster.jpg`),
+/// which lies 24 pixels down the dialog; eight blue handles, five pixels
+/// square, at its corners and the middles of its sides; and takes hold of
+/// them a little more widely, 11 pixels square (`CGegenStatic` paint
+/// `FUN_00626660`, `OnLButtonDown_004af588`).
+const RASTER: u16 = 2691;
+const RASTER_DOWN: f32 = 24.0;
+const HANDLE: i32 = 5;
+const HANDLE_INK: Rgba<u8> = Rgba([0, 0, 255, 255]);
+const HANDLE_REACH: i32 = 11;
+pub const HANDLES: usize = 8;
 
 /// What a box shows: the player's name — or, on an empty spot, the
 /// position's — the position he plays and his strength there, up to three
@@ -38,6 +51,8 @@ pub struct PlayerBox {
     /// Where the box stands, its top left, when the formation puts it
     /// elsewhere than the dialog does.
     pub at: Option<Vec2>,
+    /// The action area the box stands in and shows, if it is one.
+    pub area: Option<Rect>,
 }
 
 impl PlayerBox {
@@ -49,10 +64,65 @@ impl PlayerBox {
         }
     }
 
+    /// The handles of an action area, by their place round it from the
+    /// top left, row by row, the middle left out: what the pointer takes
+    /// hold of, and what shows.
+    pub fn handles(area: Rect, reach: i32) -> [Rect; HANDLES] {
+        let (x, y) = (area.min.x as i32, area.min.y as i32);
+        let (w, h) = (area.width() as i32, area.height() as i32);
+        let (half, end) = ((reach + 1) / 2 - 1, reach);
+        let across = [x, x + w / 2 - half, x + w - end];
+        let down = [y, y + h / 2 - half, y + h - end];
+        let mut rects = [Rect::default(); HANDLES];
+        let places = (0..3).flat_map(|row| (0..3).map(move |col| (row, col)));
+        for (i, (row, col)) in places.filter(|&p| p != (1, 1)).enumerate() {
+            let at = Vec2::new(across[col] as f32, down[row] as f32);
+            rects[i] = Rect::from_corners(at, at + Vec2::splat(reach as f32));
+        }
+        rects
+    }
+
+    pub(crate) fn targets(
+        &self,
+        index: usize,
+        control: &Control,
+        geometry: &dyn Geometry,
+        out: &mut Vec<(Target, Rect)>,
+    ) {
+        match self.area {
+            // An area answers only by its handles; elsewhere the pointer
+            // goes through to what lies under it, as the game passes it on
+            // to the dialog.
+            Some(area) => {
+                for (row, r) in Self::handles(area, HANDLE_REACH).into_iter().enumerate() {
+                    out.push((Target::Row { control: index, row }, geometry.map(r)));
+                }
+            }
+            // A player's box can be dragged to another place.
+            None => out.push((Target::Control(index), geometry.map(self.rect(control)))),
+        }
+    }
+
     /// As the game paints it: blue with his name on top, his position and
     /// strength in the bottom right and his abilities in the bottom left;
-    /// yellow with the position's name when the spot is empty.
+    /// yellow with the position's name when the spot is empty. An area
+    /// first, under the box.
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
+        if let (Some(area), Some(raster)) = (self.area, paint.image(RASTER)) {
+            let (x, y) = (area.min.x as u32, (area.min.y - RASTER_DOWN).max(0.0) as u32);
+            let (w, h) = (area.width() as u32, area.height() as u32);
+            let part = imageops::crop_imm(raster, x, y, w, h).to_image();
+            imageops::overlay(frame, &part, area.min.x as i64, area.min.y as i64);
+        }
+        self.draw_box(frame, paint);
+        if let Some(area) = self.area {
+            for r in Self::handles(area, HANDLE) {
+                fill(frame, r.min.x as i32, r.min.y as i32, HANDLE, HANDLE, HANDLE_INK);
+            }
+        }
+    }
+
+    fn draw_box(&self, frame: &mut RgbaImage, paint: &Paint) {
         let Some(font) = paint.font() else { return };
         let r = self.rect(paint.control);
         let (x, y) = (r.min.x as i32, r.min.y as i32);
@@ -90,7 +160,8 @@ impl PlayerBox {
 
 pub(crate) fn graphics(player: Option<&PlayerBox>) -> (Vec<u16>, bool) {
     let icons = player.iter().flat_map(|p| p.icons.iter().chain(&p.duty).copied());
-    ([FILLED, EMPTY].into_iter().chain(icons).collect(), false)
+    let raster = player.and_then(|p| p.area).map(|_| RASTER);
+    ([FILLED, EMPTY].into_iter().chain(icons).chain(raster).collect(), false)
 }
 
 /// The colour of a player's name on a position: white on his main one,

@@ -667,16 +667,16 @@ fn release(
         .any(|input| matches!(input.action, PointerAction::Release(PointerButton::Primary)));
     if released && let Some(from) = held.grip {
         let to = view.hovered.and_then(Grip::of);
-        // How far the pointer went, in whole classic pixels.
+        // Where the pointer took hold and how far it went, in whole
+        // classic pixels.
+        let whole = |v: Vec2| (v.x.round() as i16, v.y.round() as i16);
+        let at = held.grab.map_or((0, 0), |(grab, _)| whole(grab));
         let moved = match (view.dragging, held.grab) {
-            (Some(dragging), Some((grab, _))) => {
-                let d = (dragging.at - grab).round();
-                (d.x as i16, d.y as i16)
-            }
+            (Some(dragging), Some((grab, _))) => whole(dragging.at - grab),
             _ => (0, 0),
         };
         if to != Some(from) {
-            pending.0.push((Target::Drop { from, to, moved }, 1));
+            pending.0.push((Target::Drop { from, to, at, moved }, 1));
         }
     }
     if released && (held.repeat.is_some() || held.drag.is_some() || held.grip.is_some()) {

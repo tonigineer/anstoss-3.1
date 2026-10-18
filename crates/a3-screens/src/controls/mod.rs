@@ -266,10 +266,7 @@ impl ControlState {
             Self::Check(c) => c.targets(index, control, geometry, out),
             Self::Combo(c) => c.targets(index, control, geometry, out),
             Self::Menu(m) => m.targets(index, control, geometry, out),
-            // A player's box can be dragged to another place.
-            Self::Player(Some(player)) => {
-                out.push((Target::Control(index), geometry.map(player.rect(control))))
-            }
+            Self::Player(Some(player)) => player.targets(index, control, geometry, out),
             // The markers have no handler: a click on one does nothing.
             Self::Header(_)
             | Self::Bitmap(_)

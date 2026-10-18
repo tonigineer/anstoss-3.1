@@ -6,8 +6,11 @@
 //! and what they count for in goal, defence, midfield and attack. Dragging
 //! one of the eleven's defenders onto a striker of the opponent's, or a
 //! midfielder onto a midfielder, has him mark that player man for man; a
-//! line joins the two. A list names who goes forward at set pieces, two
-//! boxes whether the strikers and the playmakers are marked.
+//! line joins the two. "Aktionsbereich" shows where each of the eleven
+//! acts instead: his box on the whole pitch, his area round it, darkened;
+//! a click picks a player, whose area shows the raster with handles to
+//! drag. A list names who goes forward at set pieces, two boxes whether
+//! the strikers and the playmakers are marked.
 
 use std::collections::HashMap;
 
@@ -47,6 +50,10 @@ const THEIR_PARTS: [u16; PARTS] = [1734, 1735, 1736, 1737];
 /// "Manndeckung" or "Aktionsbereich".
 const MODE: u16 = 5618;
 const MAN_MARKING: usize = 0;
+const ACTION_AREAS: usize = 1;
+/// The control the screen adds for the chosen player's action area
+/// (`CGegenStatic`), over the boxes.
+const AREA: u16 = 9921;
 /// "Offensiv bei Standards".
 const SET_PIECE: u16 = 5619;
 /// "Stürmer manndecken", "Spielm. manndecken".
@@ -78,6 +85,22 @@ const BAR_WIDTH: i32 = 5;
 const OWN_INK: u32 = 0x0000c8;
 const THEIR_INK: u32 = 0xc8_0000;
 const LINE_INK: [u8; 3] = [0, 0, 0];
+/// The action areas (`FUN_004af3f3`, `OnMouseMove_004b0265`): the eleven
+/// stand on rows of five pixels for every three of a spot's y, from this;
+/// an area reaches from the middle of the box, its corners kept on the
+/// pitch; a handle moves a side only once dragged 30 pixels past the box,
+/// and at most 240 from it; the reaches are kept in bytes, 160 across and
+/// 240 along at most. The other players' areas are darkened.
+const AREA_ROW: i32 = 39;
+const RIGHT_MOST: i32 = 99 + 380;
+const BOTTOM_MOST: i32 = 400;
+const CORNER: i32 = 16;
+const POINTER_RIGHT_MOST: i32 = 99 + ACROSS;
+const PAST_THE_BOX: i32 = 30;
+const FARTHEST: i32 = 240;
+const MOST_ACROSS: u8 = 0xa0;
+const MOST_ALONG: u8 = 0xf0;
+const SHADE: u8 = 0x30;
 
 /// The table of rows (0x6ab8 / 0x6cac of the dialog): the y of a spot's y.
 fn rows(y: i16) -> i32 {
@@ -91,6 +114,26 @@ fn own_at((x, y): (i16, i16)) -> (i32, i32) {
 
 fn their_at((x, y): (i16, i16)) -> (i32, i32) {
     (ACROSS - i32::from(x) + LEFT, THEIR_ROW - rows(y) + TOP)
+}
+
+/// A box's top left with the action areas, from the pitch's.
+fn area_row(y: i16) -> i32 {
+    i32::from(y) * 5 / 3 + AREA_ROW
+}
+
+fn area_box((x, y): (i16, i16)) -> (i32, i32) {
+    (i32::from(x) + LEFT, area_row(y) + TOP)
+}
+
+/// An action area on the pitch, without the dialog's offset: left, top,
+/// right, bottom.
+fn area_rect([left, up, right, down]: marking::Area, (x, y): (i16, i16)) -> [i32; 4] {
+    let (cx, cy) = (i32::from(x) + BOX.0 / 2, area_row(y) + BOX.1 / 2);
+    let x0 = (cx - i32::from(left)).max(0);
+    let y0 = (cy - i32::from(up)).max(0);
+    let x1 = (cx + i32::from(right) - CORNER).min(RIGHT_MOST) + CORNER;
+    let y1 = (cy + i32::from(down) - CORNER).min(BOTTOM_MOST) + CORNER;
+    [x0, y0, x1, y1]
 }
 
 /// The bar takes the OK's place; the caption, the boxes and the bars'
@@ -107,6 +150,11 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
             control.kind = Kind::Paint;
         }
     }
+    let mut area = dialog.controls.iter().find(|c| c.id == Some(OWN_BOXES)).cloned();
+    if let Some(area) = area.as_mut() {
+        area.id = Some(AREA);
+    }
+    dialog.controls.extend(area);
     dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
     hub::add_bar(dialog, rules);
 }
@@ -121,6 +169,9 @@ pub struct Comparison {
     set_pieces: Vec<u16>,
     /// Whether the whistle asks.
     whistle: bool,
+    /// Man-marking or the action areas, and the player whose area shows.
+    mode: usize,
+    chosen: usize,
 }
 
 /// An eleven: its players' ids and the kinds of position under their
@@ -150,6 +201,7 @@ impl Screen for Comparison {
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         let (game, dialog) = (cx.game, cx.dialog);
         hub::open_bar(cx, view, COMPARISON_SYMBOL);
+        (self.mode, self.chosen) = (MAN_MARKING, 1);
         self.their_club = opponent(cx);
         self.theirs = self.their_club.as_ref().map(|club| Side::of(&game.rules.pitch, club));
         // The areas keep within their bounds as the screen opens.
@@ -216,9 +268,6 @@ impl Screen for Comparison {
         self.show_boxes(cx, view);
 
         let works = |target: Target| match target {
-            Target::Option { control: c, item } if dialog.controls[c].id == Some(MODE) => {
-                item == MAN_MARKING
-            }
             Target::Button(c) => dialog.controls[c].id != Some(SQUAD),
             _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
         };
@@ -238,18 +287,39 @@ impl Screen for Comparison {
         }
         let own_box =
             |c: usize| id(c).checked_sub(OWN_BOXES).map(usize::from).filter(|&i| i < FIELD);
-        match target {
-            // A box let go of where it was taken hold of, or anywhere: the
-            // marker marks whom it covers, or nobody.
-            Target::Drop { from: Grip::Control(c), moved, .. } => {
-                if let Some(place) = own_box(c) {
-                    self.drop(cx, view, place, moved);
-                }
+        let pressed = match target {
+            Target::Drop { from: Grip::Control(c), moved, .. } => own_box(c).map(|p| (p, moved)),
+            Target::Control(c) => own_box(c).map(|p| (p, (0, 0))),
+            _ => None,
+        };
+        let playing = |place: usize| own(cx).is_some_and(|c| c.lineup.field[place].is_some());
+        if let Some((place, moved)) = pressed.filter(|&(p, _)| playing(p)) {
+            // A press on one of the eleven picks him for the areas; with
+            // the areas, it shows his.
+            if place > 0 {
+                self.chosen = place;
             }
-            Target::Control(c) => {
-                if let Some(place) = own_box(c) {
-                    self.drop(cx, view, place, (0, 0));
-                }
+            if self.mode == ACTION_AREAS {
+                self.show_boxes(cx, view);
+            } else {
+                // A box let go of where it was taken hold of, or anywhere:
+                // the marker marks whom it covers, or nobody.
+                self.drop(cx, view, place, moved);
+            }
+            return Outcome::Stay;
+        }
+        match target {
+            Target::Option { control: c, item } if id(c) == MODE => {
+                self.mode = item;
+                self.show_boxes(cx, view);
+            }
+            // A handle of the area dragged: its sides follow the pointer.
+            Target::Drop { from: Grip::Row { control: c, row }, at, moved, .. }
+                if id(c) == AREA =>
+            {
+                let pointer = (i32::from(at.0 + moved.0), i32::from(at.1 + moved.1));
+                self.drag_handle(cx, row, pointer);
+                self.show_boxes(cx, view);
             }
             // A right click on one of the eleven: his info, paging through
             // the eleven.
@@ -292,10 +362,12 @@ impl Screen for Comparison {
 }
 
 impl Comparison {
-    /// Both elevens in their boxes, and the lines of the pairs that stand.
+    /// Both elevens in their boxes, and the lines of the pairs that stand;
+    /// or the eleven on the whole pitch with their action areas.
     fn show_boxes(&mut self, cx: &mut Cx, view: &mut View) {
         let (game, dialog) = (cx.game, cx.dialog);
         let pitch = &game.rules.pitch;
+        let areas = self.mode == ACTION_AREAS;
         let Some(own) = own(cx) else { return };
         let ours = Side::of(pitch, own);
         // Each box gets the duty its place has in the own eleven — the
@@ -327,20 +399,95 @@ impl Comparison {
                 })
                 .collect()
         };
-        for (i, shown) in boxes(own, own_at).into_iter().enumerate() {
+        let own_boxes = boxes(own, if areas { area_box } else { own_at });
+        for (i, shown) in own_boxes.iter().enumerate() {
             if let Some(c) = control(dialog, OWN_BOXES + i as u16) {
-                view.set_player(c, shown);
+                view.set_player(c, shown.clone());
             }
         }
         let their_boxes = self.their_club.as_ref().map(|club| boxes(club, their_at));
         for i in 0..FIELD {
             let Some(c) = control(dialog, THEIR_BOXES + i as u16) else { continue };
-            view.controls[c].hidden = their_boxes.is_none();
+            view.controls[c].hidden = areas || their_boxes.is_none();
             if let Some(shown) = their_boxes.as_ref().map(|b| b[i].clone()) {
                 view.set_player(c, shown);
             }
         }
-        self.show_lines(cx, view, &ours);
+        // The chosen player's area over the boxes, the others' darkened
+        // under them (`FUN_004ae502`, `FUN_004ae3f0`).
+        let on_pitch = |[x0, y0, x1, y1]: [i32; 4]| [x0 + LEFT, y0 + TOP, x1 + LEFT, y1 + TOP];
+        let rect = |i: usize| on_pitch(area_rect(own.areas[i], own.lineup.spots[i]));
+        view.shades = if areas {
+            let others = (1..FIELD).filter(|&i| i != self.chosen);
+            others.map(rect).map(|[x0, y0, x1, y1]| ([x0, y0, x1 - x0, y1 - y0], SHADE)).collect()
+        } else {
+            Vec::new()
+        };
+        if let Some(c) = control(dialog, AREA) {
+            view.controls[c].hidden = !areas;
+            if areas && let Some(shown) = own_boxes.get(self.chosen) {
+                let [x0, y0, x1, y1] = rect(self.chosen).map(|v| v as f32);
+                let area = Some(Rect::new(x0, y0, x1, y1));
+                view.set_player(c, PlayerBox { area, ..shown.clone() });
+            }
+        }
+        if areas {
+            view.lines.clear();
+            view.lines_on_top = false;
+        } else {
+            self.show_lines(cx, view, &ours);
+        }
+    }
+
+    /// A handle of the chosen player's area dragged to where the pointer
+    /// is: each of its sides there, if past the box, and no farther than
+    /// the game lets it (`OnMouseMove_004b0265`).
+    fn drag_handle(&self, cx: &mut Cx, handle: usize, (x, y): (i32, i32)) {
+        let Some(own) = own(cx) else { return };
+        let place = self.chosen;
+        let spot = own.lineup.spots[place];
+        let [mut left, mut top, mut right, mut bottom] = area_rect(own.areas[place], spot);
+        // The handles from the top left, row by row, the middle left out.
+        let (row, col) = match handle {
+            h @ 0..=3 => (h / 3, h % 3),
+            h => ((h + 1) / 3, (h + 1) % 3),
+        };
+        let (x, y) = ((x - LEFT).min(POINTER_RIGHT_MOST), y - TOP);
+        let (bx, by) = (i32::from(spot.0), area_row(spot.1));
+        if col == 0 {
+            if x <= bx - PAST_THE_BOX {
+                left = x;
+            }
+            left = left.max(bx - FARTHEST);
+        }
+        if row == 0 {
+            if y <= by - PAST_THE_BOX {
+                top = y;
+            }
+            top = top.max(by - FARTHEST);
+        }
+        if col == 2 {
+            if x >= bx + PAST_THE_BOX + BOX.0 {
+                right = x;
+            }
+            right = right.min(bx + FARTHEST);
+        }
+        if row == 2 {
+            if y >= by + PAST_THE_BOX + BOX.1 {
+                bottom = y;
+            }
+            bottom = bottom.min(by + FARTHEST);
+        }
+        // Kept in bytes, as the game keeps them.
+        let (cx_, cy) = (bx + BOX.0 / 2, by + BOX.1 / 2);
+        let byte = |v: i32, most: u8| (v as u8).min(most);
+        let area = [
+            byte(cx_ - left, MOST_ACROSS),
+            byte(cy - top, MOST_ALONG),
+            byte(right - cx_, MOST_ACROSS),
+            byte(bottom - cy, MOST_ALONG),
+        ];
+        change(cx, |club| club.areas[place] = area);
     }
 
     /// The lines from each marker's box to the box of whom he marks; the

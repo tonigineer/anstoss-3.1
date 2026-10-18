@@ -389,7 +389,11 @@ impl<'a> Runner<'a> {
                 return Ok(());
             }
             Action::Wait => return self.wait(shown),
-            Action::DragAt(from, to) => self.drag_at(shown, from, to)?,
+            // A drag from where nothing can be taken hold of does nothing.
+            Action::DragAt(from, to) => match self.drag_at(shown, from, to) {
+                Some(target) => target,
+                None => return Ok(()),
+            },
             Action::ClickAt(at) => self.click_at(shown, at)?,
             _ => match target_of(controls, named(shown), action)? {
                 // The pointer goes from the middle of one to the other's.
@@ -400,8 +404,10 @@ impl<'a> Runner<'a> {
                         let rect = rects.into_iter().find(|&(t, _)| Grip::of(t) == Some(grip));
                         rect.map_or(Vec2::ZERO, |(_, r)| r.center())
                     };
-                    let d = to.map_or(Vec2::ZERO, |to| middle(to) - middle(from));
-                    Target::Drop { from, to, moved: (d.x as i16, d.y as i16) }
+                    let start = middle(from);
+                    let d = to.map_or(Vec2::ZERO, |to| middle(to) - start);
+                    let (at, moved) = ((start.x as i16, start.y as i16), (d.x as i16, d.y as i16));
+                    Target::Drop { from, to, at, moved }
                 }
                 target => target,
             },
@@ -412,18 +418,18 @@ impl<'a> Runner<'a> {
     }
 
     /// What a drag from one point of the dialog `shown` to another takes
-    /// hold of and lets go of on, and how far it goes.
-    fn drag_at(&self, shown: u16, from: (i16, i16), to: (i16, i16)) -> Result<Target, Error> {
+    /// hold of and lets go of on, and how far it goes; nothing if there is
+    /// nothing to take hold of.
+    fn drag_at(&self, shown: u16, from: (i16, i16), to: (i16, i16)) -> Option<Target> {
         let controls = &self.game.dialogs[&shown];
         let rects = crate::pointer::targets(controls, self.host.view(), &Pixels);
         let under = |(x, y): (i16, i16)| {
             let at = Vec2::new(f32::from(x), f32::from(y));
             rects.iter().rev().filter(|(_, r)| r.contains(at)).find_map(|&(t, _)| Grip::of(t))
         };
-        let grip =
-            under(from).ok_or_else(|| Error::Unsupported(named(shown), format!("{from:?}")))?;
+        let grip = under(from)?;
         let moved = (to.0 - from.0, to.1 - from.1);
-        Ok(Target::Drop { from: grip, to: under(to).filter(|&g| g != grip), moved })
+        Some(Target::Drop { from: grip, to: under(to).filter(|&g| g != grip), at: from, moved })
     }
 
     /// What a click at a point of the dialog `shown` acts on: the topmost
@@ -491,7 +497,12 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::Slide(id, value) => Target::SliderAt { control: find(id)?, value },
         Action::Drag(from, to) => {
             let grip = |spot: Spot| grip(controls, dialog, spot);
-            Target::Drop { from: grip(from)?, to: to.map(grip).transpose()?, moved: (0, 0) }
+            Target::Drop {
+                from: grip(from)?,
+                to: to.map(grip).transpose()?,
+                at: (0, 0),
+                moved: (0, 0),
+            }
         }
         Action::RightClick(spot) => Target::Menu(grip(controls, dialog, spot)?),
         Action::Type(id, _) => Target::Edit(find(id)?),
@@ -650,7 +661,7 @@ mod tests {
             season.clubs[&season.manager().unwrap().club.unwrap()].lineup.clone()
         };
         let drop = |runner: &mut Runner, from: Grip, to: Option<Grip>| {
-            runner.host.input(&game, Target::Drop { from, to, moved: (0, 0) }, false);
+            runner.host.input(&game, Target::Drop { from, to, at: (0, 0), moved: (0, 0) }, false);
         };
         let before = lineup(&runner);
         // Two boxes on the pitch swap their players …
@@ -1087,6 +1098,26 @@ mod tests {
         assert_eq!(team.marked()[..3], [1616, 0, 1617]);
         assert_eq!(team.set_piece(), 3262);
         assert_eq!(team.passing(), 0x609b & !0x4000);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_action_areas_follow_their_handles() {
+        let game = game();
+        // As the original took them: the areas, Skov picked, his bottom
+        // right handle out, his top handle up; away and back.
+        let then = "now choose 9930 1\nuntil dialog 78\nnow choose 5618 1\nnow click at 93 248\n\
+                    now drag at 166 284 to 200 320\nnow drag at 107 211 to 107 150\n\
+                    now choose 9930 0\nuntil dialog 147\nnow choose 9930 1\nuntil dialog 78";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        let view = runner.host.view();
+        let area = crate::screens::control(&game.dialogs[&78], 9921).unwrap();
+        // The man-marking again, as every opening.
+        assert!(view.controls[area].hidden && view.shades.is_empty());
+        let state = runner.host.state();
+        let team = &state.records.as_ref().unwrap().teams[84];
+        assert_eq!(team.areas()[5], [79, 98, 107, 72]);
+        assert_eq!(team.areas()[1], [79, 42, 79, 42]);
     }
 
     #[test]

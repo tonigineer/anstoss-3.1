@@ -41,6 +41,9 @@ pub struct View {
     /// anew.
     pub lines: Vec<([i32; 4], [u8; 3])>,
     pub lines_on_top: bool,
+    /// Rectangles the screen darkens on the dialog's picture, under its
+    /// controls: x, y, width and height, and by how much of 255.
+    pub shades: Vec<([i32; 4], u8)>,
 }
 
 /// What the pointer drags, and where it is, in classic pixels.
@@ -98,6 +101,7 @@ impl View {
             dragging: None,
             lines: Vec::new(),
             lines_on_top: false,
+            shades: Vec::new(),
         }
     }
 

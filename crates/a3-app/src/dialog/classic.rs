@@ -66,8 +66,10 @@ pub(super) fn redraw(
     mut materials: ResMut<Assets<SharpMaterial>>,
 ) {
     let Some(mut classic) = classic.filter(|c| c.id == view.id) else { return };
-    if view.is_changed() {
-        classic.classic.update(&game, &view);
+    if view.is_changed()
+        && let Some(dialog) = game.dialogs.get(&view.id)
+    {
+        classic.classic.update_with(&game, dialog, &view);
     }
     let step = (frames.phase() * BLEND_STEPS) as u32;
     let blended = frames.is_changed() && step != classic.step;

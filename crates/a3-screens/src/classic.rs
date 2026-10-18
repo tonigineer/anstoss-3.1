@@ -86,17 +86,7 @@ impl Classic {
     /// it with its picture on top.
     pub fn new(game: &Game, dialog: &Dialog, view: &View, background: RgbaImage) -> Self {
         let fonts = game.fonts();
-        let mut images = HashMap::new();
-        for (control, shown) in dialog.controls.iter().zip(&view.controls) {
-            let (ids, sprite) = shown.state.graphics(control);
-            for id in ids {
-                let picture = if sprite { game.sprite(id) } else { game.graphic(id) };
-                match picture {
-                    Ok(picture) => _ = images.insert(id, picture),
-                    Err(err) => warn!("graphic {id}: {err}"),
-                }
-            }
-        }
+        let images = HashMap::new();
         let mut widgets = HashMap::new();
         let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS);
         let lists = list::HANDLES.into_iter().chain(list::TRACKS);
@@ -114,8 +104,27 @@ impl Classic {
             }
         }
         let mut classic = Self { background, fonts, images, widgets, bitmaps: HashMap::new() };
-        classic.update(game, view);
+        classic.update_with(game, dialog, view);
         classic
+    }
+
+    /// Loads what the controls and the bitmaps show that has not been
+    /// loaded yet.
+    pub fn update_with(&mut self, game: &Game, dialog: &Dialog, view: &View) {
+        for (control, shown) in dialog.controls.iter().zip(&view.controls) {
+            let (ids, sprite) = shown.state.graphics(control);
+            for id in ids {
+                if self.images.contains_key(&id) {
+                    continue;
+                }
+                let picture = if sprite { game.sprite(id) } else { game.graphic(id) };
+                match picture {
+                    Ok(picture) => _ = self.images.insert(id, picture),
+                    Err(err) => warn!("graphic {id}: {err}"),
+                }
+            }
+        }
+        self.update(game, view);
     }
 
     /// Loads what the bitmaps show that has not been loaded yet.
@@ -142,6 +151,9 @@ impl Classic {
                 line(frame, (x0, y0), (x1, y1), Rgba([r, g, b, 255]));
             }
         };
+        for &([x, y, w, h], alpha) in &view.shades {
+            darken(&mut frame, x, y, w, h, alpha);
+        }
         if !view.lines_on_top {
             lines(&mut frame);
         }
@@ -308,6 +320,22 @@ pub(crate) fn line(frame: &mut RgbaImage, from: (i32, i32), to: (i32, i32), colo
         }
         let across = num.div_euclid(den);
         if flat { put(step, across) } else { put(across, step) }
+    }
+}
+
+/// A rectangle darkened, as black laid over it with an alpha.
+fn darken(frame: &mut RgbaImage, x: i32, y: i32, w: i32, h: i32, alpha: u8) {
+    let keep = 255 - u32::from(alpha);
+    let (x0, y0) = (x.max(0) as u32, y.max(0) as u32);
+    let x1 = (x + w).clamp(0, frame.width() as i32) as u32;
+    let y1 = (y + h).clamp(0, frame.height() as i32) as u32;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let p = frame.get_pixel_mut(px, py);
+            for c in &mut p.0[..3] {
+                *c = (u32::from(*c) * keep / 255) as u8;
+            }
+        }
     }
 }
 
