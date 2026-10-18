@@ -8,6 +8,9 @@
 //! club knows them. The same as pictures (dialog 513, `CTrainingKurzGrafik`),
 //! which "Grafik" and "Text" switch between.
 
+pub mod individual;
+pub mod long;
+
 use std::collections::HashMap;
 
 use bevy_math::Rect;
@@ -18,7 +21,7 @@ use a3_core::records::{Records, Team};
 use a3_core::season::{ClubState, Rules};
 use a3_core::training::{
     self, ANTI_OFFSIDE, CAMP, CORNERS, DAYS, FREE_KICKS, MEETING, PRESSING, SESSIONS, SKILLS,
-    THROW_INS, TRICKS, Training, UNKNOWN,
+    THROW_INS, TRICKS, Training, UNKNOWN, Week,
 };
 use a3_files::rch::{Align, Control, Dialog, Kind, PLAIN_FONT};
 
@@ -261,9 +264,9 @@ impl Screen for ShortTraining {
                     .and_then(|s| s.manager())
                     .and_then(|m| m.templates.get(item))
                     .map(|t| t.week);
-                change_week(cx, week, |choice| choice.0 = item as u16 + 1);
+                change_week(cx, week, |w| w.template = item as i16 + 1);
                 if let Some(sessions) = template {
-                    change(cx, |t| t.apply(&sessions, day));
+                    change(cx, |t| t.apply(0, &sessions, day));
                 }
                 view.set_chosen(c, NONE);
                 self.show_week(cx, view);
@@ -271,7 +274,7 @@ impl Screen for ShortTraining {
             Target::Row { control: c, .. } if id(c) == INDIVIDUAL => {
                 let row = view.combo(c).and_then(|combo| combo.selected).unwrap_or(0);
                 if let Some(&player) = row.checked_sub(1).and_then(|r| self.players.get(r)) {
-                    change_week(cx, today(cx) / DAYS, |choice| choice.1 = player);
+                    change_week(cx, today(cx) / DAYS, |w| w.player = player);
                 }
             }
             _ => {}
@@ -382,7 +385,7 @@ impl ShortTraining {
             .as_ref()
             .and_then(|s| s.manager())
             .and_then(|m| m.weeks.get(today(cx) / DAYS))
-            .map_or(0, |&(_, player)| player);
+            .map_or(0, |w| w.player);
         let selected = self.players.iter().position(|&id| id != 0 && id == chosen);
         if let Some(combo) = view.combo_mut(c) {
             combo.items = items;
@@ -624,7 +627,7 @@ fn keep_boxes(cx: &mut Cx, view: &View) {
 
 /// Changes the club's training, and its records with it: the plan in its
 /// extra data, the flags in its team.
-fn change(cx: &mut Cx, change: impl FnOnce(&mut Training)) {
+pub(super) fn change(cx: &mut Cx, change: impl FnOnce(&mut Training)) {
     let game = cx.game;
     let state = &mut *cx.state;
     let Some(season) = state.season.as_mut() else { return };
@@ -644,22 +647,21 @@ fn change(cx: &mut Cx, change: impl FnOnce(&mut Training)) {
     }
 }
 
-/// Changes what the manager chose for a week — the template, the player in
-/// individual training —, and his record with it.
-fn change_week(cx: &mut Cx, week: usize, change: impl FnOnce(&mut (u16, u16))) {
+/// Changes what the manager planned for a week of the season — the
+/// template, the player in individual training … —, and his record with
+/// it; the season has fifty.
+pub(super) fn change_week(cx: &mut Cx, week: usize, change: impl FnOnce(&mut Week)) {
     let state = &mut *cx.state;
     let Some(season) = state.season.as_mut() else { return };
     let current = season.current;
     let Some(manager) = season.managers.get_mut(current) else { return };
-    if manager.weeks.len() <= week {
-        manager.weeks.resize(week + 1, (0, 0));
-    }
-    change(&mut manager.weeks[week]);
-    let choice = manager.weeks[week];
+    let Some(entry) = manager.weeks.get_mut(week) else { return };
+    change(entry);
+    let entry = entry.clone();
     if let Some(records) = state.records.as_mut()
         && let Some(slot) = records.human_slot(current)
         && let Some(record) = records.managers.get_mut(slot)
     {
-        record.set_week(week, choice);
+        record.set_week(week, &entry);
     }
 }

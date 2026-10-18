@@ -115,9 +115,11 @@ pub enum Kind {
         columns: Vec<Column>,
     },
     /// A button that steps through states, a picture each, at every click:
-    /// the game's `CMyPushButton` with states (its kind 3).
+    /// the game's `CMyPushButton` with states (its kind 3); whether its
+    /// pictures' black is see-through (style bit 0x8).
     States {
         pictures: Vec<u16>,
+        clear: bool,
     },
     /// A button with a text on its picture: the game's `CMyPushButton`.
     PushButton {
@@ -140,6 +142,12 @@ pub enum Kind {
     },
     /// A strip the screen paints bars into, the game's `CMyPaint`.
     Paint,
+    /// An upright slider, the game's `CMySchieber` (its kind 12 with its
+    /// second word 0; lying ones are not read yet): the picture of its
+    /// handle.
+    Fader {
+        handle: u16,
+    },
     Other,
 }
 
@@ -303,6 +311,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         3 => match u16s(8) {
             Some(count @ 1..=MOST_STATES) => Kind::States {
                 pictures: (0..usize::from(count)).filter_map(|i| u16s(9 + 3 * i)).collect(),
+                clear: u16s(3).unwrap_or(0) & CLEAR_STYLE != 0,
             },
             _ => Kind::Other,
         },
@@ -334,6 +343,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         13 => Kind::Check,
         14 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
         15 => Kind::Paint,
+        12 if u16s(1) == Some(0) => Kind::Fader { handle: u16s(0)? },
         _ => Kind::Other,
     };
     let align = match style & 3 {
@@ -379,6 +389,8 @@ pub struct Column {
 const LIST_COLUMNS: (usize, usize) = (12, 15);
 const HEADER_COLUMNS: (usize, usize) = (3, 4);
 const COMBO_COLUMNS: (usize, usize) = (12, 16);
+/// A stepping button whose pictures' black is see-through.
+const CLEAR_STYLE: u16 = 0x8;
 /// The most states a stepping button has.
 const MOST_STATES: u16 = 8;
 const MOST_COLUMNS: u16 = 50;

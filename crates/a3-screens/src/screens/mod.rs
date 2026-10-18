@@ -132,6 +132,9 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(comparison::Comparison::default()),
         Box::new(training::ShortTraining::default()),
         Box::new(training::UnitChoice),
+        Box::new(training::long::LongTraining::default()),
+        Box::new(training::individual::IndividualTraining::default()),
+        Box::new(training::individual::AbilityChoice::default()),
     ]
 }
 
@@ -153,6 +156,8 @@ pub fn compose(game: &mut Game) {
     tactics::compose(&mut game.dialogs, &game.data.rules);
     comparison::compose(&mut game.dialogs, &game.data.rules);
     training::compose(&mut game.dialogs, &game.data.rules);
+    training::long::compose(&mut game.dialogs, &game.data.rules);
+    training::individual::compose(&mut game.dialogs, &game.data.rules);
     corner_buttons(&mut game.dialogs);
 }
 

@@ -53,7 +53,7 @@ impl ButtonState {
             &Kind::Button { normal, hover } => (normal, hover, false),
             &Kind::PushButton { normal, hover } => (normal, hover, true),
             // Its state's picture, which does not light up.
-            Kind::States { pictures } if !pictures.is_empty() => {
+            Kind::States { pictures, .. } if !pictures.is_empty() => {
                 let picture = pictures[self.step.min(pictures.len() - 1)];
                 (picture, picture, false)
             }
@@ -90,10 +90,17 @@ impl ButtonState {
             font.draw(frame, left, top, &label.text, label.ink, false);
         }
         if let (true, Some(font)) = (labelled, paint.font()) {
-            let text = &paint.control.text;
-            let left = centred(r.min.x as i32, r.width() as i32, font.width(text, false) as i32);
-            let top = r.min.y as i32 + (r.height() as i32 - font.height() as i32) / 2;
-            font.draw(frame, left, top, text, if pointed { TEXT_HOVER } else { TEXT }, false);
+            // The dialog file breaks a label into lines with "\n": a block
+            // in the middle, each line centred.
+            let lines: Vec<&str> = paint.control.text.split("\\n").collect();
+            let height = font.height() as i32;
+            let top = r.min.y as i32 + (r.height() as i32 - lines.len() as i32 * height) / 2;
+            for (i, line) in lines.iter().enumerate() {
+                let width = font.width(line, false) as i32;
+                let left = centred(r.min.x as i32, r.width() as i32, width);
+                let ink = if pointed { TEXT_HOVER } else { TEXT };
+                font.draw(frame, left, top + i as i32 * height, line, ink, false);
+            }
         }
     }
 }
@@ -108,8 +115,9 @@ fn file_graphics(control: &Control) -> (Vec<u16>, bool) {
     match &control.kind {
         &Kind::Button { normal, hover } => (vec![normal, hover], true),
         &Kind::PushButton { normal, hover } => (vec![normal, hover], false),
-        // A stepping button's pictures keep their black (`FUN_007aac2f`).
-        Kind::States { pictures } => (pictures.clone(), false),
+        // A stepping button's pictures keep their black, unless its style
+        // makes it see-through (`FUN_007aac2f`).
+        Kind::States { pictures, clear } => (pictures.clone(), *clear),
         _ => (Vec::new(), true),
     }
 }

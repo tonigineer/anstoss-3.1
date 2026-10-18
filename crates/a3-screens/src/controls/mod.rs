@@ -9,6 +9,7 @@ pub mod button;
 pub mod check;
 pub mod combo;
 pub mod edit;
+pub mod fader;
 pub mod header;
 pub mod list;
 pub mod marker;
@@ -64,6 +65,7 @@ pub enum ControlState {
     Anim(AnimState),
     Spin(Value),
     Slider(Value),
+    Fader(Value),
     Edit(EditState),
     Options(OptionsState),
     /// What a player's box shows, once the flow has filled it.
@@ -116,6 +118,7 @@ impl ControlView {
             Kind::Anim => ControlState::Anim(AnimState::default()),
             Kind::Spin { .. } => ControlState::Spin(Value::default()),
             Kind::Slider { .. } => ControlState::Slider(Value::default()),
+            Kind::Fader { .. } => ControlState::Fader(Value::default()),
             Kind::Edit { .. } => ControlState::Edit(EditState { text: text() }),
             Kind::Options { items, style, .. } => {
                 ControlState::Options(OptionsState::new(items, *style))
@@ -175,14 +178,14 @@ impl ControlState {
     /// A spinner's or slider's value.
     pub fn as_value(&self) -> Option<&Value> {
         match self {
-            Self::Spin(value) | Self::Slider(value) => Some(value),
+            Self::Spin(value) | Self::Slider(value) | Self::Fader(value) => Some(value),
             _ => None,
         }
     }
 
     pub fn as_value_mut(&mut self) -> Option<&mut Value> {
         match self {
-            Self::Spin(value) | Self::Slider(value) => Some(value),
+            Self::Spin(value) | Self::Slider(value) | Self::Fader(value) => Some(value),
             _ => None,
         }
     }
@@ -217,6 +220,7 @@ impl ControlState {
             Self::Player(player) => player_box::graphics(player.as_ref()),
             Self::Marker(marker) => (marker.iter().map(|m| m.image).collect(), true),
             Self::List(list) => list.graphics(),
+            Self::Fader(_) => fader::graphics(control),
             _ => (Vec::new(), false),
         }
     }
@@ -231,6 +235,7 @@ impl ControlState {
             Self::Bitmap(b) => b.draw(frame, paint),
             Self::Anim(a) => a.draw(frame, paint),
             Self::Slider(v) => slider::draw(v, frame, paint),
+            Self::Fader(v) => fader::draw(v, frame, paint),
             Self::Spin(_) => spin::draw(frame, paint),
             Self::Edit(e) => e.draw(frame, paint),
             Self::Options(o) => o.draw(frame, paint),
@@ -260,6 +265,7 @@ impl ControlState {
             Self::Anim(a) => a.targets(index, control, geometry, out),
             Self::Spin(_) => spin::targets(index, control, geometry, out),
             Self::Slider(_) => slider::targets(index, control, geometry, out),
+            Self::Fader(v) => fader::targets(v, index, control, geometry, out),
             Self::Edit(_) => out.push((Target::Edit(index), geometry.rect(control))),
             Self::Options(o) => o.targets(index, control, geometry, out),
             Self::Bar(b) => b.targets(index, control, geometry, out),

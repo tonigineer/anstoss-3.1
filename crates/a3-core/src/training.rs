@@ -21,6 +21,12 @@ pub const FREE: u8 = 11;
 /// The units, 0 to 38; the tables have a fortieth, empty.
 const UNIT_ENTRIES: usize = 40;
 
+/// The bit of the team's passing word that keeps its training secret
+/// (team +0xd2): its opponents learn nothing of it.
+pub const SECRET: u16 = 0x8000;
+/// A week's template number above this is a training camp's own.
+pub const CAMP_WEEK: i16 = 100;
+
 /// The team record's flags for the next match: a training camp, a team
 /// meeting.
 pub const CAMP: u32 = 0x800;
@@ -59,6 +65,18 @@ const CATEGORY_COUNTS_AT: u32 = 0x88b6a0;
 const CATEGORY_PLACES_AT: u32 = 0x88b6bc;
 const CATEGORY_UNITS_AT: u32 = 0x88b818;
 const CATEGORIES: usize = 7;
+/// The rules for the week's player in individual training, by their texts.
+const RULE_TEXTS_AT: u32 = 0x88b53c;
+const RULES: usize = 6;
+/// The co-trainer's odds of the manager's templates, a row of fourteen by
+/// the kind of training he plans: cumulative, out of 100.
+const CO_ODDS_AT: u32 = 0x8ab1f0;
+const CO_KINDS: usize = 7;
+const CO_TEMPLATES: usize = 14;
+/// Above the odds the co-trainer takes this template.
+const CO_ELSE: usize = 1;
+const CO_DRAW: u32 = 110;
+const CO_ODDS_TOTAL: u32 = 100;
 const CATEGORY_SIZE: u32 = 0x50;
 const CATEGORY_ENTRY: u32 = 8;
 
@@ -94,12 +112,24 @@ impl Training {
         self.plan[day * SESSIONS + session] = unit;
     }
 
-    /// A template's week into this week, from today on; the days gone
-    /// stay (`FUN_0074cb28`).
-    pub fn apply(&mut self, week: &[u8; WEEK], today: usize) {
-        for day in today..DAYS {
-            let at = day * SESSIONS;
-            self.plan[at..at + SESSIONS].copy_from_slice(&week[at..at + SESSIONS]);
+    /// A template's week into a week of the plan: into this one from
+    /// today on, the days gone staying; into a later one whole
+    /// (`FUN_0074cb28`).
+    pub fn apply(&mut self, plan_week: usize, week: &[u8; WEEK], today: usize) {
+        let first = if plan_week == 0 { today } else { 0 };
+        for day in first..DAYS {
+            let at = (plan_week * DAYS + day) * SESSIONS;
+            let from = day * SESSIONS;
+            self.plan[at..at + SESSIONS].copy_from_slice(&week[from..from + SESSIONS]);
+        }
+    }
+
+    /// The week as it starts: nothing planned, then the week's template
+    /// if one was chosen (`FUN_0074e870`).
+    pub fn start_week(&mut self, week: Option<&[u8; WEEK]>) {
+        self.plan[..WEEK].fill(FREE);
+        if let Some(week) = week {
+            self.apply(0, week, 0);
         }
     }
 
@@ -116,6 +146,32 @@ impl Training {
     pub fn set(&mut self, flag: u32, on: bool) {
         self.flags = if on { self.flags | flag } else { self.flags & !flag };
     }
+}
+
+/// What a manager planned for a week of the season (the manager object's
+/// +0x720 + week × 0x3a): whether it is over, what kind of week it is,
+/// the team's condition and freshness, the template (1 more than its
+/// number, 0 none, above [`CAMP_WEEK`] a camp's), the player in individual
+/// training, and the names they had when the week ended.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Week {
+    pub done: bool,
+    pub kind: u8,
+    pub condition: u8,
+    pub freshness: u8,
+    pub template: i16,
+    pub player: u16,
+    pub template_name: String,
+    pub player_name: String,
+}
+
+/// What the co-trainer trains when he plans a week (the club's extra data
+/// +0x2826): on how many days, how many units, and how many of each focus.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct CoTraining {
+    pub days: i16,
+    pub units: i16,
+    pub focus: [u8; 9],
 }
 
 /// A week template of the manager: its name and its sessions.
@@ -163,6 +219,9 @@ pub struct TrainingTables {
     knowledge: Vec<u8>,
     /// The unit popup's lists.
     pub categories: Vec<Category>,
+    /// The rules for the week's player in individual training.
+    pub rule_texts: Vec<u16>,
+    co_odds: Vec<u8>,
 }
 
 /// A list of the unit popup: where it starts in the popup, and its units
@@ -199,6 +258,8 @@ impl TrainingTables {
             balls: u16s(BALLS_AT, WORDS)?,
             knowledge: exe.bytes(KNOWLEDGE_AT, (MOST_LEVEL + 1) * KNOWLEDGE_ROW)?.to_vec(),
             categories,
+            rule_texts: u16s(RULE_TEXTS_AT, RULES)?,
+            co_odds: exe.bytes(CO_ODDS_AT, CO_KINDS * CO_TEMPLATES)?.to_vec(),
         })
     }
 
@@ -228,6 +289,22 @@ impl TrainingTables {
         }
     }
 
+    /// The template a co-trainer of a kind picks for a week, by a draw
+    /// below 110 (`FUN_0074ccbd`).
+    pub fn co_template(&self, kind: u8, draw: u32) -> usize {
+        if draw >= CO_ODDS_TOTAL {
+            return CO_ELSE;
+        }
+        let row = usize::from(kind) * CO_TEMPLATES;
+        let odds = self.co_odds.get(row..row + CO_TEMPLATES).unwrap_or_default();
+        odds.iter().take_while(|&&limit| u32::from(limit) <= draw).count()
+    }
+
+    /// What a co-trainer's template draw is out of.
+    pub fn co_draw(&self) -> u32 {
+        CO_DRAW
+    }
+
     /// Whether a club knows an opponent's skill, at its level and by the
     /// opponent's luck number (`FUN_0059957a`).
     pub fn known(&self, level: usize, luck: usize, skill: usize) -> bool {
@@ -244,7 +321,7 @@ mod tests {
     fn a_template_leaves_the_days_gone() {
         let mut training = Training::default();
         training.set_unit(0, 0, 26);
-        training.apply(&[16; WEEK], 1);
+        training.apply(0, &[16; WEEK], 1);
         assert_eq!(training.unit(0, 0), 26);
         assert_eq!(training.unit(0, 1), FREE);
         assert_eq!((training.unit(1, 0), training.unit(6, 2)), (16, 16));

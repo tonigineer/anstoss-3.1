@@ -16,9 +16,9 @@ use crate::random::Random;
 use crate::records::{self, Globals, Records, Team};
 use crate::season::{ClubState, Fitness, Manager, Season, Status};
 use crate::tactics::{FOUL, PICKS, Pick, Tactics};
-use crate::training::{Template, Training};
+use crate::training::{CoTraining, Template, Training};
 use crate::world::Player;
-use crate::{autolineup, cohesion, duties};
+use crate::{autolineup, cohesion, duties, individual};
 
 /// A manager under contract (`records::Manager::status`).
 const HIRED: u8 = 3;
@@ -53,6 +53,8 @@ pub fn season(records: &Records, data: &Data, random: Random) -> Season {
                     .collect(),
                 weeks: (0..records::WEEKS).map(|week| m.week(week)).collect(),
                 training_pictures: m.training_pictures(),
+                individual_rule: m.individual_rule(),
+                camp_rules: m.camp_rules(),
             }
         })
         .collect();
@@ -153,6 +155,16 @@ fn club_state(records: &Records, team: &Team, data: &Data) -> ClubState {
             extra.map_or(Training::default().plan(), |e| e.plan()),
             team.training_flags(),
         ),
+        individual: human
+            .and_then(|slot| records.individual.get(slot))
+            .map_or_else(|| state.individual.clone(), |store| store.entries()),
+        intensity_states: team.intensity_states(),
+        detective: extra.map_or(0, |e| e.detective()),
+        co_training: extra.map_or_else(Default::default, |e| CoTraining {
+            days: e.co_training_days(),
+            units: e.co_training_units(),
+            focus: e.co_training_focus(),
+        }),
         ..state
     };
     // A game saved in the middle of a matchday goes on with its matches: the
@@ -258,7 +270,7 @@ fn status(records: &Records, medical: &MedicalTables, record: &records::Player) 
             i32::from(record.contract() & CONTRACT_YEAR) - i32::from(globals.start_year()),
         ),
         knocked: record.knocked() != 0,
-        dumbbell: record.dumbbell() == 1,
+        dumbbell: i16::from(record.intensity()) == individual::BUILD_UP,
         always: record.picks() & ALWAYS != 0,
         never: record.picks() & NEVER != 0,
         matches: record.league_matches(),

@@ -25,8 +25,8 @@ use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
 pub use a3_core::cycle::dialogs::{
-    COMPARISON, DRESSING_ROOM, LINEUP, LINEUP_LIST, SHORT_TRAINING, TACTICS, TRAINING_PICTURES,
-    UNIT_CHOICE,
+    ABILITY_CHOICE, COMPARISON, DRESSING_ROOM, INDIVIDUAL_TRAINING, LINEUP, LINEUP_LIST,
+    LONG_TRAINING, SHORT_TRAINING, TACTICS, TRAINING_PICTURES, UNIT_CHOICE,
 };
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
@@ -51,17 +51,21 @@ const SYMBOL: f32 = 32.0;
 const LINEUP_SYMBOL: usize = 0;
 pub(crate) const COMPARISON_SYMBOL: usize = 1;
 pub(crate) const TACTICS_SYMBOL: usize = 2;
+pub(crate) const LONG_TRAINING_SYMBOL: usize = 3;
 pub(crate) const SHORT_TRAINING_SYMBOL: usize = 4;
+pub(crate) const INDIVIDUAL_TRAINING_SYMBOL: usize = 5;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 5] = [
+const BAR_SCREENS: [(usize, u16); 7] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
+    (LONG_TRAINING_SYMBOL, LONG_TRAINING),
     (SHORT_TRAINING_SYMBOL, SHORT_TRAINING),
+    (INDIVIDUAL_TRAINING_SYMBOL, INDIVIDUAL_TRAINING),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
 /// What the game takes for Saturday.
@@ -742,7 +746,7 @@ impl MenuBar {
                 titles.chosen = self.sort.column;
             }
         }
-        if let Kind::States { pictures } = &dialog.controls[button].kind
+        if let Kind::States { pictures, .. } = &dialog.controls[button].kind
             && let Some(&picture) = pictures.get(usize::from(self.sort.stats))
             && let ControlState::Button(state) = &mut view.controls[button].state
         {
@@ -1520,8 +1524,8 @@ mod tests {
     use crate::controls::{ControlState, bar, player_box};
     use crate::screens::compose;
 
-    /// The first of the three trainings, not built yet.
-    const TRAINING_SYMBOL: usize = 3;
+    /// A symbol not built yet.
+    const UNBUILT_SYMBOL: usize = 8;
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
@@ -1552,7 +1556,7 @@ mod tests {
         // whistle.
         let bar = control(dialog, BAR_ID).unwrap();
         let crossed = |item| view.inert.contains(&Target::Option { control: bar, item });
-        assert!(crossed(TRAINING_SYMBOL) && !crossed(LINEUP_SYMBOL));
+        assert!(crossed(UNBUILT_SYMBOL) && !crossed(LINEUP_SYMBOL));
         assert!(!crossed(DRESSING_SYMBOL) && !crossed(WHISTLE));
         // The rest of the test looks at the picture without the crosses.
         view.inert.clear();

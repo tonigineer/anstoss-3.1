@@ -64,6 +64,12 @@ pub mod dialogs {
     /// pictures for a manager who switched to them; the popup of its
     /// units.
     pub const SHORT_TRAINING: u16 = 346;
+    /// The season's training weeks and the camp, the bar's fourth symbol;
+    /// each player's own training, its sixth.
+    pub const LONG_TRAINING: u16 = 345;
+    pub const INDIVIDUAL_TRAINING: u16 = 347;
+    /// The ability a player is to work on, chosen from those he lacks.
+    pub const ABILITY_CHOICE: u16 = 365;
     pub const TRAINING_PICTURES: u16 = 513;
     pub const UNIT_CHOICE: u16 = 362;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
@@ -411,6 +417,9 @@ impl Cycle {
                 self.season(|s| {
                     s.pass_day();
                     s.day += 1;
+                    if s.day % WEEK_DAYS == 0 {
+                        s.begin_week();
+                    }
                 });
                 self.ask(Request::new(week))?;
             }

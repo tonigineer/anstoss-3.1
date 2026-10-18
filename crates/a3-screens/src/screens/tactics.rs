@@ -196,7 +196,7 @@ impl Screen for TacticsScreen {
             Target::Button(c) | Target::Menu(Grip::Control(c)) if BUTTONS.contains(&id(c)) => {
                 let back = matches!(target, Target::Menu(_));
                 let count = match &dialog.controls[c].kind {
-                    Kind::States { pictures } => pictures.len(),
+                    Kind::States { pictures, .. } => pictures.len(),
                     _ => 0,
                 };
                 if let Some(button) = view.controls[c].state.as_button_mut() {

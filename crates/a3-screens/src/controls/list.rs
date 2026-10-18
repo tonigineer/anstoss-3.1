@@ -46,8 +46,13 @@ const TRACK_WIDTH: u32 = 13;
 const MIN_HANDLE: i32 = 8;
 /// Rows the mouse wheel scrolls per notch, as Windows does.
 pub const WHEEL_ROWS: i32 = 3;
-const SELECTED_TEXT: Rgba<u8> = Rgba([255, 255, 255, 255]);
-const SELECTED_ROW: Rgba<u8> = Rgba([0, 0, 0, 255]);
+/// The colour a selected row is drawn half over with, by the list's
+/// scheme (the table at 0x8ae138; `FUN_0079c633` with alpha 0x80), as high
+/// as the list's font; rows this high or more start it further in.
+const SELECTION: [[u8; 3]; 6] =
+    [[255, 0, 0], [0, 0, 255], [200, 200, 200], [0, 255, 0], [0, 255, 255], [200, 200, 200]];
+const TALL_ROW: f32 = 36.0;
+const TALL_ROW_INDENT: i32 = 12;
 
 #[derive(Clone, Debug)]
 pub struct ListState {
@@ -78,7 +83,26 @@ pub struct ListState {
     pub keys: Vec<usize>,
     /// Whether a click tells which column it fell in (`Target::Cell`).
     pub by_column: bool,
+    /// A bar each row may show under its text.
+    pub bars: Vec<Option<Bar>>,
+    /// The colour the selected row is drawn half over with, where the
+    /// screen sets one of its own (`FUN_005a0dc0`).
+    pub selection: Option<[u8; 3]>,
 }
+
+/// A row's progress bar (`FUN_007a9370`, painted by `FUN_007a7d9c`): a
+/// white strip this wide from `left`, black over it as far as `value` of
+/// 100 goes.
+#[derive(Clone, Copy, Debug)]
+pub struct Bar {
+    pub left: i32,
+    pub width: i32,
+    pub value: i32,
+}
+
+const BAR_HEIGHT: i32 = 11;
+const BAR_BACK: Rgba<u8> = Rgba([255, 255, 255, 255]);
+const BAR_FILL: Rgba<u8> = Rgba([0, 0, 0, 255]);
 
 impl Default for ListState {
     fn default() -> Self {
@@ -95,6 +119,8 @@ impl Default for ListState {
             row_boxes: Vec::new(),
             keys: Vec::new(),
             by_column: false,
+            bars: Vec::new(),
+            selection: None,
         }
     }
 }
@@ -223,9 +249,25 @@ impl ListState {
             let selected = self.selected == Some(self.scroll + row)
                 || self.marked.get(self.scroll + row).copied().unwrap_or(false);
             let ink = self.inks.get(self.scroll + row).copied().flatten();
+            // The bar first: a selection lies over it.
+            if let Some(bar) = self.bars.get(self.scroll + row).copied().flatten() {
+                fill(frame, x + bar.left, top, bar.width, BAR_HEIGHT, BAR_BACK);
+                let filled = (bar.width + 1) * bar.value / 100;
+                fill(frame, x + bar.left, top, filled, BAR_HEIGHT, BAR_FILL);
+            }
             let color = if selected {
-                fill(frame, x, top, right - x, row_height(control) as i32, SELECTED_ROW);
-                SELECTED_TEXT
+                let [r, g, b] =
+                    self.selection.unwrap_or(SELECTION[scheme(control).min(SELECTION.len() - 1)]);
+                let indent = if row_height(control) >= TALL_ROW { TALL_ROW_INDENT } else { 0 };
+                let (x0, y0) = (x + indent, top - 1);
+                for py in y0.max(0)..(y0 + font.height() as i32).min(frame.height() as i32) {
+                    for px in x0.max(0)..right.min(frame.width() as i32) {
+                        let p = frame.get_pixel_mut(px as u32, py as u32);
+                        let mix = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
+                        *p = Rgba([mix(p[0], r), mix(p[1], g), mix(p[2], b), 255]);
+                    }
+                }
+                ink.map_or(TEXT, |[r, g, b]| Rgba([r, g, b, 255]))
             } else if paint.pointed(Target::Row { control: paint.index, row })
                 || self.pointed_cell(paint, row)
             {

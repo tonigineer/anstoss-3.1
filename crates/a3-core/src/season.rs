@@ -62,6 +62,9 @@ const BAR_SYMBOLS_AT: u32 = 0x8a364c;
 const BAR_TIPS_AT: u32 = 0x8a3560;
 const BAR_WITHOUT_CLUB_AT: u32 = 0x8a3600;
 pub const BAR_SYMBOLS: usize = 19;
+/// A training camp's conditions as a manager starts: in the middle
+/// (`FUN_0074d622`).
+const CAMP_RULE: u8 = 2;
 /// Season goals by number: 0 the championship … 10 staying up.
 const PROMOTED_GOAL: usize = 10;
 /// A club whose board is not loyal (5) aims one step higher with a chance
@@ -111,6 +114,8 @@ pub struct Rules {
     pub tactics: crate::tactics::TacticsTables,
     /// The training's units, words and knowledge.
     pub training: crate::training::TrainingTables,
+    /// The individual training's difficulties and intensities.
+    pub individual: crate::individual::IndividualTables,
 }
 
 impl Rules {
@@ -148,6 +153,7 @@ impl Rules {
             medical: crate::medical::MedicalTables::load(exe)?,
             tactics: crate::tactics::TacticsTables::load(exe)?,
             training: crate::training::TrainingTables::load(exe)?,
+            individual: crate::individual::IndividualTables::load(exe)?,
         })
     }
 
@@ -282,6 +288,14 @@ pub struct ClubState {
     pub set_piece: u16,
     /// The training plan, and the camp and meeting before the next match.
     pub training: crate::training::Training,
+    /// Who the detective watches, by id (0 nobody); what the co-trainer
+    /// trains when he plans a week.
+    pub detective: u16,
+    pub co_training: crate::training::CoTraining,
+    /// Each player's own training, as the store keeps it (forty entries
+    /// for a human club), and the four buttons' states.
+    pub individual: Vec<crate::individual::Entry>,
+    pub intensity_states: u8,
 }
 
 /// How a player is: fit and fresh, in hundredths, and in what spirits.
@@ -381,6 +395,10 @@ impl ClubState {
             areas: Default::default(),
             set_piece: 0,
             training: Default::default(),
+            detective: 0,
+            co_training: Default::default(),
+            individual: vec![Default::default(); crate::individual::ENTRIES],
+            intensity_states: 0,
         }
     }
 }
@@ -423,10 +441,14 @@ pub struct Manager {
     pub list_view: bool,
     /// The formations he chooses from.
     pub formations: Vec<lineup::Formation>,
-    /// His week templates, and the template and the player in individual
-    /// training he chose for each week of the game.
+    /// His week templates, and what he planned for each week of the
+    /// season.
     pub templates: Vec<crate::training::Template>,
-    pub weeks: Vec<(u16, u16)>,
+    pub weeks: Vec<crate::training::Week>,
+    /// How the week's player in individual training is chosen; a camp's
+    /// food, going out and control.
+    pub individual_rule: u8,
+    pub camp_rules: [u8; 3],
     /// Whether his short-term training shows as pictures (dialog 513).
     pub training_pictures: bool,
 }
@@ -502,7 +524,9 @@ impl Season {
                     list_view: false,
                     formations: rules.pitch.new_formations(),
                     templates: Vec::new(),
-                    weeks: Vec::new(),
+                    weeks: vec![Default::default(); crate::records::WEEKS],
+                    individual_rule: 0,
+                    camp_rules: [CAMP_RULE; 3],
                     training_pictures: false,
                 }
             })
@@ -625,6 +649,40 @@ impl Season {
     pub fn start_week(&mut self) {
         for state in self.clubs.values_mut() {
             state.week = vec![team_fitness(&state.lineup, &state.fitness)];
+        }
+    }
+
+    /// A new week of the season begins (`FUN_0074e870`): for each manager
+    /// with a club the past week keeps what it had, and the club's plan
+    /// starts from the week's template, or empty.
+    pub fn begin_week(&mut self) {
+        let week = self.day / crate::training::DAYS;
+        for manager in &mut self.managers {
+            let Some(club) = manager.club.and_then(|key| self.clubs.get_mut(&key)) else {
+                continue;
+            };
+            if let Some(past) = week.checked_sub(1).and_then(|w| manager.weeks.get_mut(w))
+                && !past.done
+            {
+                past.done = true;
+                let template = usize::try_from(past.template - 1).ok();
+                if let Some(t) = template.and_then(|t| manager.templates.get(t)) {
+                    past.template_name.clone_from(&t.name);
+                }
+                let player = club.status.iter().position(|s| s.id == past.player && s.id != 0);
+                if let Some(p) = player.and_then(|p| club.players.get(p)) {
+                    past.player_name = match p.first_name.chars().next() {
+                        Some(initial) => format!("{}, {initial}.", p.last_name),
+                        None => p.last_name.clone(),
+                    };
+                }
+            }
+            let Some(entry) = manager.weeks.get_mut(week) else { continue };
+            let template = usize::try_from(entry.template - 1).ok();
+            let sessions = template.and_then(|t| manager.templates.get(t)).map(|t| t.week);
+            club.training.start_week(sessions.as_ref());
+            entry.condition = lineup::average(club, lineup::condition) as u8;
+            entry.freshness = lineup::average(club, lineup::freshness) as u8;
         }
     }
 

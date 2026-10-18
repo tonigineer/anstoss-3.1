@@ -344,9 +344,14 @@ record! {
     /// bits each from the lowest.
     0x297 => offences, set_offences: u8;
     0x298 => offence_counts, set_offence_counts: u8;
-    /// 1: the line-up list marks him with the dumbbell (what for is not
-    /// traced yet).
-    0x34c => dumbbell, set_dumbbell: u8;
+    /// How hard he trains ([`crate::individual`]): 0 out, 1 building up
+    /// (the line-up list's dumbbell) … 4 hard.
+    0x34c => intensity, set_intensity: u8;
+    /// His favourite ability, for his first individual training: its
+    /// number from 1 in the low five bits, how far he got above.
+    0x34b => favourite, set_favourite: u8;
+    /// The minutes he played in the last match.
+    0x25c => minutes, set_minutes: u8;
     /// The form the line-up showed last, for its trend.
     0x34d => last_form, set_last_form: u8;
     /// Bit k: he was punished for an offence of level k this week.
@@ -426,6 +431,9 @@ record! {
     /// throw-ins 6–8, dirty tricks 12–14 (the club object's +0x9f, +0xa1,
     /// +0xa2; TRAINING-KURZ.md).
     0xc5 => pressing, set_pressing: u8;
+    /// The individual training's four buttons, two bits each
+    /// ([`crate::individual::state`]).
+    0xcf => intensity_states, set_intensity_states: u8;
     0xc7 => anti_offside, set_anti_offside: u8;
     0xc8 => set_pieces, set_set_pieces: u16;
     /// Before the next match: bit 0x800 a training camp, bit 0x1000 a
@@ -555,6 +563,14 @@ record! {
     /// co-trainer lines the team up before a match in a system of his
     /// choosing, bit 2 in the one it stands in.
     0x2824 => line_up_flags, set_line_up_flags: u16;
+    /// What the co-trainer trains when he plans a week: days, units and
+    /// each focus' units ([`crate::training::CoTraining`]); bit 0 of the
+    /// flags above lets him plan every week.
+    0x2826 => co_training_days, set_co_training_days: i16;
+    0x2828 => co_training_units, set_co_training_units: i16;
+    0x282a => co_training_focus, set_co_training_focus: [u8; 9];
+    /// The player the detective watches (0 nobody).
+    0x2834 => detective, set_detective: u16;
 }
 
 impl Extra {
@@ -585,6 +601,9 @@ record! {
     Person, 0x54 - HEADER, base HEADER;
     0x20 => names, set_names: [u16; 2];
     0x2d => job, set_job: u8;
+    /// The kind of training a co-trainer plans, the row of his templates'
+    /// odds (`FUN_006317c6`).
+    0x26 => training_kind, set_training_kind: u8;
 }
 
 /// The stadiums of the teams played (0x290 bytes at `DAT_01a48138` + team
@@ -647,6 +666,15 @@ record! {
     /// the list), the screen his turn starts on in bits 6 and 7, the
     /// short-term training as pictures in bit 8.
     0x212c => options, set_options: u32;
+    /// How the week's player in individual training is chosen when nobody
+    /// is: 0 not, else the least in form of all, of the eleven, of the
+    /// keepers and defenders, the midfielders, the strikers.
+    0x14a8 => individual_rule, set_individual_rule: u8;
+    /// A training camp's conditions: food, going out, control, 0 to 4.
+    0x14aa => camp_rules, set_camp_rules: [u8; 3];
+    /// 1: he plays in his own team too, a player-manager (the manager
+    /// object's +0x26).
+    0x2e8 => playing, set_playing: i16;
 }
 
 /// The bits of a manager's options that choose the line-up's view.
@@ -668,7 +696,10 @@ const WEEKS_AT: usize = 0x86c;
 const WEEK_SIZE: usize = 0x3a;
 const WEEK_TEMPLATE: usize = 4;
 const WEEK_PLAYER: usize = 6;
-pub const WEEKS: usize = 53;
+const WEEK_TEMPLATE_NAME: (usize, usize) = (8, 30);
+const WEEK_PLAYER_NAME: (usize, usize) = (0x26, 20);
+/// The season's weeks a manager plans.
+pub const WEEKS: usize = 50;
 
 /// A manager's formations: a name of ten bytes and the eleven's spots, x
 /// and y in pitch pixels, each (the manager object's +0x118).
@@ -705,17 +736,40 @@ impl Manager {
             .collect()
     }
 
-    /// The template and the player in individual training he chose for a
-    /// week.
-    pub fn week(&self, week: usize) -> (u16, u16) {
+    /// What he planned for a week of the season.
+    pub fn week(&self, week: usize) -> crate::training::Week {
         let at = WEEKS_AT + week.min(WEEKS - 1) * WEEK_SIZE;
-        (self.get(at + WEEK_TEMPLATE), self.get(at + WEEK_PLAYER))
+        let name = |(offset, len): (usize, usize)| text(&self.0[at + offset..], len);
+        crate::training::Week {
+            done: self.get::<u8>(at) != 0,
+            kind: self.get(at + 1),
+            condition: self.get(at + 2),
+            freshness: self.get(at + 3),
+            template: self.get(at + WEEK_TEMPLATE),
+            player: self.get(at + WEEK_PLAYER),
+            template_name: name(WEEK_TEMPLATE_NAME),
+            player_name: name(WEEK_PLAYER_NAME),
+        }
     }
 
-    pub fn set_week(&mut self, week: usize, (template, player): (u16, u16)) {
+    pub fn set_week(&mut self, week: usize, entry: &crate::training::Week) {
         let at = WEEKS_AT + week.min(WEEKS - 1) * WEEK_SIZE;
-        self.put(at + WEEK_TEMPLATE, template);
-        self.put(at + WEEK_PLAYER, player);
+        self.put(at, u8::from(entry.done));
+        self.put(at + 1, entry.kind);
+        self.put(at + 2, entry.condition);
+        self.put(at + 3, entry.freshness);
+        self.put(at + WEEK_TEMPLATE, entry.template);
+        self.put(at + WEEK_PLAYER, entry.player);
+        for ((offset, len), name) in
+            [(WEEK_TEMPLATE_NAME, &entry.template_name), (WEEK_PLAYER_NAME, &entry.player_name)]
+        {
+            let field = &mut self.0[at + offset..at + offset + len];
+            let bytes: Vec<u8> =
+                name.chars().map(|c| a3_files::bitmap_font::to_cp1252(c).unwrap_or(b'?')).collect();
+            let n = bytes.len().min(len - 1);
+            field[..n].copy_from_slice(&bytes[..n]);
+            field[n..].fill(0);
+        }
     }
 
     /// Whether his short-term training shows as pictures (`FUN_006a5cd5`).
@@ -814,6 +868,27 @@ impl Planner {
             self.put(at, appointment.kind);
             self.put(at + 1, appointment.flag);
             self.put(at + 4, appointment.player);
+        }
+    }
+}
+
+/// The human clubs' individual training, by slot (`0xa50028` + slot ×
+/// 0x7a0): forty players' choices ([`crate::individual::Entry`]).
+const INDIVIDUAL_AT: u32 = 0xa50028;
+
+record! {
+    /// A human club's individual training.
+    IndividualStore, crate::individual::ENTRIES * crate::individual::ENTRY, base HEADER;
+}
+
+impl IndividualStore {
+    pub fn entries(&self) -> Vec<crate::individual::Entry> {
+        self.0.chunks(crate::individual::ENTRY).map(crate::individual::Entry::read).collect()
+    }
+
+    pub fn set_entries(&mut self, entries: &[crate::individual::Entry]) {
+        for (bytes, entry) in self.0.chunks_mut(crate::individual::ENTRY).zip(entries) {
+            entry.write(bytes);
         }
     }
 }
@@ -983,6 +1058,7 @@ pub struct Records {
     /// The human managers' week planners, by slot.
     pub planners: Vec<Planner>,
     pub calendars: Vec<Planner>,
+    pub individual: Vec<IndividualStore>,
     pub luck: Luck,
     /// The pool of names the players' names point into.
     pub names: Vec<String>,
@@ -1023,6 +1099,9 @@ impl Records {
         let calendars = (0..MANAGERS)
             .map(|n| Planner::new(block(format!("{CALENDAR_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
+        let individual = (0..MANAGERS)
+            .map(|n| IndividualStore::new(block(format!("{INDIVIDUAL_AT:#x}[{n}]"))?))
+            .collect::<io::Result<_>>()?;
         let globals = Globals::new(block(format!("{GLOBALS_AT:#x}"))?)?;
         let luck = Luck::new(block(format!("{LUCK_AT:#x}"))?)?;
         let countries = Countries::new(block(format!("{COUNTRIES_AT:#x}"))?)?;
@@ -1048,6 +1127,7 @@ impl Records {
             extras,
             planners,
             calendars,
+            individual,
             luck,
             names,
             persons,
@@ -1081,6 +1161,9 @@ impl Records {
         }
         for (n, calendar) in self.calendars.iter().enumerate() {
             put(format!("{CALENDAR_AT:#x}[{n}]"), 0, calendar.bytes());
+        }
+        for (n, store) in self.individual.iter().enumerate() {
+            put(format!("{INDIVIDUAL_AT:#x}[{n}]"), 0, store.bytes());
         }
         put(format!("{GLOBALS_AT:#x}"), 0, self.globals.bytes());
         put(format!("{LUCK_AT:#x}"), 0, self.luck.bytes());

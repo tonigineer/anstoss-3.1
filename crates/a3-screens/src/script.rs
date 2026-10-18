@@ -1144,9 +1144,35 @@ mod tests {
         // "ES/Fähigkeiten VORB": training matches all week, from today.
         let plan = records.extras[records.human_slot(0).unwrap()].plan();
         assert_eq!((&plan[..3], &plan[18..21]), (&[26, 26, 26][..], &[33, 33, 33][..]));
-        let (template, player) = records.humans().next().unwrap().week(62 / 7);
-        assert!(template == 5 && player != 0);
+        let week = records.humans().next().unwrap().week(62 / 7);
+        assert!(week.template == 5 && week.player != 0);
         assert_ne!(records.teams[84].training_flags() & a3_core::training::CAMP, 0);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_long_and_individual_training_keep_what_is_set() {
+        let game = game();
+        // On a week's first day: an intensity stepped, the button of those
+        // who did not play; a template for the week, the camp's food a
+        // notch down, the training secret; away.
+        let then = "now click bar 5\nuntil dialog 347\nnow cell 3298 1 8\nnow press 4785\n\
+                    now click bar 3\nuntil dialog 345\nnow choose 5035 2\n\
+                    now click at 134 130\nnow press 5344\nnow click bar 0\nuntil dialog 147";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = records.humans().next().unwrap();
+        let team = records.team(manager.country(), manager.team()).unwrap();
+        // 0x94 is 0, 1, 1, 2; the last one stepped round to 0.
+        assert_eq!(team.intensity_states(), 0x14);
+        assert_ne!(team.passing() & a3_core::training::SECRET, 0);
+        let slot = usize::from(team.human()) - 1;
+        let kept = records.individual[slot].entries().iter().filter(|e| e.id != 0).count();
+        assert_eq!(kept, usize::from(team.player_count()).min(a3_core::individual::ENTRIES));
+        let week = usize::from(records.globals.day()) / 7;
+        assert_eq!(manager.week(week).template, 3);
+        assert_eq!(manager.camp_rules()[0], 3);
     }
 
     #[test]

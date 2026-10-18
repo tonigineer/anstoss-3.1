@@ -12,6 +12,7 @@ pub mod data;
 pub mod discipline;
 pub mod duties;
 pub mod finances;
+pub mod individual;
 pub mod jobs;
 pub mod lineup;
 pub mod load;

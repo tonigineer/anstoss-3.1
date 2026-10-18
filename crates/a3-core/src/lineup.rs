@@ -49,6 +49,8 @@ const ABBREVIATIONS_AT: u32 = 0x8a8490;
 const ABILITY_ICONS_AT: u32 = 0x89f918;
 const ABILITY_ICONS: usize = 50;
 const DUTY_ICONS: usize = 6;
+/// After the duties' icons the snowflake: training nothing.
+const NOTHING_ICON: usize = ABILITY_ICONS + DUTY_ICONS;
 const FIELD_ABILITIES: usize = 16;
 const KEEPER_ABILITIES: usize = 9;
 /// What abilities and character add when the game ranks a player for its
@@ -174,7 +176,7 @@ impl Tables {
             forward_fit: exe.u16s(FORWARD_FIT_AT, KINDS)?.into_iter().map(|v| v as i16).collect(),
             parts: parts.chunks(PART_ROW).map(|r| [r[0], r[1], r[2], r[3]]).collect(),
             ability_icons: exe
-                .u32s(ABILITY_ICONS_AT, ABILITY_ICONS + DUTY_ICONS)?
+                .u32s(ABILITY_ICONS_AT, NOTHING_ICON + 1)?
                 .into_iter()
                 .map(|id| id as u16)
                 .collect(),
@@ -208,6 +210,19 @@ impl Tables {
             }
         }
         icons
+    }
+
+    /// The graphic of one of a player's abilities, good or bad.
+    pub fn ability_icon(&self, keeper: bool, good: bool, ability: usize) -> Option<u16> {
+        let count = if keeper { KEEPER_ABILITIES } else { FIELD_ABILITIES };
+        let first = if keeper { 2 * FIELD_ABILITIES } else { 0 };
+        let at = first + if good { 0 } else { count } + ability;
+        self.ability_icons.get(at).copied().filter(|_| ability < count)
+    }
+
+    /// The snowflake: a player who trains no ability.
+    pub fn nothing_icon(&self) -> Option<u16> {
+        self.ability_icons.get(NOTHING_ICON).copied()
     }
 
     /// The graphic of a duty, as a player's box and dialog 418 show it.

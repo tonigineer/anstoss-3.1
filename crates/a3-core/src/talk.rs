@@ -419,7 +419,7 @@ impl Talk<'_> {
             }
             let injured = self.injured;
             let r = self.r_mut();
-            r.set_dumbbell(match injured {
+            r.set_intensity(match injured {
                 7.. => 0,
                 1.. => 2,
                 _ => 3,
@@ -446,7 +446,7 @@ impl Talk<'_> {
         let r = self.r_mut();
         r.set_offences(r.offences() & !0x77);
         r.set_away_kind(r.away_kind() | SUSPENDED);
-        r.set_dumbbell(0);
+        r.set_intensity(0);
         let club = self.club;
         if let Some(team) = team_mut(self.records, club) {
             team.set_spirit((i32::from(team.spirit()) - 2).clamp(10, 50) as u8);
