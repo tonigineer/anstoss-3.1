@@ -78,6 +78,11 @@ impl Screen for Notice {
                 let name = cx.state.records.as_ref().and_then(|r| r.known_as(player));
                 cx.game.text(text).replacen("%s", &name.unwrap_or_default(), 1)
             }
+            Args::TextForDate(text, day) => {
+                let year = cx.state.season.as_ref().map_or(0, |s| s.year);
+                let date = super::hub::date_text(cx.game, a3_core::calendar::date(year, day));
+                cx.game.text(text).replacen("%s", &date, 1)
+            }
             _ => return,
         };
         set(view, cx.dialog, NOTICE_TEXT, text);

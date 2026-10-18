@@ -98,11 +98,13 @@ pub struct Bar {
     pub left: i32,
     pub width: i32,
     pub value: i32,
+    pub fill: Rgba<u8>,
 }
 
 const BAR_HEIGHT: i32 = 11;
 const BAR_BACK: Rgba<u8> = Rgba([255, 255, 255, 255]);
-const BAR_FILL: Rgba<u8> = Rgba([0, 0, 0, 255]);
+/// A progress bar's colour.
+pub const BAR_FILL: Rgba<u8> = Rgba([0, 0, 0, 255]);
 
 impl Default for ListState {
     fn default() -> Self {
@@ -253,7 +255,7 @@ impl ListState {
             if let Some(bar) = self.bars.get(self.scroll + row).copied().flatten() {
                 fill(frame, x + bar.left, top, bar.width, BAR_HEIGHT, BAR_BACK);
                 let filled = (bar.width + 1) * bar.value / 100;
-                fill(frame, x + bar.left, top, filled, BAR_HEIGHT, BAR_FILL);
+                fill(frame, x + bar.left, top, filled, BAR_HEIGHT, bar.fill);
             }
             let color = if selected {
                 let [r, g, b] =

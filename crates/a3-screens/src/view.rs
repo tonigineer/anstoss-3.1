@@ -44,13 +44,17 @@ pub struct View {
     /// Rectangles the screen darkens on the dialog's picture, under its
     /// controls: x, y, width and height, and by how much of 255.
     pub shades: Vec<([i32; 4], u8)>,
+    /// The pictures controls are dragged as, with their text on them.
+    pub drag_pictures: Vec<(usize, u16)>,
 }
 
-/// What the pointer drags, and where it is, in classic pixels.
+/// What the pointer drags, where it is and where it took hold, in classic
+/// pixels.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Dragging {
     pub grip: Grip,
     pub at: Vec2,
+    pub from: Vec2,
 }
 
 macro_rules! by_index {
@@ -68,6 +72,16 @@ macro_rules! by_index {
 }
 
 impl View {
+    /// The picture of a control being dragged, its text and where it
+    /// stands: where the control would, gone with the pointer, kept on the
+    /// screen above the bar.
+    pub fn dragged_picture(&self, dialog: &Dialog) -> Option<(u16, usize, Vec2)> {
+        let dragging = self.dragging?;
+        let Grip::Control(c) = dragging.grip else { return None };
+        let &(_, picture) = self.drag_pictures.iter().find(|&&(control, _)| control == c)?;
+        Some((picture, c, dialog.controls.get(c)?.rect.min + dragging.at - dragging.from))
+    }
+
     /// The box of the player being dragged, standing under the pointer,
     /// with a control of a box's size to draw it as.
     pub fn dragged_box(&self, dialog: &Dialog) -> Option<(usize, PlayerBox)> {
@@ -99,6 +113,7 @@ impl View {
             tip: None,
             inert: Vec::new(),
             dragging: None,
+            drag_pictures: Vec::new(),
             lines: Vec::new(),
             lines_on_top: false,
             shades: Vec::new(),

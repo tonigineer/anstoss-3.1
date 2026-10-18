@@ -70,6 +70,10 @@ pub mod dialogs {
     pub const INDIVIDUAL_TRAINING: u16 = 347;
     /// The ability a player is to work on, chosen from those he lacks.
     pub const ABILITY_CHOICE: u16 = 365;
+    /// The year calendar, the bar's seventh symbol; the week planner, its
+    /// eighth.
+    pub const YEAR_CALENDAR: u16 = 348;
+    pub const WEEK_PLANNER: u16 = 413;
     pub const TRAINING_PICTURES: u16 = 513;
     pub const UNIT_CHOICE: u16 = 362;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
@@ -137,6 +141,9 @@ pub enum Args {
     Record(u16),
     /// A text by its id, with a player's name for its `%s`.
     TextFor(u16, u16),
+    /// A text by its id, with the date of a day of the season for its
+    /// `%s`.
+    TextForDate(u16, usize),
     /// How a player took a sick visit (`medical::Reaction`).
     Visit {
         player: u16,

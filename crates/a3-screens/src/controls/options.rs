@@ -8,7 +8,7 @@ use image::{Rgba, RgbaImage, imageops};
 
 use a3_files::rch::{Control, Item, Kind, TOGGLE_OPTIONS};
 
-use crate::classic::{Paint, TEXT, TEXT_HOVER, centred};
+use crate::classic::{Paint, TEXT_HOVER, centred};
 use crate::pointer::{Geometry, Target};
 
 /// The radio bullets painted into the backgrounds are Windows radio buttons,
@@ -20,6 +20,8 @@ const BULLET_CENTRE: Vec2 = Vec2::new(4.0, 7.0);
 const LABEL_INSET: f32 = 9.0;
 /// The dot marking a chosen radio option.
 const DOT_COLOR: Rgba<u8> = Rgba([100, 100, 100, 255]);
+/// A picture group whose labels are centred in their options.
+const CENTRED_LABELS: u16 = 0x2;
 
 /// What [`OptionsState::chosen`] is with no option chosen.
 pub const NONE: usize = usize::MAX;
@@ -78,7 +80,8 @@ impl OptionsState {
 
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let control = paint.control;
-        let Kind::Options { image, items, .. } = &control.kind else { return };
+        let Kind::Options { image, items, ink, chosen_ink, .. } = &control.kind else { return };
+        let (ink, chosen_ink) = (*ink, *chosen_ink);
         let r = control.rect;
         let (x, y) = (r.min.x as i32, r.min.y as i32);
         // Cut to the control, as its window cuts it.
@@ -123,7 +126,8 @@ impl OptionsState {
                 continue;
             }
             let pointed = paint.pointed(Target::Option { control: paint.index, item });
-            let color = if pointed { TEXT_HOVER } else { TEXT };
+            let [ir, ig, ib] = if item == self.chosen { chosen_ink } else { ink };
+            let color = if pointed { TEXT_HOVER } else { Rgba([ir, ig, ib, 255]) };
             if *image == 0 {
                 // Windows centres a radio button's label on its bullet.
                 let top = (bullet_centre(control, item).y - cell / 2.0).round() as i32;
@@ -141,11 +145,17 @@ impl OptionsState {
                     } else {
                         it.text_at.y
                     };
+                // Centred or at its place, as the group's style says
+                // (`FUN_007a670e`: bits 1–2).
+                let centre = match &control.kind {
+                    Kind::Options { style, .. } => style & CENTRED_LABELS != 0,
+                    _ => true,
+                };
                 for (i, line) in lines.iter().enumerate() {
                     let width = font.width(line, false) as i32;
                     let room = (it.rect.width() - it.text_at.x) as i32;
-                    let left =
-                        centred((r.min.x + it.rect.min.x + it.text_at.x) as i32, room, width);
+                    let start = (r.min.x + it.rect.min.x + it.text_at.x) as i32;
+                    let left = if centre { centred(start, room, width) } else { start };
                     let top = (top + cell * i as f32).round() as i32;
                     font.draw(frame, left, top, line, color, false);
                 }

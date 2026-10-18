@@ -24,6 +24,8 @@ pub const PLAIN: Rgba<u8> = Rgba([224, 222, 226, 255]);
 pub(crate) const TEXT: Rgba<u8> = Rgba([0, 0, 0, 255]);
 pub(crate) const TEXT_HOVER: Rgba<u8> = Rgba([176, 48, 0, 255]);
 /// A popup's edge, in pixels: black, as text.
+/// A dragged picture stays above this line, the bar's top less one.
+const DRAG_BOTTOM: f32 = 447.0;
 const POPUP_EDGE: i32 = 2;
 /// The handle of sliders and scrollbars, and the arrows of list scrollbars,
 /// which the game loads by name.
@@ -111,8 +113,9 @@ impl Classic {
     /// Loads what the controls and the bitmaps show that has not been
     /// loaded yet.
     pub fn update_with(&mut self, game: &Game, dialog: &Dialog, view: &View) {
-        for (control, shown) in dialog.controls.iter().zip(&view.controls) {
-            let (ids, sprite) = shown.state.graphics(control);
+        let dragged = view.drag_pictures.iter().map(|&(_, id)| (vec![id], false));
+        let states = dialog.controls.iter().zip(&view.controls).map(|(c, s)| s.state.graphics(c));
+        for (ids, sprite) in states.chain(dragged) {
             for id in ids {
                 if self.images.contains_key(&id) {
                     continue;
@@ -173,6 +176,24 @@ impl Classic {
             let control = &dialog.controls[size];
             let paint = Paint { classic: self, view, index: size, control, caret, phase, scene };
             dragged.draw(&mut frame, &paint);
+        }
+        // So does a control dragged as a picture, its text on it, cut to
+        // the control's size, kept above the bar (`FUN_006693b7`).
+        if let Some((picture, c, at)) = view.dragged_picture(dialog)
+            && let Some(image) = self.images.get(&picture)
+        {
+            let control = &dialog.controls[c];
+            let (w, h) = (image.width() as f32, image.height() as f32);
+            let at = Vec2::new(at.x.clamp(0.0, 640.0 - w), at.y.clamp(0.0, DRAG_BOTTOM - h));
+            let size = control.rect.size();
+            let cut = imageops::crop_imm(image, 0, 0, size.x as u32, size.y as u32).to_image();
+            paste(&mut frame, &cut, at.floor());
+            if let (Some(font), Some(text)) =
+                (self.fonts.get(PLAIN_FONT), view.controls[c].state.text())
+            {
+                let left = centred(at.x as i32, size.x as i32, font.width(text, false) as i32);
+                font.draw(&mut frame, left, at.y as i32, text, TEXT, false);
+            }
         }
         // What does nothing yet is crossed out.
         if !view.inert.is_empty() {
@@ -365,7 +386,12 @@ pub(crate) fn columns<'a>(
         let Some(&tab) = tabs.get(i) else { break };
         let left = x + tab as i32;
         let spare = |width: f32| width as i32 - font.width(cell, false) as i32;
-        match aligns.get(i).copied().flatten() {
+        // A column placed without a width runs to the next one's start
+        // (`FUN_007a756f`).
+        let to_next = tabs.get(i + 1).map_or((right - left) as f32, |&next| next - tab);
+        let align =
+            aligns.get(i).copied().flatten().map(|(a, w)| (a, if w == 0.0 { to_next } else { w }));
+        match align {
             Some((Align::Centre, width)) => {
                 let at = centred(left, width as i32, font.width(cell, false) as i32);
                 font.draw(frame, at, y, cell, color, false)

@@ -116,6 +116,8 @@ pub struct Rules {
     pub training: crate::training::TrainingTables,
     /// The individual training's difficulties and intensities.
     pub individual: crate::individual::IndividualTables,
+    /// The year calendar's kinds, events, parties and camps' places.
+    pub year: crate::year::YearTables,
 }
 
 impl Rules {
@@ -154,6 +156,7 @@ impl Rules {
             tactics: crate::tactics::TacticsTables::load(exe)?,
             training: crate::training::TrainingTables::load(exe)?,
             individual: crate::individual::IndividualTables::load(exe)?,
+            year: crate::year::YearTables::load(exe)?,
         })
     }
 

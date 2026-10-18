@@ -99,6 +99,10 @@ impl Screen for LongTraining {
         let (game, dialog) = (cx.game, cx.dialog);
         *self = Self::default();
         hub::open_bar(cx, view, LONG_TRAINING_SYMBOL);
+        // On the week's last day the short-term training closes too.
+        if hub::last_day(cx) {
+            hub::switch_off(cx, view, hub::SHORT_TRAINING_SYMBOL);
+        }
         let Some(season) = cx.state.season.as_ref() else { return };
         set(view, dialog, CAPTION_ID, hub::manager_title(game, season, CAPTION));
         let Some(manager) = season.manager() else { return };

@@ -26,7 +26,8 @@ use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
 pub use a3_core::cycle::dialogs::{
     ABILITY_CHOICE, COMPARISON, DRESSING_ROOM, INDIVIDUAL_TRAINING, LINEUP, LINEUP_LIST,
-    LONG_TRAINING, SHORT_TRAINING, TACTICS, TRAINING_PICTURES, UNIT_CHOICE,
+    LONG_TRAINING, SHORT_TRAINING, TACTICS, TRAINING_PICTURES, UNIT_CHOICE, WEEK_PLANNER,
+    YEAR_CALENDAR,
 };
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
@@ -54,18 +55,22 @@ pub(crate) const TACTICS_SYMBOL: usize = 2;
 pub(crate) const LONG_TRAINING_SYMBOL: usize = 3;
 pub(crate) const SHORT_TRAINING_SYMBOL: usize = 4;
 pub(crate) const INDIVIDUAL_TRAINING_SYMBOL: usize = 5;
+pub(crate) const YEAR_CALENDAR_SYMBOL: usize = 6;
+pub(crate) const WEEK_PLANNER_SYMBOL: usize = 7;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 7] = [
+const BAR_SCREENS: [(usize, u16); 9] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
     (LONG_TRAINING_SYMBOL, LONG_TRAINING),
     (SHORT_TRAINING_SYMBOL, SHORT_TRAINING),
     (INDIVIDUAL_TRAINING_SYMBOL, INDIVIDUAL_TRAINING),
+    (YEAR_CALENDAR_SYMBOL, YEAR_CALENDAR),
+    (WEEK_PLANNER_SYMBOL, WEEK_PLANNER),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
 /// What the game takes for Saturday.
@@ -363,6 +368,22 @@ pub(crate) fn open_bar(cx: &Cx, view: &mut View, own: usize) {
         state.off[NATIONAL_SYMBOL] = true;
     }
     state.tips = game.rules.bar_tips.iter().map(|&t| game.text(t as u16).to_owned()).collect();
+}
+
+/// Whether today is the week's last day, which closes some of the bar's
+/// symbols.
+pub(crate) fn last_day(cx: &Cx) -> bool {
+    cx.state.season.as_ref().is_some_and(|s| s.day % WEEK_DAYS == SATURDAY)
+}
+
+/// Switches one more symbol of the bar off, as some screens do
+/// (`FUN_00683026`).
+pub(crate) fn switch_off(cx: &Cx, view: &mut View, symbol: usize) {
+    if let Some(state) = control(cx.dialog, BAR_ID).and_then(|b| view.bar_mut(b))
+        && let Some(off) = state.off.get_mut(symbol)
+    {
+        *off = true;
+    }
 }
 
 /// Whether a target is a symbol of the bar.
@@ -760,19 +781,27 @@ impl MenuBar {
 /// A title as the turn's screens write it in their frame (`FUN_00730fed`):
 /// the screen's, the manager's name, his club and the date.
 pub(crate) fn manager_title(game: &Game, season: &Season, caption: u16) -> String {
+    manager_title_of(game, season, game.text(caption))
+}
+
+/// The same with a caption of its own.
+pub(crate) fn manager_title_of(game: &Game, season: &Season, caption: &str) -> String {
     let Some(manager) = season.manager() else { return String::new() };
     let club = manager.club.and_then(|(slot, c)| game.world.country(slot)?.clubs.get(c));
-    let date = season.date();
-    let date = game
-        .text(DATE)
-        .replace("%1", &date.format("%-d").to_string())
-        .replace("%2", &date.format("%-m").to_string())
-        .replace("%3", &date.format("%Y").to_string());
-    let who = format!("{} {} {}", game.text(caption), manager.first_name, manager.last_name);
+    let date = date_text(game, season.date());
+    let who = format!("{caption} {} {}", manager.first_name, manager.last_name);
     match club {
         Some(club) => format!("{who} ({}), {date}", club.name),
         None => format!("{who}, {date}"),
     }
+}
+
+/// A date as the game writes it: "8.9.2025" (text 1997).
+pub(crate) fn date_text(game: &Game, date: chrono::NaiveDate) -> String {
+    game.text(DATE)
+        .replace("%1", &date.format("%-d").to_string())
+        .replace("%2", &date.format("%-m").to_string())
+        .replace("%3", &date.format("%Y").to_string())
 }
 
 /// A title as the popups of the turn write it (text 1431, `FUN_00731086`):

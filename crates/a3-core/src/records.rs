@@ -822,8 +822,8 @@ impl Manager {
 /// The human managers' week planners (`CDatenTerminplaner`), by slot.
 const PLANNER_AT: u32 = 0x1c39620;
 /// A day of a planner: its kind, a flag, and what it is about.
-const PLANNER_DAYS: usize = 378;
-const PLANNER_ENTRY: usize = 0x1c;
+pub const PLANNER_DAYS: usize = 378;
+pub const PLANNER_ENTRY: usize = 0x1c;
 const PLANNER_ENTRIES_AT: usize = 0x24;
 
 record! {
@@ -833,12 +833,15 @@ record! {
 }
 
 /// An appointment of a planner: what kind of appointment (0 none), and the
-/// player it is about, for the kinds about a player.
+/// player it is about, for the kinds about a player; for a negotiation with
+/// another human's club its country (the player field's low byte) and its
+/// number, which booking leaves as it was.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Appointment {
     pub kind: u8,
     pub flag: u8,
     pub player: u16,
+    pub club: i16,
 }
 
 impl Planner {
@@ -847,7 +850,26 @@ impl Planner {
             return Appointment::default();
         }
         let at = PLANNER_ENTRIES_AT + day * PLANNER_ENTRY;
-        Appointment { kind: self.get(at), flag: self.get(at + 1), player: self.get(at + 4) }
+        Appointment {
+            kind: self.get(at),
+            flag: self.get(at + 1),
+            player: self.get(at + 4),
+            club: self.get(at + 6),
+        }
+    }
+
+    /// A day's whole entry, as it is stored.
+    pub fn entry(&self, day: usize) -> [u8; PLANNER_ENTRY] {
+        if day >= PLANNER_DAYS {
+            return [0; PLANNER_ENTRY];
+        }
+        self.get(PLANNER_ENTRIES_AT + day * PLANNER_ENTRY)
+    }
+
+    pub fn set_entry(&mut self, day: usize, entry: [u8; PLANNER_ENTRY]) {
+        if day < PLANNER_DAYS {
+            self.put(PLANNER_ENTRIES_AT + day * PLANNER_ENTRY, entry);
+        }
     }
 
     /// The teams of a day's match in a year calendar, home first: their

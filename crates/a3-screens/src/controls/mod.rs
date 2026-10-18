@@ -99,7 +99,9 @@ impl ControlView {
     pub fn new(control: &Control) -> Self {
         let text = || control.text.clone();
         let state = match &control.kind {
-            Kind::Static => ControlState::Static(StaticState { text: text(), clickable: false }),
+            Kind::Static => {
+                ControlState::Static(StaticState { text: text(), clickable: false, quiet: false })
+            }
             Kind::Button { .. } | Kind::States { .. } => {
                 ControlState::Button(ButtonState::default())
             }

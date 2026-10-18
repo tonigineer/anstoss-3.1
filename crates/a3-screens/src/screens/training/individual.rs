@@ -122,6 +122,10 @@ impl Screen for IndividualTraining {
         let (game, dialog) = (cx.game, cx.dialog);
         *self = Self::default();
         hub::open_bar(cx, view, INDIVIDUAL_TRAINING_SYMBOL);
+        // On the week's last day the short-term training closes too.
+        if hub::last_day(cx) {
+            hub::switch_off(cx, view, hub::SHORT_TRAINING_SYMBOL);
+        }
         if let Some(season) = cx.state.season.as_ref() {
             set(view, dialog, CAPTION_ID, hub::manager_title(game, season, CAPTION));
         }
@@ -317,6 +321,7 @@ fn fill(cx: &Cx, view: &mut View) {
             left: BAR_LEFT,
             width: individual::bar_width(tables.difficulty(keeper, ability)),
             value: i32::from(entry.progress.get(ability).copied().unwrap_or(0)),
+            fill: crate::controls::list::BAR_FILL,
         }));
     }
     let Some(list) = control(dialog, LIST).and_then(|c| view.list_mut(c)) else { return };
@@ -469,6 +474,7 @@ impl Screen for AbilityChoice {
                 left: CHOICE_BAR,
                 width: individual::bar_width(tables.difficulty(keeper, a)),
                 value: i32::from(entry.progress[a]),
+                fill: crate::controls::list::BAR_FILL,
             }));
             keys.push(a);
         }

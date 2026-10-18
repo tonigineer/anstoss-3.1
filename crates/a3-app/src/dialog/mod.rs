@@ -637,7 +637,7 @@ fn drag(
 ) {
     if let (Some(grip), Some((grab, zoom))) = (held.grip, held.grab) {
         let at = grab + Vec2::new(drag.distance.x, drag.distance.y) / (scale.0 * zoom);
-        let dragging = Some(a3_screens::view::Dragging { grip, at });
+        let dragging = Some(a3_screens::view::Dragging { grip, at, from: grab });
         if view.dragging != dragging {
             view.dragging = dragging;
         }

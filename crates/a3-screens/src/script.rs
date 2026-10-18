@@ -1177,6 +1177,28 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_calendar_books_and_the_planner_shows() {
+        let game = game();
+        // September: the family day dragged onto the 10th, the club party
+        // of the 15th clicked away; then the week planner.
+        let then = "now click bar 6\nuntil dialog 348\nnow drag at 544 355 to 244 180\n\
+                    now cell 4459 14 4\nnow click bar 7\nuntil dialog 413";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        let state = runner.host.state();
+        let calendar = &state.records.as_ref().unwrap().calendars[0];
+        let booked = a3_core::year::day(calendar, 65);
+        assert_eq!((booked.kind(), booked.value()), (a3_core::year::EVENT, 0));
+        assert_eq!(a3_core::year::day(calendar, 70).kind(), 0);
+        let dialog = &game.dialogs[&413];
+        let view = runner.host.view();
+        let rows = crate::screens::control(dialog, 5034).unwrap();
+        let labels = &view.options(rows).unwrap().labels;
+        assert_eq!(labels[1], "Vertragsverhandlung\nTom Rothe");
+        assert_eq!(labels[6], "Einzelgespräch\nRobert Skov");
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_talk_is_booked_in_the_planner() {
         let game = game();
         // The keeper's menu on the first day of a week: the talk is its
@@ -1224,6 +1246,7 @@ mod tests {
         view.dragging = Some(crate::view::Dragging {
             grip: crate::pointer::Grip::Row { control: list, row: 3 },
             at,
+            from: at,
         });
         let after = draw(&view);
         // The box's picture lies under the pointer, and nowhere else changed.

@@ -16,12 +16,14 @@ pub struct StaticState {
     pub text: String,
     /// Statics only answer the pointer when the flow says so.
     pub clickable: bool,
+    /// One that answers to be dragged does not light up.
+    pub quiet: bool,
 }
 
 impl StaticState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let Some(font) = paint.font_of(paint.control.font) else { return };
-        let pointed = paint.pointed(Target::Control(paint.index));
+        let pointed = paint.pointed(Target::Control(paint.index)) && !self.quiet;
         let [r, g, b] = paint.control.ink;
         let color = if pointed { TEXT_HOVER } else { Rgba([r, g, b, 255]) };
         draw_static(font, frame, paint.control, &self.text, color);

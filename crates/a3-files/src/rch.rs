@@ -101,6 +101,10 @@ pub enum Kind {
         items: Vec<Item>,
         /// Bits of the game's own: [`TOGGLE_OPTIONS`].
         style: u16,
+        /// Its labels' colour, and the chosen option's (COLORREFs after the
+        /// image).
+        ink: [u8; 3],
+        chosen_ink: [u8; 3],
     },
     /// A box to tick, with its label beside it.
     Check,
@@ -223,6 +227,15 @@ const PUSH_STYLE: u16 = 0x300;
 /// words of its extra data; and its bit that lets a click on the chosen
 /// option clear it (`OnLButtonDown_007a6d03`).
 const OPTIONS_STYLE: usize = 11;
+/// Where a group's label colours are in its data.
+const LABEL_INK: usize = 4;
+const CHOSEN_INK: usize = 8;
+
+/// A COLORREF in a control's data, as red, green and blue.
+fn colour(extra: &[u8], at: usize) -> [u8; 3] {
+    let [r, g, b, _] = u32_at(extra, at).unwrap_or(0).to_le_bytes();
+    [r, g, b]
+}
 pub const TOGGLE_OPTIONS: u16 = 0x400;
 /// Where a combo box keeps how far its list drops (in words) and its style
 /// (in bytes) in its extra data.
@@ -334,6 +347,8 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
             image: u16s(1)?,
             items: parse_items(extra, usize::from(u16s(0)?)),
             style: u16s(OPTIONS_STYLE).unwrap_or(0),
+            ink: colour(extra, LABEL_INK),
+            chosen_ink: colour(extra, CHOSEN_INK),
         },
         5 => Kind::Combo {
             drop: u16s(COMBO_DROP).unwrap_or(DEFAULT_DROP),
