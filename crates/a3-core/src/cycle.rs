@@ -77,6 +77,10 @@ pub mod dialogs {
     /// The balance sheet, the bar's ninth symbol; the finances, its tenth.
     pub const BALANCE: u16 = 349;
     pub const FINANCES: u16 = 417;
+    /// The squad and the transfer market, the bar's eleventh symbol, and
+    /// its current squad.
+    pub const SQUAD_MENU: u16 = 218;
+    pub const CURRENT_SQUAD: u16 = 216;
     /// The balance sheet's deposits, its loans, a loan paid back, the
     /// bank's refusal.
     pub const INVESTMENTS: u16 = 16;

@@ -457,7 +457,7 @@ fn bars(view: &mut View, dialog: &Dialog, graph: &[[f64; ROWS]; 4]) {
 }
 
 /// A figure of the finances (`FUN_004db67a`): "1.234.567", "- 982.535".
-fn amount(game: &Game, v: i64) -> String {
+pub(crate) fn amount(game: &Game, v: i64) -> String {
     let sign = if v < 0 { '-' } else { ' ' };
     let v = v.unsigned_abs();
     let written = match v {

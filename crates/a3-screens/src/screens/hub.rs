@@ -26,8 +26,8 @@ use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
 pub use a3_core::cycle::dialogs::{
     ABILITY_CHOICE, BALANCE, COMPARISON, DRESSING_ROOM, FINANCES, INDIVIDUAL_TRAINING, LINEUP,
-    LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, TACTICS, TRAINING_PICTURES, UNIT_CHOICE,
-    WEEK_PLANNER, YEAR_CALENDAR,
+    LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, SQUAD_MENU, TACTICS, TRAINING_PICTURES,
+    UNIT_CHOICE, WEEK_PLANNER, YEAR_CALENDAR,
 };
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
@@ -59,6 +59,7 @@ pub(crate) const YEAR_CALENDAR_SYMBOL: usize = 6;
 pub(crate) const WEEK_PLANNER_SYMBOL: usize = 7;
 pub(crate) const BALANCE_SYMBOL: usize = 8;
 pub(crate) const FINANCES_SYMBOL: usize = 9;
+pub(crate) const SQUAD_SYMBOL: usize = 10;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 /// What the turn before a match closes: the money, the club, the national
 /// team (the table at 0x8a35b0).
@@ -67,7 +68,7 @@ const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 11] = [
+const BAR_SCREENS: [(usize, u16); 12] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
@@ -78,6 +79,7 @@ const BAR_SCREENS: [(usize, u16); 11] = [
     (WEEK_PLANNER_SYMBOL, WEEK_PLANNER),
     (BALANCE_SYMBOL, BALANCE),
     (FINANCES_SYMBOL, FINANCES),
+    (SQUAD_SYMBOL, SQUAD_MENU),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
 /// What the game takes for Saturday.
@@ -98,7 +100,7 @@ const CAPTION_ID: u16 = 9920;
 /// 0x884a38, their texts at 0x8a4508). The talk is not offered on a week's
 /// last day.
 const MENU_ID: u16 = 9950;
-const MENU: [(Command, u16); 5] = [
+pub(crate) const MENU: [(Command, u16); 5] = [
     (Command::Info, 4036),
     (Command::Talk, 4045),
     (Command::Blank, 4046),
@@ -109,7 +111,7 @@ const WEEK: usize = 7;
 
 /// What an entry of a player's menu does.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Command {
+pub(crate) enum Command {
     Info,
     Talk,
     Blank,
@@ -317,16 +319,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
         }
         if line_up(id) {
             // The menu a right click on a player opens, over everything.
-            let menu = Control {
-                kind: Kind::Menu,
-                rect: Rect::new(0.0, 0.0, 0.0, 0.0),
-                align: Align::Left,
-                text: String::new(),
-                id: Some(MENU_ID),
-                font: a3_files::rch::PLAIN_FONT,
-                ink: [0; 3],
-            };
-            dialog.controls.push(menu);
+            dialog.controls.push(menu_control());
         }
         add_bar(dialog, rules);
     }
@@ -953,6 +946,13 @@ fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip, commands: &[Command]) -> 
         Place::Bench(i) => club.lineup.bench[i]?,
         Place::Player(p) => p,
     };
+    show_menu(cx, view, grip, commands)?;
+    Some(player)
+}
+
+/// Shows a player's menu of `commands` where a right click fell, in the
+/// dialog's menu control.
+pub(crate) fn show_menu(cx: &Cx, view: &mut View, grip: Grip, commands: &[Command]) -> Option<()> {
     let target = match grip {
         Grip::Control(c) => Target::Control(c),
         Grip::Row { control, row } => Target::Row { control, row },
@@ -967,7 +967,32 @@ fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip, commands: &[Command]) -> 
         m.at = Some(rect.center());
         m.entries = entries;
     }
-    Some(player)
+    Some(())
+}
+
+/// The menu a right click opens, over everything else.
+pub(crate) fn menu_control() -> Control {
+    Control {
+        kind: Kind::Menu,
+        rect: Rect::new(0.0, 0.0, 0.0, 0.0),
+        align: Align::Left,
+        text: String::new(),
+        id: Some(MENU_ID),
+        font: a3_files::rch::PLAIN_FONT,
+        ink: [0; 3],
+    }
+}
+
+/// Closes the menu; the entry chosen, if the click fell on one.
+pub(crate) fn close_menu(cx: &Cx, view: &mut View, target: Target) -> Option<usize> {
+    let menu = control(cx.dialog, MENU_ID);
+    if let Some(ControlState::Menu(m)) = menu.map(|m| &mut view.controls[m].state) {
+        m.at = None;
+    }
+    match target {
+        Target::Option { control: c, item } if Some(c) == menu => Some(item),
+        _ => None,
+    }
 }
 
 /// Where on the line-up a grip is: a spot, a place on the bench, or a
@@ -1532,13 +1557,13 @@ pub(crate) fn filled_box(
 }
 
 /// A position's short name: "IV".
-fn abbreviation(game: &Game, kind: u8) -> String {
+pub(crate) fn abbreviation(game: &Game, kind: u8) -> String {
     let id = game.rules.pitch.abbreviations.get(usize::from(kind)).copied().unwrap_or(0);
     game.text(id as u16).to_owned()
 }
 
 /// A player as boxes and lists name him: "Name, F.".
-fn name(player: &Player) -> String {
+pub(crate) fn name(player: &Player) -> String {
     match player.first_name.chars().next() {
         Some(initial) => format!("{}, {initial}.", player.last_name),
         None => player.last_name.clone(),
@@ -1546,7 +1571,7 @@ fn name(player: &Player) -> String {
 }
 
 /// Tenths as the game prints them: "7.3".
-fn tenths(value: i32) -> String {
+pub(crate) fn tenths(value: i32) -> String {
     format!("{:.1}", value as f32 / 10.0)
 }
 
@@ -1564,7 +1589,7 @@ mod tests {
     use crate::screens::compose;
 
     /// A symbol not built yet.
-    const UNBUILT_SYMBOL: usize = 10;
+    const UNBUILT_SYMBOL: usize = 11;
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]

@@ -129,7 +129,7 @@ pub fn order(
 
 /// The original's sort (`FUN_0050f112`): every row against each above it,
 /// swapped when it goes before — sorted, but not stably.
-fn exchange_sort(mut rows: Vec<usize>, before: impl Fn(usize, usize) -> bool) -> Vec<usize> {
+pub fn exchange_sort(mut rows: Vec<usize>, before: impl Fn(usize, usize) -> bool) -> Vec<usize> {
     for i in 1..rows.len() {
         for j in 0..i {
             if before(rows[i], rows[j]) {

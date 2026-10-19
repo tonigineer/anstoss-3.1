@@ -20,6 +20,7 @@ pub mod planner;
 pub mod playerinfo;
 pub mod popups;
 pub mod special;
+pub mod squad;
 pub mod start;
 pub mod tactics;
 pub mod talk;
@@ -137,6 +138,8 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(bank::Loans::default()),
         Box::new(bank::Repayment::default()),
         Box::new(bank::NoCredit),
+        Box::new(squad::SquadMenu::default()),
+        Box::new(squad::CurrentSquad::default()),
         Box::new(talk::TalkScreen::default()),
         Box::new(talk::Mates::default()),
         Box::new(tactics::TacticsScreen::default()),
@@ -173,6 +176,8 @@ pub fn compose(game: &mut Game) {
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);
+    squad::compose(&mut game.dialogs, &game.data.rules);
+    squad::compose_squad(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
 }
 

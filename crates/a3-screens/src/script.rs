@@ -1285,6 +1285,29 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_squad_is_listed_by_position() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 0\nuntil dialog 216";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&216];
+        let list = view.list(crate::screens::control(dialog, 3298).unwrap()).unwrap();
+        // By main position, the keepers first; fifteen columns a row.
+        let positions: Vec<&str> =
+            list.rows.iter().map(|r| r.split('\t').nth(1).unwrap()).collect();
+        assert_eq!(positions[0], "TO");
+        assert!(list.rows.iter().all(|r| r.split('\t').count() == 15));
+        let line = view.text(crate::screens::control(dialog, 3299).unwrap());
+        assert!(
+            line.starts_with(&format!("Derzeit verfügen Sie über {} Spieler", list.rows.len()))
+        );
+        // The fine's mode on the first row opens its dialog.
+        let then = format!("{open}\nnow choose 5657 4\nnow row 3298 0\nuntil dialog 85");
+        on_save(&game, "Probe1", &then).unwrap();
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_finances_show_the_season_row_by_row() {
         let game = game();
         let texts = |then: &str, ids: &[u16]| -> Vec<String> {
