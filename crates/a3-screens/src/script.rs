@@ -1251,6 +1251,40 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_loan_is_taken_and_paid_back() {
+        let game = game();
+        let loans = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            a3_core::finances::loans_of(team)
+        };
+        // 30.000 € for two years, not to be paid back early; then 10.000 €
+        // for a year, which may.
+        let then = "now click bar 8\nuntil dialog 349\nnow press 4462\nuntil dialog 335\n\
+                    now spin 4363 up\nnow spin 4363 up\nnow choose 6061 4\nnow press 4361\n\
+                    now choose 6061 0\nnow slide 4363 1\nnow press 4361";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let taken = loans(&runner);
+        assert_eq!(taken.len(), 2);
+        assert_eq!((taken[0].principal, taken[0].term, taken[0].repayable), (30_000, 1, false));
+        assert_eq!((taken[1].principal, taken[1].term, taken[1].repayable), (10_000, 0, true));
+        assert_eq!(taken[0].rates[0] - taken[1].rates[0], -150);
+        // The fixed one cannot be paid back; the other all at once.
+        let fixed = format!("{then}\nnow row 4299 0\nnow press 4362\nuntil dialog 380");
+        assert_eq!(loans(&on_save(&game, "Probe1", &fixed).unwrap()).len(), 2);
+        let then = format!(
+            "{then}\nnow row 4299 1\nnow press 4362\nuntil dialog 138\n\
+                            now press 2457\nuntil dialog 335"
+        );
+        let left = loans(&on_save(&game, "Probe1", &then).unwrap());
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].principal, 30_000);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_finances_show_the_season_row_by_row() {
         let game = game();
         let texts = |then: &str, ids: &[u16]| -> Vec<String> {

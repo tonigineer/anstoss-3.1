@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use a3_core::cycle::Request;
-use a3_core::finances::{self, Balance as Figures, Refusal};
+use a3_core::finances::{self, Balance as Figures, LEAST_LOAN, Refusal};
 use a3_core::forecast::Forecast;
 use a3_core::records::{Records, Team};
 use a3_core::season::Rules;
@@ -19,7 +19,7 @@ use crate::controls::bitmap::Picture;
 use crate::game::Game;
 use crate::pointer::Target;
 use crate::view::View;
-use a3_core::cycle::dialogs::{INVESTMENTS, NOTICE};
+use a3_core::cycle::dialogs::{INVESTMENTS, LOANS as LOANS_DIALOG, NO_CREDIT, NOTICE};
 
 /// The OK, whose place the bar takes.
 const OK: u16 = 1;
@@ -49,8 +49,9 @@ const SHARES: u16 = 5511;
 const SHARE_PRICE: u16 = 5512;
 const MARKET_VALUE: u16 = 5513;
 const AG_TEXT: u16 = 4590;
-/// The button to the deposits.
+/// The buttons to the deposits and the loans.
 const DEPOSITS_BUTTON: u16 = 4461;
+const LOANS_BUTTON: u16 = 4462;
 /// The button to the stock market, and why it refuses.
 const AG_BUTTON: u16 = 6152;
 const LEAGUE_REFUSAL: u16 = 4582;
@@ -107,9 +108,8 @@ impl Screen for Balance {
         open_screen(cx, view, BALANCE_SYMBOL);
         fill_balance(cx, view);
         let works = |target: Target| match target {
-            Target::Button(c) => {
-                [AG_BUTTON, DEPOSITS_BUTTON].contains(&dialog.controls[c].id.unwrap_or(0))
-            }
+            Target::Button(c) => [AG_BUTTON, DEPOSITS_BUTTON, LOANS_BUTTON]
+                .contains(&dialog.controls[c].id.unwrap_or(0)),
             _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
         };
         mark_inert(view, dialog, works);
@@ -134,6 +134,16 @@ impl Screen for Balance {
             Target::Button(c) if cx.dialog.controls[c].id == Some(DEPOSITS_BUTTON) => {
                 self.whistle = false;
                 Outcome::Popup(Request::new(INVESTMENTS))
+            }
+            // The loans, while there is more than a little to invest
+            // (`FUN_00481aeb`).
+            Target::Button(c) if cx.dialog.controls[c].id == Some(LOANS_BUTTON) => {
+                self.whistle = false;
+                let investable = own_team(cx.game, cx).map_or(0, |(records, team)| {
+                    Figures::of(team, records.globals.fund_prices(), &records.agreed()).investable()
+                });
+                let dialog = if investable > LEAST_LOAN { LOANS_DIALOG } else { NO_CREDIT };
+                Outcome::Popup(Request::new(dialog))
             }
             _ => Outcome::Stay,
         }

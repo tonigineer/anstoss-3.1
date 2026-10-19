@@ -610,3 +610,171 @@ pub fn step_position(units: i64) -> i32 {
     };
     p as i16 as i32
 }
+
+/// A loan of the club: its slot, what is still owed, its rates for the
+/// first, second and further years, its term, whether it may be paid back
+/// early, the bank days it was paid on and taken on, and its end (years ×
+/// 1000 + the day it was taken).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Loan {
+    pub slot: usize,
+    pub principal: i64,
+    pub rates: [i16; 3],
+    pub term: u8,
+    pub repayable: bool,
+    pub paid: i16,
+    pub taken: i16,
+    pub end: i16,
+}
+
+/// A loan's fields.
+const LOAN_PRINCIPAL: usize = 0;
+const LOAN_RATES: usize = 8;
+const LOAN_TERM: usize = 0xe;
+const LOAN_FLAGS: usize = 0xf;
+const LOAN_PAID: usize = 0x10;
+const LOAN_TAKEN: usize = 0x12;
+const LOAN_END: usize = 0x14;
+const IN_USE: u8 = 1;
+const REPAYABLE: u8 = 2;
+/// The terms' years (`DAT_0088d498`).
+pub const LOAN_YEARS: [i16; 3] = [1, 2, 5];
+/// The bank's rates by term, less than the first year's, repayable ones
+/// first (`FUN_005d77a6`).
+const RATE_STEPS: [i16; 6] = [0, 25, 50, 150, 175, 200];
+/// The least the bank lends; a year of the bank's, in days.
+pub const LEAST_LOAN: i64 = 10_000;
+const BANK_YEAR: i32 = 360;
+
+fn loan_at(slot: usize, field: usize) -> usize {
+    at(0x318 + ENTRY * slot + field)
+}
+
+/// The bank's six rates: repayable and not, for one, two and five years.
+pub fn credit_rates(base: i16) -> [i16; 6] {
+    RATE_STEPS.map(|step| base.wrapping_sub(step))
+}
+
+/// The loans in use (`FUN_005d791d`).
+pub fn loans_of(team: &Team) -> Vec<Loan> {
+    (0..LOANS)
+        .filter(|&slot| team.get::<u8>(loan_at(slot, LOAN_FLAGS)) & IN_USE != 0)
+        .map(|slot| {
+            let rate = |k: usize| team.get::<i16>(loan_at(slot, LOAN_RATES + 2 * k));
+            Loan {
+                slot,
+                principal: team.get::<i64>(loan_at(slot, LOAN_PRINCIPAL)),
+                rates: [rate(0), rate(1), rate(2)],
+                term: team.get::<u8>(loan_at(slot, LOAN_TERM)),
+                repayable: team.get::<u8>(loan_at(slot, LOAN_FLAGS)) & REPAYABLE != 0,
+                paid: team.get::<i16>(loan_at(slot, LOAN_PAID)),
+                taken: team.get::<i16>(loan_at(slot, LOAN_TAKEN)),
+                end: team.get::<i16>(loan_at(slot, LOAN_END)),
+            }
+        })
+        .collect()
+}
+
+/// The first loan slot free (`FUN_005d8177`).
+pub fn free_loan(team: &Team) -> Option<usize> {
+    (0..LOANS).find(|&slot| team.get::<u8>(loan_at(slot, LOAN_FLAGS)) & IN_USE == 0)
+}
+
+impl Balance {
+    /// What the bank would still lend: what may be invested and half the
+    /// deposits, less the loans (`FUN_00622db2`).
+    pub fn credit_frame(&self) -> i64 {
+        self.investable().wrapping_add(self.deposits / 2).wrapping_sub(self.loans)
+    }
+}
+
+impl Loan {
+    /// The rate it runs at now, in 1/100 %.
+    pub fn rate(&self) -> i16 {
+        self.rates[usize::from(self.term).min(2)]
+    }
+
+    /// The months until it ends, by the season's start year and today's
+    /// month and year (`FUN_005d791d`).
+    pub fn months_left(&self, start_year: u16, month: u16, year: u16) -> i32 {
+        let mut m = i32::from(self.end % 1000 / 30) + 7;
+        let mut y = i32::from(start_year) + i32::from(self.end / 1000);
+        if m > 12 {
+            m -= 12;
+            y += 1;
+        }
+        (y - i32::from(year)) * 12 + m - i32::from(month)
+    }
+
+    /// The days the bank counts it as running (`FUN_004fb7b9`).
+    fn days(&self, bank_day: i16) -> i16 {
+        self.paid.wrapping_add(bank_day).wrapping_sub(self.taken)
+    }
+
+    /// What paying back an amount early costs more, or saves, by the rate
+    /// of the years it has run against its own (`FUN_004fbb79`).
+    pub fn early_cost(&self, amount: i32, bank_day: i16) -> i32 {
+        let days = self.days(bank_day);
+        let years = match days {
+            ..360 => 0,
+            360..720 => 1,
+            _ => 2,
+        };
+        let difference = i32::from(self.rates[years]) - i32::from(self.rate());
+        amount / 100 * difference / 100 * i32::from(days) / BANK_YEAR
+    }
+}
+
+/// A loan asked for: how much, for which term, whether it may be paid back
+/// early.
+#[derive(Clone, Copy, Debug)]
+pub struct Credit {
+    pub amount: i64,
+    pub term: u8,
+    pub repayable: bool,
+}
+
+/// A loan taken in a free slot: its rates from the bank's six, its end
+/// after its years (`OnClicked_IDC_KREDITE_AUFNEHMEN_005d7fb3`). The cash is
+/// not touched: the bank's money is more by the loan.
+pub fn borrow(
+    team: &mut Team,
+    slot: usize,
+    credit: Credit,
+    rates: [i16; 6],
+    bank_day: i16,
+    today: u16,
+) {
+    let Credit { amount, term, repayable } = credit;
+    team.put(loan_at(slot, LOAN_PRINCIPAL), amount);
+    team.put(loan_at(slot, LOAN_TERM), term);
+    team.put(loan_at(slot, LOAN_FLAGS), if repayable { IN_USE | REPAYABLE } else { IN_USE });
+    let first = if repayable { 0 } else { 3 };
+    for k in 0..3 {
+        team.put(loan_at(slot, LOAN_RATES + 2 * k), rates[first + k]);
+    }
+    team.put(loan_at(slot, LOAN_TAKEN), bank_day);
+    let years = LOAN_YEARS[usize::from(term).min(2)];
+    team.put(loan_at(slot, LOAN_END), years.wrapping_mul(1000).wrapping_add(today as i16));
+    team.put(loan_at(slot, LOAN_PAID), 0i16);
+}
+
+/// An amount paid back: all of it ends the loan; less is taken off it,
+/// the interest since it was taken booked — by a slip of the game's, as
+/// the other costs doubled (`FUN_006481ac`, `FUN_0064809f`).
+pub fn repay(team: &mut Team, loan: &Loan, amount: i32, bank_day: i16) {
+    if loan.principal <= i64::from(amount) {
+        team.put(loan_at(loan.slot, LOAN_PRINCIPAL), 0i64);
+        team.put(loan_at(loan.slot, LOAN_FLAGS), 0u8);
+        return;
+    }
+    if loan.taken < bank_day {
+        let days = i32::from(bank_day) - i32::from(loan.taken);
+        let interest = amount / 100 * i32::from(loan.rate()) / 100 * days / BANK_YEAR;
+        let costs = team.get::<i32>(at(LOSSES));
+        let sum = i64::from(costs) + i64::from(interest);
+        let booked = if sum < 0x8000_0000 { costs.wrapping_add(costs) } else { i32::MAX };
+        team.put(at(LOSSES), booked);
+    }
+    team.put(loan_at(loan.slot, LOAN_PRINCIPAL), loan.principal - i64::from(amount));
+}

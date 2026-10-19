@@ -945,6 +945,8 @@ record! {
     /// The bank's rates for loans and for the overdraft, in 1/100 %.
     0xb5cc80 => loan_rate, set_loan_rate: i16;
     0xb5cc84 => overdraft_rate, set_overdraft_rate: i16;
+    /// What a repayable loan for a year costs, in 1/100 % (`DAT_00b5cc86`).
+    0xb5cc86 => credit_rate, set_credit_rate: i16;
     /// What call money pays, in 1/100 % (`DAT_00b5cc8a`).
     0xb5cc8a => deposit_rate, set_deposit_rate: i16;
     /// How far the European cups are: the Champions League's stage (0 the

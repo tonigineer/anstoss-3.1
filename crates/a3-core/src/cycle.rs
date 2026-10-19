@@ -77,8 +77,12 @@ pub mod dialogs {
     /// The balance sheet, the bar's ninth symbol; the finances, its tenth.
     pub const BALANCE: u16 = 349;
     pub const FINANCES: u16 = 417;
-    /// The balance sheet's deposits.
+    /// The balance sheet's deposits, its loans, a loan paid back, the
+    /// bank's refusal.
     pub const INVESTMENTS: u16 = 16;
+    pub const LOANS: u16 = 335;
+    pub const REPAYMENT: u16 = 138;
+    pub const NO_CREDIT: u16 = 24;
     pub const TRAINING_PICTURES: u16 = 513;
     pub const UNIT_CHOICE: u16 = 362;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
@@ -151,6 +155,8 @@ pub enum Args {
     TextForDate(u16, usize),
     /// A text by its id, with an amount of money for its `%s`.
     TextForMoney(u16, i64),
+    /// A loan of the current club, by its slot.
+    Loan(usize),
     /// How a player took a sick visit (`medical::Reaction`).
     Visit {
         player: u16,
