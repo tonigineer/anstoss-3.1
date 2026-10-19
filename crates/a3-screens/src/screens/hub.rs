@@ -25,9 +25,9 @@ use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
 pub use a3_core::cycle::dialogs::{
-    ABILITY_CHOICE, COMPARISON, DRESSING_ROOM, INDIVIDUAL_TRAINING, LINEUP, LINEUP_LIST,
-    LONG_TRAINING, SHORT_TRAINING, TACTICS, TRAINING_PICTURES, UNIT_CHOICE, WEEK_PLANNER,
-    YEAR_CALENDAR,
+    ABILITY_CHOICE, BALANCE, COMPARISON, DRESSING_ROOM, FINANCES, INDIVIDUAL_TRAINING, LINEUP,
+    LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, TACTICS, TRAINING_PICTURES, UNIT_CHOICE,
+    WEEK_PLANNER, YEAR_CALENDAR,
 };
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
@@ -57,12 +57,17 @@ pub(crate) const SHORT_TRAINING_SYMBOL: usize = 4;
 pub(crate) const INDIVIDUAL_TRAINING_SYMBOL: usize = 5;
 pub(crate) const YEAR_CALENDAR_SYMBOL: usize = 6;
 pub(crate) const WEEK_PLANNER_SYMBOL: usize = 7;
+pub(crate) const BALANCE_SYMBOL: usize = 8;
+pub(crate) const FINANCES_SYMBOL: usize = 9;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
+/// What the turn before a match closes: the money, the club, the national
+/// team (the table at 0x8a35b0).
+const BEFORE_MATCH_CLOSED: [usize; 7] = [8, 9, 10, 11, 12, 13, 15];
 const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 9] = [
+const BAR_SCREENS: [(usize, u16); 11] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
@@ -71,6 +76,8 @@ const BAR_SCREENS: [(usize, u16); 9] = [
     (INDIVIDUAL_TRAINING_SYMBOL, INDIVIDUAL_TRAINING),
     (YEAR_CALENDAR_SYMBOL, YEAR_CALENDAR),
     (WEEK_PLANNER_SYMBOL, WEEK_PLANNER),
+    (BALANCE_SYMBOL, BALANCE),
+    (FINANCES_SYMBOL, FINANCES),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
 /// What the game takes for Saturday.
@@ -363,6 +370,9 @@ pub(crate) fn open_bar(cx: &Cx, view: &mut View, own: usize) {
     };
     if season.day % WEEK_DAYS == SATURDAY {
         SATURDAY_CLOSED.iter().for_each(|&s| state.off[s] = true);
+    }
+    if season.before_match {
+        BEFORE_MATCH_CLOSED.iter().for_each(|&s| state.off[s] = true);
     }
     if manager.national_team.is_none() {
         state.off[NATIONAL_SYMBOL] = true;
@@ -1554,7 +1564,7 @@ mod tests {
     use crate::screens::compose;
 
     /// A symbol not built yet.
-    const UNBUILT_SYMBOL: usize = 8;
+    const UNBUILT_SYMBOL: usize = 10;
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]

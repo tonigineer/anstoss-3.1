@@ -47,10 +47,13 @@ const MIN_HANDLE: i32 = 8;
 /// Rows the mouse wheel scrolls per notch, as Windows does.
 pub const WHEEL_ROWS: i32 = 3;
 /// The colour a selected row is drawn half over with, by the list's
-/// scheme (the table at 0x8ae138; `FUN_0079c633` with alpha 0x80), as high
-/// as the list's font; rows this high or more start it further in.
+/// scheme (the schemes at 0x8ae138, 0x2e4 bytes apart; `FUN_0079c633` with
+/// alpha 0x80), as high as the list's font; rows this high or more start
+/// it further in. The schemes hold COLORREFs, which the blend hands on as
+/// they are to a library that reads 0xRRGGBB: red and blue swap, the
+/// first scheme's red shows blue, the fifth's cyan yellow.
 const SELECTION: [[u8; 3]; 6] =
-    [[255, 0, 0], [0, 0, 255], [200, 200, 200], [0, 255, 0], [0, 255, 255], [200, 200, 200]];
+    [[0, 0, 255], [255, 0, 0], [200, 200, 200], [0, 255, 0], [255, 255, 0], [200, 200, 200]];
 const TALL_ROW: f32 = 36.0;
 const TALL_ROW_INDENT: i32 = 12;
 

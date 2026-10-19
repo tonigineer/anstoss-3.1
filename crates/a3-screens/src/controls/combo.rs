@@ -28,6 +28,8 @@ const ROW: i32 = 16;
 /// The list starts this far below the field's top; its window reaches as
 /// far below the field as the combo box says.
 const LIST_TOP: i32 = 20;
+/// The screen the game sets, which a dropped list stays on.
+const SCREEN_HEIGHT: f32 = 480.0;
 /// Only the arrow at the field's right end drops the list
 /// (`OnLButtonDown_007989d9`).
 const ARROW: f32 = 20.0;
@@ -101,11 +103,21 @@ impl ComboState {
         drop + control.rect.height() as i32 - LIST_TOP
     }
 
-    /// The dropped list, in classic pixels.
+    /// The dropped list, in classic pixels: below the field, or above it
+    /// where the screen ends too soon, as Windows drops it.
     fn list(control: &Control) -> Rect {
         let r = control.rect;
+        let height = Self::height(control) as f32;
+        if Self::above(control) {
+            return Rect::new(r.min.x, r.min.y - height, r.max.x, r.min.y);
+        }
         let top = r.min.y + LIST_TOP as f32;
-        Rect::new(r.min.x, top, r.max.x, top + Self::height(control) as f32)
+        Rect::new(r.min.x, top, r.max.x, top + height)
+    }
+
+    /// Whether the list drops above the field.
+    fn above(control: &Control) -> bool {
+        control.rect.min.y + (LIST_TOP + Self::height(control)) as f32 > SCREEN_HEIGHT
     }
 
     /// How many rows the list shows.
@@ -176,8 +188,11 @@ impl ComboState {
         fill(frame, x0, y1 - 1, w - 1, 1, EDGE);
         let scrolls = self.scrolls(control);
         let right = if scrolls { x1 - 1 - BAR } else { x1 - 1 };
-        // The rows, clipped above that line.
-        let mut rows = RgbaImage::from_pixel((right - x0 - 1).max(1) as u32, (h - 3) as u32, LIST);
+        // The rows, clipped above that line, from a line below the top —
+        // from the top in a list above the field.
+        let first = if Self::above(control) { y0 } else { y0 + 1 };
+        let mut rows =
+            RgbaImage::from_pixel((right - x0 - 1).max(1) as u32, (y1 - 2 - first) as u32, LIST);
         let font = paint.font();
         for (i, text) in self.items.iter().enumerate().skip(self.scroll) {
             let top = ((i - self.scroll) as i32) * ROW;
@@ -195,7 +210,7 @@ impl ComboState {
                 draw_text(font, &mut rows, control, (0, top), ROW_TEXT - 1, text, right);
             }
         }
-        paste(frame, &rows, Vec2::new((x0 + 1) as f32, (y0 + 1) as f32));
+        paste(frame, &rows, Vec2::new((x0 + 1) as f32, first as f32));
         if scrolls {
             let bar = right;
             fill(frame, bar, y0 + 1, BAR, h - 3 - BAR, STRIP);
@@ -254,8 +269,9 @@ impl ComboState {
         let scrolls = self.scrolls(control);
         let right = if scrolls { l.max.x - 1.0 - BAR as f32 } else { l.max.x - 1.0 };
         let shown = self.items.len().saturating_sub(self.scroll).min(Self::rows(control) + 1);
+        let first = if Self::above(control) { l.min.y } else { l.min.y + 1.0 };
         for row in 0..shown {
-            let top = l.min.y + 1.0 + (row as i32 * ROW) as f32;
+            let top = first + (row as i32 * ROW) as f32;
             let bottom = (top + ROW as f32).min(l.max.y - 1.0);
             let r = Rect::new(l.min.x + 1.0, top, right, bottom);
             out.push((Target::Row { control: index, row }, geometry.map(r)));

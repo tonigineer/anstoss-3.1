@@ -443,6 +443,15 @@ record! {
     /// observation list (the club object's +0x27c): how much it knows of
     /// its opponents.
     0x4f4 => observation_cost, set_observation_cost: i32;
+    /// What the bank's credit limit grows with, 0 to 8: the less, the more
+    /// (the club object's +0xec; BILANZ.md).
+    0x11c => credit_class, set_credit_class: u8;
+    /// The overdraft the bank allows, in 100.000s (the club object's +0x4f0).
+    0x768 => overdraft, set_overdraft: i16;
+    /// Bit 0: the club went to the stock market, an AG (`FUN_0069d71d`).
+    0x924 => legal_form, set_legal_form: u8;
+    /// Bit 7: only call money for its deposits (the club object's +0x101).
+    0x12b => standing, set_standing: u8;
     0xcc => style, set_style: u8;
     0xcd => effort, set_effort: u8;
     0xce => hardness, set_hardness: u8;
@@ -933,6 +942,11 @@ record! {
     0xb5cbc8 => seasons, set_seasons: u16;
     /// The funds' prices, which deposits are worth by (`DAT_00b5cc8c`).
     0xb5cc8c => fund_prices, set_fund_prices: [i32; 5];
+    /// The bank's rates for loans and for the overdraft, in 1/100 %.
+    0xb5cc80 => loan_rate, set_loan_rate: i16;
+    0xb5cc84 => overdraft_rate, set_overdraft_rate: i16;
+    /// What call money pays, in 1/100 % (`DAT_00b5cc8a`).
+    0xb5cc8a => deposit_rate, set_deposit_rate: i16;
     /// How far the European cups are: the Champions League's stage (0 the
     /// qualifier, 1 and 2 the group stages, then the knock-out rounds) and
     /// the UEFA cup's round (EUROPAPOKAL-STAND.md).
@@ -964,6 +978,9 @@ record! {
     0xb5cbe0 => day_of_year, set_day_of_year: u16;
     /// Days in this year.
     0xb5cca4 => year_days, set_year_days: u16;
+    /// The European ranking: fifteen countries, a row of 0x24 bytes each
+    /// starting with the country (`DAT_00b5d1a8`).
+    0xb5d1a8 => ranking, set_ranking: [u8; 15 * 0x24];
     /// A player for each position whose market value counts a fifth more,
     /// by id.
     0xb5dfd0 => stars, set_stars: [u16; 11];
@@ -1006,6 +1023,38 @@ impl Luck {
 }
 
 /// The block of tables by country (`0xae5b18`, its data from `0xae5b38`).
+/// The transfers agreed for the season's end (`0x1be0b40`, `FUN_0070ffef`):
+/// a u16 count, then pages of 100 entries of 0x28 bytes from +4, one
+/// after the other.
+const AGREED_AT: u32 = 0x1be0b40;
+const AGREED_ENTRY: usize = 0x28;
+
+/// A transfer agreed: the player, the club selling him and the club
+/// buying him (country and number), the fee, and a flag the buyer's sum
+/// leaves such transfers out by.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Agreed {
+    pub player: u16,
+    pub seller: (u8, i16),
+    pub buyer: (u8, i16),
+    pub fee: u32,
+    pub flagged: bool,
+}
+
+/// The stock market (`0x8be408`, its data from +0x20): an i32 count, then
+/// 0x108 bytes a listed club from +0x14.
+const SHARES_AT: u32 = 0x8be408;
+const SHARES_FIRST: usize = 0x14;
+const SHARES_ENTRY: usize = 0x108;
+const PRICES: usize = 52;
+
+/// A club on the stock market: how many shares, and their price.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Listing {
+    pub shares: i32,
+    pub price: f32,
+}
+
 const COUNTRIES_AT: u32 = 0xae5b18;
 record! {
     /// Tables by country.
@@ -1039,6 +1088,18 @@ impl Countries {
     /// cup's, as the new game set them (`DAT_00ae668e`, `DAT_00ae66ce`).
     pub fn cup_names(&self) -> [String; 2] {
         [0xae668e, 0xae66ce].map(|at| text(&self.0[at - Self::BASE..], 0x40))
+    }
+
+    /// The system a country's cup is played by (`DAT_00ae5d0c`).
+    pub fn cup_system(&self, country: usize) -> u8 {
+        self.get(0xae5d0c + country)
+    }
+
+    /// A key the game looks a country up by in the European ranking — by a
+    /// slip, the country played in the slot of that number
+    /// (`DAT_00ae5d8e`).
+    pub fn ranking_key(&self, country: usize) -> i16 {
+        self.get(0xae5d8e + 2 * country)
     }
 
     /// How many teams a country has.
@@ -1232,8 +1293,13 @@ impl Records {
 
     /// The team of a country's club, by its number there.
     pub fn team(&self, country: u16, number: u16) -> Option<&Team> {
+        self.teams.get(self.team_index(country, number)?)
+    }
+
+    /// Where a country's club's team stands among the teams.
+    pub fn team_index(&self, country: u16, number: u16) -> Option<usize> {
         let first = usize::try_from(self.countries.first_team(country.into())).ok()?;
-        self.teams.get(first + usize::from(number))
+        Some(first + usize::from(number))
     }
 
     pub fn team_mut(&mut self, country: u16, number: u16) -> Option<&mut Team> {
@@ -1243,6 +1309,48 @@ impl Records {
 
     pub fn player(&self, id: u16) -> Option<&Player> {
         (id != 0).then(|| self.players.get(usize::from(id))).flatten()
+    }
+
+    /// The transfers agreed for the season's end.
+    pub fn agreed(&self) -> Vec<Agreed> {
+        let Some(block) = self.block(&format!("{AGREED_AT:#x}")) else { return Vec::new() };
+        let word =
+            |at: usize| block.get(at..at + 2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]));
+        let count = usize::from(word(0) as u16);
+        (0..count)
+            .filter_map(|k| {
+                let at = 4 + k * AGREED_ENTRY;
+                let e = block.get(at..at + AGREED_ENTRY)?;
+                let word = |o: usize| i16::from_le_bytes([e[o], e[o + 1]]);
+                (word(0) != 0).then(|| Agreed {
+                    player: word(2) as u16,
+                    seller: (e[4], word(6)),
+                    buyer: (e[8], word(0xa)),
+                    fee: u32::from_le_bytes(e[0xc..0x10].try_into().unwrap()),
+                    flagged: e[0x25] != 0,
+                })
+            })
+            .collect()
+    }
+
+    /// A club's place on the stock market, by its country and number
+    /// (`FUN_00405dbe`), and its price as it stands (`FUN_00407520`).
+    pub fn listing(&self, country: u8, number: u8) -> Option<Listing> {
+        let block = self.block(&format!("{SHARES_AT:#x}"))?;
+        let count = usize::try_from(i32::from_le_bytes(block.get(0..4)?.try_into().ok()?)).ok()?;
+        (0..count).find_map(|k| {
+            let e = block.get(SHARES_FIRST + k * SHARES_ENTRY..)?.get(..SHARES_ENTRY)?;
+            let word = |o: usize| i16::from_le_bytes([e[o], e[o + 1]]);
+            if word(0x1c) != i16::from(country) || word(0x1e) != i16::from(number) {
+                return None;
+            }
+            let ring = usize::try_from(word(0x24)).ok()? % PRICES;
+            let at = 0x38 + ring * 4;
+            Some(Listing {
+                shares: i32::from_le_bytes(e[0x20..0x24].try_into().ok()?),
+                price: f32::from_le_bytes(e[at..at + 4].try_into().ok()?),
+            })
+        })
     }
 
     /// The slot of the `n`th manager in play.

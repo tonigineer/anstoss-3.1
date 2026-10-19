@@ -125,7 +125,9 @@ pub enum Kind {
         pictures: Vec<u16>,
         clear: bool,
     },
-    /// A button with a text on its picture: the game's `CMyPushButton`.
+    /// A button that shows the dialog's picture until it is held, with its
+    /// text on it if it has one: the game's `CMyPushButton`, and some of
+    /// its bitmap buttons.
     PushButton {
         normal: u16,
         hover: u16,
@@ -220,9 +222,9 @@ pub const PRINTER_FLAG: u32 = 2;
 
 /// Where a dialog record's German title starts.
 const TITLE: usize = 0x1e;
-/// A bitmap button's style bits: the dialog's picture shows until it is
-/// held (0x100), and its text is drawn on it (0x200).
-const PUSH_STYLE: u16 = 0x300;
+/// A bitmap button's style bit: the dialog's picture shows until it is
+/// held (its bit 0x200 draws the text on it, which only such have).
+const HELD_STYLE: u16 = 0x100;
 /// Where a group of options keeps its style (`CMyHighButton` +0x2e6), in
 /// words of its extra data; and its bit that lets a click on the chosen
 /// option clear it (`OnLButtonDown_007a6d03`).
@@ -311,11 +313,9 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
     let kind = match kind {
         1 => Kind::Static,
         // A bitmap button that shows the dialog's picture until it is held
-        // and draws its text on it is a push button (`CMyBitmapButton`'s
-        // style bits 0x100 and 0x200).
-        2 if u16s(7)? & PUSH_STYLE == PUSH_STYLE => {
-            Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? }
-        }
+        // is a push button, with its text on it if it has one
+        // (`CMyBitmapButton`'s style bits 0x100 and 0x200).
+        2 if u16s(7)? & HELD_STYLE != 0 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
         2 => Kind::Button { normal: u16s(5)?, hover: u16s(6)? },
         // The list's font, row height and style (`FUN_007aa393`: the
         // control's +0x1e8, +0x1ea and +0x1eb).

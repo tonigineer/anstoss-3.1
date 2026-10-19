@@ -1199,6 +1199,98 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_balance_sheet_shows_the_clubs_money() {
+        let game = game();
+        // As the original showed it; a club of the third league may not go
+        // to the stock market.
+        let then = "now click bar 8\nuntil dialog 349";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&349];
+        let text =
+            |id: u16| view.text(crate::screens::control(dialog, id).unwrap()).trim().to_owned();
+        assert_eq!([text(4463), text(4464), text(4465)], ["663.765 €", "0 €", "0 €"]);
+        assert_eq!([text(4472), text(4473), text(4474)], ["663.765 €", "2.50 Mio €", "3.16 Mio €"]);
+        assert_eq!([text(4469), text(4470), text(4471)], ["15%", "12.50%", "(1.70 Mio €)"]);
+        assert_eq!([text(4466), text(4467)], ["0 €", "663.765 €"]);
+        // The forecasts, the tickets by the attendance model among them.
+        assert_eq!([text(4468), text(4475)], ["1.42 Mio €", "- 2.49 Mio €"]);
+        assert_eq!(
+            [text(5510), text(5511), text(5512), text(5513)],
+            ["Verein", "---", "---", "---"]
+        );
+        let then = "now click bar 8\nuntil dialog 349\nnow press 6152\nuntil dialog 380";
+        let runner = on_save(&game, "Probe1", then).unwrap();
+        let view = runner.host.view();
+        let notice = view.text(crate::screens::control(&game.dialogs[&380], 4730).unwrap());
+        assert_eq!(notice, game.text(4582));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_deposit_is_made_and_dissolved() {
+        let game = game();
+        let deposits = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            a3_core::finances::deposits_of(team, records.globals.fund_prices())
+        };
+        // 120.000 € with the third partner: a step up from 100.000 €.
+        let open = "now click bar 8\nuntil dialog 349\nnow press 4461\nuntil dialog 16";
+        let then = format!("{open}\nnow spin 1278 up\nnow choose 6050 2\nnow press 1276");
+        let Some(runner) = on_save(&game, "Probe1", &then) else { return };
+        let made = deposits(&runner);
+        assert_eq!(made.len(), 1);
+        assert_eq!((made[0].slot, made[0].partner, made[0].cost), (0, 2, 120_000));
+        let then = format!("{then}\nnow row 1266 0\nnow press 1277\nnow press 1\nuntil dialog 349");
+        let runner = on_save(&game, "Probe1", &then).unwrap();
+        assert!(deposits(&runner).is_empty());
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finances_show_the_season_row_by_row() {
+        let game = game();
+        let texts = |then: &str, ids: &[u16]| -> Vec<String> {
+            let then = format!("now click bar 9\nuntil dialog 417\n{then}");
+            let runner = on_save(&game, "Probe1", &then).unwrap();
+            let view = runner.host.view();
+            let dialog = &game.dialogs[&417];
+            ids.iter()
+                .map(|&id| view.text(crate::screens::control(dialog, id).unwrap()).to_owned())
+                .collect()
+        };
+        if game.save_games().iter().all(|s| s.name != "Probe1") {
+            return;
+        }
+        // As the original showed them: the tickets, the TV money, the
+        // sponsors, the other income, the staff, the players, the matches
+        // and training, the stadium, the other costs, the result.
+        let rows = [5093, 5094, 5096, 5098, 5086, 5087, 5088, 5089, 5090, 5092, 1616];
+        assert_eq!(
+            texts("", &rows),
+            [
+                "85.487", "900.000", "266.000", "19.583", "34.566", "272.833", "170.740",
+                "121.666", "7.500", "663.765", "Gewinn"
+            ]
+        );
+        // This week's: the tickets and sponsors since the turn began.
+        assert_eq!(texts("now row 2226 3", &[5093, 5096, 5092]), ["8.171", "45.000", "53.171"]);
+        // The season carried on: the tickets at the plan's attendance.
+        assert_eq!(texts("now row 2226 0", &[5093]), ["1.245.752"]);
+        // The season extrapolated.
+        let rows = [5096, 5098, 5086, 5087, 5088, 5090];
+        assert_eq!(
+            texts("now row 2226 1", &rows),
+            ["280.000", "230.000", "410.000", "208.431", "397.890", "90.000"]
+        );
+        assert_eq!(texts("now row 2226 1", &[5093, 5092]), ["1.240.000", "1.422.013"]);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_talk_is_booked_in_the_planner() {
         let game = game();
         // The keeper's menu on the first day of a week: the talk is its

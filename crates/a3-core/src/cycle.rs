@@ -74,6 +74,11 @@ pub mod dialogs {
     /// eighth.
     pub const YEAR_CALENDAR: u16 = 348;
     pub const WEEK_PLANNER: u16 = 413;
+    /// The balance sheet, the bar's ninth symbol; the finances, its tenth.
+    pub const BALANCE: u16 = 349;
+    pub const FINANCES: u16 = 417;
+    /// The balance sheet's deposits.
+    pub const INVESTMENTS: u16 = 16;
     pub const TRAINING_PICTURES: u16 = 513;
     pub const UNIT_CHOICE: u16 = 362;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
@@ -144,6 +149,8 @@ pub enum Args {
     /// A text by its id, with the date of a day of the season for its
     /// `%s`.
     TextForDate(u16, usize),
+    /// A text by its id, with an amount of money for its `%s`.
+    TextForMoney(u16, i64),
     /// How a player took a sick visit (`medical::Reaction`).
     Visit {
         player: u16,
@@ -415,6 +422,7 @@ impl Cycle {
                 self.season(|s| s.current = manager);
                 self.turn()?;
             }
+            self.season(|s| s.before_match = false);
             let Some(week) = self.season(|s| self.start_week(s)).flatten() else {
                 return Ok(());
             };

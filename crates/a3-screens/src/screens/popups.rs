@@ -83,6 +83,10 @@ impl Screen for Notice {
                 let date = super::hub::date_text(cx.game, a3_core::calendar::date(year, day));
                 cx.game.text(text).replacen("%s", &date, 1)
             }
+            Args::TextForMoney(text, amount) => {
+                let amount = super::playerinfo::money(cx.game, amount);
+                cx.game.text(text).replacen("%s", &amount, 1)
+            }
             _ => return,
         };
         set(view, cx.dialog, NOTICE_TEXT, text);

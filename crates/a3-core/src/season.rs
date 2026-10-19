@@ -118,6 +118,8 @@ pub struct Rules {
     pub individual: crate::individual::IndividualTables,
     /// The year calendar's kinds, events, parties and camps' places.
     pub year: crate::year::YearTables,
+    /// The forecasts' months left and perimeter advertising.
+    pub forecast: crate::forecast::ForecastTables,
 }
 
 impl Rules {
@@ -157,6 +159,7 @@ impl Rules {
             training: crate::training::TrainingTables::load(exe)?,
             individual: crate::individual::IndividualTables::load(exe)?,
             year: crate::year::YearTables::load(exe)?,
+            forecast: crate::forecast::ForecastTables::load(exe)?,
         })
     }
 
@@ -244,6 +247,9 @@ pub struct Season {
     /// text of its kind ("Einzelgespräch", "Krankenbesuch") and the last
     /// name of the manager who had it (`IDC_ABLAUF_WOCHE_MELDUNG`).
     pub planner_message: Option<(u16, String)>,
+    /// Whether the turns are the ones before the clubs' matches, which close
+    /// the money's and the club's screens (`FUN_00652a86`).
+    pub before_match: bool,
     pub random: Random,
 }
 
@@ -543,6 +549,7 @@ impl Season {
             expected,
             clubs: BTreeMap::new(),
             planner_message: None,
+            before_match: false,
             random,
         };
         for m in 0..season.managers.len() {

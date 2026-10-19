@@ -4,10 +4,12 @@
 //! over itself, and closes with a reply — to the cycle, or a popup's to the
 //! screen below it. The [`crate::host`] keeps them open.
 
+pub mod bank;
 pub mod calendar;
 pub mod comparison;
 pub mod discipline;
 pub mod duties;
+pub mod finances;
 pub mod formations;
 pub mod hub;
 pub mod jobs;
@@ -129,6 +131,9 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(planner::Planner::default()),
         Box::new(planner::WeekPlanner::default()),
         Box::new(year::YearCalendar::default()),
+        Box::new(finances::Balance::default()),
+        Box::new(finances::Finances::default()),
+        Box::new(bank::Investments::default()),
         Box::new(talk::TalkScreen::default()),
         Box::new(talk::Mates::default()),
         Box::new(tactics::TacticsScreen::default()),
@@ -163,6 +168,8 @@ pub fn compose(game: &mut Game) {
     training::individual::compose(&mut game.dialogs, &game.data.rules);
     planner::compose(&mut game.dialogs, &game.data.rules);
     year::compose(&mut game.dialogs, &game.data.rules);
+    finances::compose(&mut game.dialogs, &game.data.rules);
+    bank::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
 }
 

@@ -18,16 +18,20 @@ pub struct BitmapState {
     /// Whether it stands on the control's bottom edge, as a bar does: the
     /// picture is cut to its height.
     pub bottom: bool,
+    /// A left edge further right than the control's, which the screen moved
+    /// its window's to: the picture starts there.
+    pub left: Option<f32>,
 }
 
 impl BitmapState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         if let Some(picture) = self.picture.as_ref().and_then(|p| paint.bitmap(p)) {
             let r = paint.control.rect;
+            let left = self.left.unwrap_or(r.min.x);
             let at = if self.bottom {
-                bevy_math::Vec2::new(r.min.x, r.max.y - picture.height() as f32)
+                bevy_math::Vec2::new(left, r.max.y - picture.height() as f32)
             } else {
-                r.min
+                bevy_math::Vec2::new(left, r.min.y)
             };
             paste(frame, picture, at);
         }

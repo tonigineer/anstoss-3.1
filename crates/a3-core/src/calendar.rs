@@ -79,6 +79,11 @@ impl Calendar {
         (league < MAX_LEAGUES).then(|| usize::from(first) + league).filter(|&r| r < self.rows.len())
     }
 
+    /// What a row has on a day: a matchday, or another competition's code.
+    pub fn entry(&self, row: usize, day: usize) -> u32 {
+        self.rows.get(row).and_then(|r| r.get(day)).copied().unwrap_or(0)
+    }
+
     /// The league matchday a row plays on `day`, counted from 1.
     pub fn matchday(&self, row: usize, day: usize) -> Option<usize> {
         let value = *self.rows.get(row)?.get(day)?;

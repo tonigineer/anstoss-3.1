@@ -7,7 +7,7 @@ use bevy_math::Vec2;
 
 use crate::controls::anim::AnimState;
 use crate::controls::bar::BarState;
-use crate::controls::bitmap::Picture;
+use crate::controls::bitmap::{BitmapState, Picture};
 use crate::controls::check::CheckState;
 use crate::controls::combo::ComboState;
 use crate::controls::header::HeaderState;
@@ -131,6 +131,7 @@ impl View {
         check, check_mut, as_check, as_check_mut, CheckState;
         paint, paint_mut, as_paint, as_paint_mut, PaintState;
         combo, combo_mut, as_combo, as_combo_mut, ComboState;
+        bitmap, bitmap_mut, as_bitmap, as_bitmap_mut, BitmapState;
     }
 
     /// What a static, field or header says; nothing for other controls.
