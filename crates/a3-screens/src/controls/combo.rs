@@ -21,6 +21,10 @@ use crate::pointer::{Geometry, Target};
 /// in its style's bits 4 to 6 (`FUN_0079b97a`).
 pub(crate) const LIST_UP: &str = "Pfeile/PfeilO1.bmp";
 pub(crate) const LIST_DOWN: &str = "Pfeile/PfeilU1.bmp";
+/// The field's arrow held, over the dialog's picture while the list is
+/// down, this far left of the field's right end and above its top.
+pub(crate) const FIELD_HELD: &str = "Pfeile/PfeilU2.bmp";
+const HELD_AT: (f32, f32) = (21.0, 2.0);
 const HANDLE_COLOUR: u8 = 0x70;
 const HANDLE_SHIFT: u8 = 4;
 
@@ -129,12 +133,13 @@ impl ComboState {
         self.items.len() > Self::rows(control)
     }
 
-    /// Opens or closes the list, opened on the chosen row.
-    pub fn toggle(&mut self, control: &Control) {
+    /// Opens or closes the list, opened at its top: the top row the game
+    /// opens it on is set once, to 0, and never changed
+    /// (`CMyComboBox` +0x318, `OnLButtonDown_007989d9`).
+    pub fn toggle(&mut self, _control: &Control) {
         self.open = !self.open && !self.disabled;
         if self.open {
-            let last = self.items.len().saturating_sub(Self::rows(control));
-            self.scroll = self.selected.unwrap_or(0).min(last);
+            self.scroll = 0;
         }
     }
 
@@ -156,9 +161,15 @@ impl ComboState {
         self.scroll = (self.scroll as i32 + rows).clamp(0, last as i32) as usize;
     }
 
-    /// The field: the chosen text.
+    /// The field: the chosen text, and its arrow held while the list is
+    /// down.
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let r = paint.control.rect;
+        if self.open
+            && let Some(held) = paint.widget(FIELD_HELD)
+        {
+            paste(frame, held, Vec2::new(r.max.x - HELD_AT.0, r.min.y - HELD_AT.1));
+        }
         let (x, y) = (r.min.x as i32, r.min.y as i32);
         if let (Some(font), Some(text)) =
             (paint.font(), self.selected.and_then(|s| self.items.get(s)))
@@ -212,13 +223,15 @@ impl ComboState {
         }
         paste(frame, &rows, Vec2::new((x0 + 1) as f32, first as f32));
         if scrolls {
+            // Its column a line higher too in a list above the field.
+            let lift = first - (y0 + 1);
             let bar = right;
-            fill(frame, bar, y0 + 1, BAR, h - 3 - BAR, STRIP);
+            fill(frame, bar, y0 + 1 + lift, BAR, h - 3 - BAR, STRIP);
             if let Some(up) = paint.widget(LIST_UP) {
-                paste(frame, up, Vec2::new(bar as f32, (y0 + 1) as f32));
+                paste(frame, up, Vec2::new(bar as f32, (y0 + 1 + lift) as f32));
             }
             if let Some(down) = paint.widget(LIST_DOWN) {
-                paste(frame, down, Vec2::new(bar as f32, (y1 - 1 - BAR) as f32));
+                paste(frame, down, Vec2::new(bar as f32, (y1 - 1 - BAR + lift) as f32));
             }
             if let Some(long) = paint.widget(handle_bar(control)) {
                 // As long as the rows shown are of all, cut from the long
@@ -230,7 +243,7 @@ impl ComboState {
                 let handle = cut(long, length as u32);
                 let last = self.items.len().saturating_sub(Self::rows(control)).max(1);
                 let down = (track - length) * self.scroll as i32 / last as i32;
-                paste(frame, &handle, Vec2::new(bar as f32, (y0 + 1 + BAR + down) as f32));
+                paste(frame, &handle, Vec2::new(bar as f32, (y0 + 1 + BAR + down + lift) as f32));
             }
         }
     }

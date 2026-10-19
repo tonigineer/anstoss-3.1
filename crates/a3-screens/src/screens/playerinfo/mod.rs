@@ -9,6 +9,7 @@
 //! player of a new game.
 
 mod current;
+pub(crate) use current::market_value;
 mod history;
 mod private;
 mod season;
@@ -70,13 +71,22 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     }
 }
 
-/// The player info, on a player of the current club's squad.
+/// The player info, on a player of the current club's squad or any
+/// other.
 #[derive(Default)]
 pub struct PlayerInfo {
-    /// The squad in the order the arrows go through it, and the player
+    /// The players in the order the arrows go through them, and the one
     /// shown.
-    order: Vec<usize>,
+    order: Vec<Who>,
     at: usize,
+}
+
+/// A player the info shows: a place in the current club's squad, or any
+/// player by his record's id.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Who {
+    Place(usize),
+    Id(u16),
 }
 
 impl Screen for PlayerInfo {
@@ -89,8 +99,14 @@ impl Screen for PlayerInfo {
         if let Args::Player(player) = args {
             let Some(club) = club_state(cx) else { return };
             let by_position = a3_core::squadlist::by_position(&club.players);
-            self.order = cx.state.paging.take().unwrap_or(by_position);
-            self.at = self.order.iter().position(|&p| p == player).unwrap_or(0);
+            let order = cx.state.paging.take().unwrap_or(by_position);
+            self.order = order.into_iter().map(Who::Place).collect();
+            self.at = self.order.iter().position(|&p| p == Who::Place(player)).unwrap_or(0);
+        }
+        if let Args::Record(id) = args {
+            let order = cx.state.paging_ids.take().unwrap_or_else(|| vec![id]);
+            self.order = order.into_iter().map(Who::Id).collect();
+            self.at = self.order.iter().position(|&p| p == Who::Id(id)).unwrap_or(0);
         }
         for id in [PLAYERS, PAGES] {
             if let Some(arrows) = control(cx.dialog, id).and_then(|c| view.options_mut(c)) {
@@ -217,19 +233,44 @@ impl Shown<'_> {
 impl PlayerInfo {
     fn show(&self, cx: &mut Cx, view: &mut View) {
         let Some(season) = cx.state.season.as_ref() else { return };
-        let Some(club) = season.manager().and_then(|m| m.club) else { return };
-        let Some(state) = season.clubs.get(&club) else { return };
-        let Some(&p) = self.order.get(self.at) else { return };
-        let status = state.status.get(p).copied().unwrap_or_default();
+        let Some(own) = season.manager().and_then(|m| m.club) else { return };
+        let Some(state) = season.clubs.get(&own) else { return };
         let records = cx.state.records.as_ref();
+        // A player of the squad as the season has him; any other as his
+        // record has him, at his own club.
+        let place = match self.order.get(self.at) {
+            Some(&Who::Place(p)) => Some(p),
+            Some(&Who::Id(id)) => state.status.iter().position(|s| s.id == id),
+            None => return,
+        };
+        let other;
+        let (player, fitness, status, club) = match (place, self.order.get(self.at)) {
+            (Some(p), _) => (
+                &state.players[p],
+                lineup::fitness_of(&state.fitness, p),
+                state.status.get(p).copied().unwrap_or_default(),
+                own,
+            ),
+            (None, Some(&Who::Id(id))) => {
+                let Some(records) = records else { return };
+                let Some(found) = a3_core::load::any_player(records, &cx.game.data, id) else {
+                    return;
+                };
+                other = found;
+                let [country, number] = records.player(id).map_or([0, 0], |r| r.club());
+                let slot = cx.game.world.slot_of(country.into()).unwrap_or(usize::MAX);
+                (&other.0, other.1, other.2, (slot, usize::from(number)))
+            }
+            _ => return,
+        };
         let shown = Shown {
             game: cx.game,
             dialog: cx.dialog,
             season,
             records,
             record: records.and_then(|r| r.player(status.id)),
-            player: &state.players[p],
-            fitness: lineup::fitness_of(&state.fitness, p),
+            player,
+            fitness,
             status,
             club,
             today: season.date(),

@@ -13,6 +13,7 @@ pub mod finances;
 pub mod formations;
 pub mod hub;
 pub mod jobs;
+pub mod market;
 pub mod medical;
 pub mod office;
 pub mod opponent;
@@ -140,6 +141,8 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(bank::NoCredit),
         Box::new(squad::SquadMenu::default()),
         Box::new(squad::CurrentSquad::default()),
+        Box::new(squad::MarketValues::default()),
+        Box::new(market::TransferList::default()),
         Box::new(talk::TalkScreen::default()),
         Box::new(talk::Mates::default()),
         Box::new(tactics::TacticsScreen::default()),
@@ -178,6 +181,8 @@ pub fn compose(game: &mut Game) {
     bank::compose(&mut game.dialogs);
     squad::compose(&mut game.dialogs, &game.data.rules);
     squad::compose_squad(&mut game.dialogs);
+    squad::compose_values(&mut game.dialogs);
+    market::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
 }
 

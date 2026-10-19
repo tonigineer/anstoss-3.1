@@ -177,18 +177,7 @@ pub(super) fn show(s: &Shown, view: &mut View) {
                 return text(RETIRING);
             }
             let stars = records.map(|records| records.globals.stars()).unwrap_or_default();
-            let worth = Worth {
-                strength: player.strength,
-                position: player.positions[0],
-                talent: r.talent(),
-                age: age(player.birthday, today),
-                good: r.good(),
-                character: r.traits(),
-                qualities: r.qualities(),
-                star: stars.get(usize::from(player.positions[0])).is_some_and(|&s| s == r.id()),
-                kind_12_matches: r.kind_12_matches(),
-            };
-            money(game.rules.value.market_value(&worth, years, today.month()))
+            money(market_value(game, player, r, stars, years, today))
         }),
     );
     let automatic = contract.is_some_and(|r| r.terms() & EXTENDS != 0);
@@ -308,4 +297,27 @@ pub(super) fn injury_text(game: &Game, record: Option<&Record>, status: &Status)
     } else {
         fill(text(ILL), status.injured.to_string())
     }
+}
+
+/// A player's market value (`FUN_00708836`), by his contract's years left.
+pub(crate) fn market_value(
+    game: &Game,
+    player: &Player,
+    r: &Record,
+    stars: [u16; 11],
+    years: i32,
+    today: NaiveDate,
+) -> i64 {
+    let worth = Worth {
+        strength: player.strength,
+        position: player.positions[0],
+        talent: r.talent(),
+        age: age(player.birthday, today),
+        good: r.good(),
+        character: r.traits(),
+        qualities: r.qualities(),
+        star: stars.get(usize::from(player.positions[0])).is_some_and(|&s| s == r.id()),
+        kind_12_matches: r.kind_12_matches(),
+    };
+    game.rules.value.market_value(&worth, years, today.month())
 }

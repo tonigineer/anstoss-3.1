@@ -81,6 +81,9 @@ pub mod dialogs {
     /// its current squad.
     pub const SQUAD_MENU: u16 = 218;
     pub const CURRENT_SQUAD: u16 = 216;
+    pub const MARKET_VALUES: u16 = 217;
+    /// The transfer market's list.
+    pub const TRANSFER_LIST: u16 = 287;
     /// The balance sheet's deposits, its loans, a loan paid back, the
     /// bank's refusal.
     pub const INVESTMENTS: u16 = 16;

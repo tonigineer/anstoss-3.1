@@ -294,6 +294,13 @@ fn status(records: &Records, medical: &MedicalTables, record: &records::Player) 
     }
 }
 
+/// Any player of the game as a screen shows him, by his record's id: what
+/// he is, how fit, how things stand with him.
+pub fn any_player(records: &Records, data: &Data, id: u16) -> Option<(Player, Fitness, Status)> {
+    let record = records.player(id)?;
+    Some((player(records, record), fitness(record), status(records, &data.rules.medical, record)))
+}
+
 /// Days from today to a year and a day of the year, as `FUN_00636638`
 /// reckons them: none for a day gone by. (The original takes the days of
 /// the years in between from a table, `DAT_00b1f85e`; here they have 365.)

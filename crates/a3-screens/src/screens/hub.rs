@@ -100,12 +100,13 @@ const CAPTION_ID: u16 = 9920;
 /// 0x884a38, their texts at 0x8a4508). The talk is not offered on a week's
 /// last day.
 const MENU_ID: u16 = 9950;
-pub(crate) const MENU: [(Command, u16); 5] = [
+pub(crate) const MENU: [(Command, u16); 6] = [
     (Command::Info, 4036),
     (Command::Talk, 4045),
     (Command::Blank, 4046),
     (Command::Bonus, 4066),
     (Command::Fine, 4067),
+    (Command::Watch, 4044),
 ];
 const WEEK: usize = 7;
 
@@ -117,6 +118,8 @@ pub(crate) enum Command {
     Blank,
     Bonus,
     Fine,
+    /// "Beobachtungsliste": the transfer list's.
+    Watch,
 }
 const BAR_ID: u16 = 9930;
 /// What the bar takes the place of: the OK button.
@@ -605,7 +608,7 @@ impl Screen for MenuBar {
                 self.menu = MENU
                     .iter()
                     .map(|&(command, _)| command)
-                    .filter(|&c| c != Command::Talk || talk)
+                    .filter(|&c| (c != Command::Talk || talk) && c != Command::Watch)
                     .collect();
                 self.menu_player = open_menu(cx, view, grip, &self.menu);
             }

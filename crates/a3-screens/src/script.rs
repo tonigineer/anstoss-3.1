@@ -1308,6 +1308,46 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_transfer_list_filters_and_watches() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 6371 0\nuntil dialog 287";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&287];
+        let list = |runner: &Runner| {
+            let view = runner.host.view();
+            view.list(crate::screens::control(dialog, 3937).unwrap()).unwrap().clone()
+        };
+        let all = list(&runner);
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let listed = a3_core::transfers::listings(records);
+        assert_eq!(all.rows.len(), listed.iter().filter(|e| e.id != 0).count());
+        let count =
+            runner.host.view().text(crate::screens::control(dialog, 3936).unwrap()).to_owned();
+        assert!(count.contains(&listed.len().to_string()));
+        drop(state);
+        // Strength 13 and up: nobody; the least strength is kept on OK.
+        let strong = format!("{open}\nnow spin 5660 up{}", "\nnow spin 5660 up".repeat(12));
+        assert!(list(&on_save(&game, "Probe1", &strong).unwrap()).rows.is_empty());
+        let kept = format!("{strong}\nnow press 3938\nuntil dialog 218");
+        let runner = on_save(&game, "Probe1", &kept).unwrap();
+        let state = runner.host.state();
+        let manager = state.records.as_ref().unwrap().managers[0].least_strength();
+        assert_eq!(manager, 13);
+        drop(state);
+        // A player watched turns green after the next refill.
+        let id = all.keys[0] as u16;
+        let watch = format!(
+            "{open}\nnow rclick 3937 row 0\nnow choose 9950 1\nnow choose 5658 1\nnow choose 5658 0"
+        );
+        let runner = on_save(&game, "Probe1", &watch).unwrap();
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        assert!(a3_core::transfers::watched(records, 0).contains(&id));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_finances_show_the_season_row_by_row() {
         let game = game();
         let texts = |then: &str, ids: &[u16]| -> Vec<String> {

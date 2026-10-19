@@ -152,9 +152,13 @@ impl Game {
             (1 | 2, Some(number)) => {
                 records.team(country.into(), number).map_or_else(String::new, |t| t.name())
             }
-            // The amateur clubs' and the clubs abroad's names are not read yet.
-            (1, None) if number < teams + AMATEUR_CLUBS => self.text(AMATEUR).to_owned(),
+            (1, None) if number < teams + AMATEUR_CLUBS => records
+                .amateur_club_name(country, (number - teams) as usize)
+                .unwrap_or_else(|| self.text(AMATEUR).to_owned()),
             (1 | 2, None) => self.text(AMATEUR).to_owned(),
+            (_, _) if countries.abroad(country.into()) != 0 => records
+                .club_abroad_name(country, number as u16)
+                .unwrap_or_else(|| self.text(ABROAD).to_owned()),
             _ => self.text(ABROAD).to_owned(),
         }
     }

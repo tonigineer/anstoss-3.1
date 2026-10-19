@@ -24,4 +24,7 @@ pub struct GameState {
     /// place, when the screen that opens it has its own: the line-up list's
     /// rows. Taken by the player info.
     pub paging: Option<Vec<usize>>,
+    /// The same by the players' ids, for screens of players of any club:
+    /// the transfer list's rows.
+    pub paging_ids: Option<Vec<u16>>,
 }

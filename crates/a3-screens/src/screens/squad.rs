@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use a3_core::cycle::Request;
-use a3_core::cycle::dialogs::CURRENT_SQUAD;
 use a3_core::cycle::dialogs::NOTICE;
+use a3_core::cycle::dialogs::{CURRENT_SQUAD, MARKET_VALUES, TRANSFER_LIST};
 use a3_core::records::Team;
 use a3_core::season::Rules;
 use a3_core::{lineup, squadlist};
@@ -28,8 +28,11 @@ const CAPTION: u16 = 2520;
 /// The squad's screens and the market's, buttons in two groups.
 const SQUAD_SCREENS: u16 = 5042;
 const MARKET_SCREENS: u16 = 6371;
-/// The current squad's button.
+/// The current squad's button, the market values'.
 const CURRENT_SQUAD_ITEM: usize = 0;
+const MARKET_VALUES_ITEM: usize = 6;
+/// The transfer list's button.
+const TRANSFER_LIST_ITEM: usize = 0;
 /// The amateurs' button, which a club's amateur department sees as its
 /// professionals' (text 4628); the market's youth poaching, which it may
 /// not (alert 4698).
@@ -87,10 +90,10 @@ impl Screen for SquadMenu {
             Target::Option { control: c, item }
                 if dialog.controls[c].id == Some(MARKET_SCREENS) =>
             {
-                refusal(cx, item).is_some()
+                item == TRANSFER_LIST_ITEM || refusal(cx, item).is_some()
             }
             Target::Option { control: c, item } if dialog.controls[c].id == Some(SQUAD_SCREENS) => {
-                item == CURRENT_SQUAD_ITEM
+                matches!(item, CURRENT_SQUAD_ITEM | MARKET_VALUES_ITEM)
             }
             _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
         };
@@ -109,6 +112,16 @@ impl Screen for SquadMenu {
                 if cx.dialog.controls[c].id == Some(SQUAD_SCREENS) =>
             {
                 Outcome::Popup(Request::new(CURRENT_SQUAD))
+            }
+            Target::Option { control: c, item: MARKET_VALUES_ITEM }
+                if cx.dialog.controls[c].id == Some(SQUAD_SCREENS) =>
+            {
+                Outcome::Popup(Request::new(MARKET_VALUES))
+            }
+            Target::Option { control: c, item: TRANSFER_LIST_ITEM }
+                if cx.dialog.controls[c].id == Some(MARKET_SCREENS) =>
+            {
+                Outcome::Popup(Request::new(TRANSFER_LIST))
             }
             Target::Option { control: c, item }
                 if cx.dialog.controls[c].id == Some(MARKET_SCREENS) =>
@@ -413,7 +426,7 @@ fn fill_squad(cx: &Cx, view: &mut View) {
         };
         rows.push(
             [
-                hub::name(player),
+                super::duties::short_name(cx, player, status.id),
                 hub::abbreviation(game, main),
                 sides,
                 strength,
@@ -465,5 +478,163 @@ fn fill_squad(cx: &Cx, view: &mut View) {
     set(view, dialog, SQUAD_LINE, line);
     if let Some(format) = control(dialog, WAGES_LINE).map(|c| dialog.controls[c].text.clone()) {
         set(view, dialog, WAGES_LINE, format.replacen("%s", &money(game, salaries.into()), 1));
+    }
+}
+
+/// The market values (dialog 217, `CSpielerkaderMarktwerte`): the squad by
+/// what each player is worth, with his wage, bonuses, release fee and the
+/// contract's end.
+#[derive(Default)]
+pub struct MarketValues {
+    /// The player whose menu is open.
+    menu_player: Option<usize>,
+}
+
+const VALUES_LIST: u16 = 3307;
+/// "Karriereende" for a player retiring; the bonuses are kept in 100s.
+const CAREER_ENDS: u16 = 2487;
+const BONUS_UNIT: i64 = 100;
+/// The day the contracts end on, the 30th of June.
+const CONTRACT_END: (u32, u32) = (30, 6);
+/// The list's menu: the player's info only (`CListBoxSpielerInfo`).
+const INFO_MENU: [hub::Command; 1] = [hub::Command::Info];
+
+pub(crate) fn compose_values(dialogs: &mut HashMap<u16, Dialog>) {
+    if let Some(dialog) = dialogs.get_mut(&MARKET_VALUES) {
+        dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
+        dialog.controls.push(hub::menu_control());
+    }
+}
+
+impl Screen for MarketValues {
+    fn ids(&self) -> &[u16] {
+        &[MARKET_VALUES]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        self.menu_player = None;
+        if let Some(season) = cx.state.season.as_ref() {
+            set(view, dialog, CAPTION_ID, hub::manager_title_of(game, season, &dialog.title));
+        }
+        fill_values(cx, view);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        if let Some(player) = self.menu_player.take() {
+            if hub::close_menu(cx, view, target).and_then(|i| INFO_MENU.get(i)).is_some() {
+                let rows = control(dialog, VALUES_LIST).and_then(|l| view.list(l));
+                cx.state.paging = rows.map(|l| l.keys.iter().rev().copied().collect());
+                let info = super::playerinfo::CURRENT;
+                return Outcome::Popup(Request::with(info, Args::Player(player)));
+            }
+            return Outcome::Stay;
+        }
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Menu(grip @ Grip::Row { control: c, row })
+                if dialog.controls[c].id == Some(VALUES_LIST) =>
+            {
+                let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
+                if let Some(player) = player
+                    && hub::show_menu(cx, view, grip, &INFO_MENU).is_some()
+                {
+                    self.menu_player = Some(player);
+                }
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// The rows (`FUN_00565dfc`): by market value, the highest first — the
+/// manager and players retiring count none —, sorted by insertion.
+fn fill_values(cx: &Cx, view: &mut View) {
+    let (game, dialog) = (cx.game, cx.dialog);
+    let Some(season) = cx.state.season.as_ref() else { return };
+    let Some(club) = season.manager().and_then(|m| m.club).and_then(|k| season.clubs.get(&k))
+    else {
+        return;
+    };
+    let Some(records) = cx.state.records.as_ref() else { return };
+    let today = season.date();
+    let year = i32::from(records.globals.start_year());
+    let stars = records.globals.stars();
+    let players = &club.players;
+    let record = |p: usize| club.status.get(p).and_then(|s| records.player(s.id));
+    let years = |p: usize| {
+        record(p).map_or(0, |r| ((i32::from(r.contract() & CONTRACT_YEAR) - year) as i8).max(0))
+    };
+    let real = |p: usize| club.status.get(p).is_some_and(|s| s.id <= LAST_REAL_ID);
+    let retiring = |p: usize| record(p).is_some_and(|r| r.retiring() & RETIRING != 0);
+    let values: Vec<i64> = (0..players.len())
+        .map(|p| match record(p) {
+            Some(r) if real(p) && !retiring(p) => {
+                super::playerinfo::market_value(game, &players[p], r, stars, years(p).into(), today)
+            }
+            _ => 0,
+        })
+        .collect();
+    let mut order: Vec<usize> = Vec::with_capacity(players.len());
+    for p in 0..players.len() {
+        let at = order.iter().position(|&q| values[q] < values[p]).unwrap_or(order.len());
+        order.insert(at, p);
+    }
+    let dash = || "-".to_owned();
+    let contract_end = |years: i8| {
+        let date = chrono::NaiveDate::from_ymd_opt(
+            year + i32::from(years),
+            CONTRACT_END.1,
+            CONTRACT_END.0,
+        );
+        date.map_or_else(dash, |d| hub::date_text(game, d))
+    };
+    let rows: Vec<String> = order
+        .iter()
+        .map(|&p| {
+            let player = &players[p];
+            let r = record(p);
+            let get = |f: &dyn Fn(&a3_core::records::Player) -> u16| r.map_or(0, f);
+            let unknown =
+                matches!((get(&|r| r.picks().into()) as u8 & UNKNOWN_STRENGTH) >> 6, 1 | 3);
+            let strength = if unknown { "?".to_owned() } else { player.strength.to_string() };
+            let years = years(p);
+            let (value, contract, fee) = if !real(p) {
+                (dash(), dash(), String::new())
+            } else if retiring(p) {
+                let contract = if years >= 1 { contract_end(years) } else { dash() };
+                (game.text(CAREER_ENDS).to_owned(), contract, String::new())
+            } else {
+                let contract = if years >= 1 { contract_end(years) } else { dash() };
+                let fee = match get(&|r| r.fixed_fee()) {
+                    0 => dash(),
+                    fee => money(game, i64::from(fee) * FEE_UNIT),
+                };
+                (money(game, values[p]), contract, fee)
+            };
+            let id = club.status.get(p).map_or(0, |s| s.id);
+            [
+                super::duties::short_name(cx, player, id),
+                hub::abbreviation(game, player.positions[0]),
+                strength,
+                value,
+                money(game, i64::from(get(&|r| r.salary())) * SALARY_UNIT),
+                money(game, i64::from(get(&|r| r.appearance_bonus())) * BONUS_UNIT),
+                money(game, i64::from(get(&|r| r.goal_bonus())) * BONUS_UNIT),
+                fee,
+                contract,
+            ]
+            .join("\t")
+        })
+        .collect();
+    if let Some(list) = control(dialog, VALUES_LIST).and_then(|c| view.list_mut(c)) {
+        list.rows = rows;
+        list.keys = order;
+        list.selected = None;
     }
 }

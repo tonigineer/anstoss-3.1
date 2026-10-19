@@ -13,7 +13,7 @@ use a3_files::bitmap_font::BitmapFont;
 use a3_files::rch::{Align, Control, Dialog, PLAIN_FONT};
 
 use crate::controls::bitmap::Picture;
-use crate::controls::{bar, check, list, slider, spin};
+use crate::controls::{bar, check, combo, list, slider, spin};
 use crate::fonts::Fonts;
 use crate::game::{Game, transparent_black};
 use crate::pointer::Target;
@@ -92,7 +92,7 @@ impl Classic {
         let mut widgets = HashMap::new();
         let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS);
         let lists = list::HANDLES.into_iter().chain(list::TRACKS);
-        let named = [SCROLL_UP, SCROLL_DOWN, check::TICK]
+        let named = [SCROLL_UP, SCROLL_DOWN, check::TICK, combo::FIELD_HELD]
             .into_iter()
             .chain(lists)
             .chain(sliders)

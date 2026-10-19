@@ -675,6 +675,12 @@ record! {
     /// the list), the screen his turn starts on in bits 6 and 7, the
     /// short-term training as pictures in bit 8.
     0x212c => options, set_options: u32;
+    /// The transfer list's filters: the least strength shown, the
+    /// leagues or country, all, new or the club's own players
+    /// (TRANSFERLISTE.md).
+    0x1f42 => least_strength, set_least_strength: i16;
+    0x1f6e => market_filter, set_market_filter: i16;
+    0x1f70 => market_show, set_market_show: i16;
     /// How the week's player in individual training is chosen when nobody
     /// is: 0 not, else the least in form of all, of the eleven, of the
     /// keepers and defenders, the midfielders, the strikers.
@@ -963,6 +969,8 @@ record! {
     0xb5cbb4 => more_countries, set_more_countries: [i16; 4];
     /// The year the game started in.
     0xb5cbca => start_year, set_start_year: u16;
+    /// The transfer list's least strength, when no manager has one.
+    0xb5d170 => least_strength, set_least_strength: i16;
     0xb5cbcc => year, set_year: u16;
     /// How many humans play.
     0xb5cbce => humans, set_humans: u16;
@@ -1102,6 +1110,18 @@ impl Countries {
     /// (`DAT_00ae5d8e`).
     pub fn ranking_key(&self, country: usize) -> i16 {
         self.get(0xae5d8e + 2 * country)
+    }
+
+    /// Where a country's clubs abroad start among those kept, from 1; 0
+    /// none (`DAT_00ae5bad`).
+    pub fn abroad(&self, country: usize) -> u8 {
+        self.get(0xae5bad + country)
+    }
+
+    /// The country played in a slot: 1 the main one, then the more ones
+    /// (`DAT_00ae5d8c`).
+    pub fn slot_country(&self, slot: usize) -> i16 {
+        self.get(0xae5d8c + 2 * slot)
     }
 
     /// How many teams a country has.
@@ -1265,6 +1285,30 @@ impl Records {
     /// object's address, `[n]` for one of many.
     pub fn block(&self, name: &str) -> Option<&[u8]> {
         self.save.blocks.iter().find(|b| b.name == name).map(|b| b.data.as_slice())
+    }
+
+    /// The name of a country's amateur club, counted from its teams' end
+    /// (`0x19f7fd0[slot]`, a name every 0x108 bytes from +0x23a), or of a
+    /// club abroad (`0x1a28dd8[i]`, the name first; TRANSFERLISTE.md §3.3).
+    pub fn amateur_club_name(&self, country: u8, k: usize) -> Option<String> {
+        const AT: usize = 0x23a;
+        const STEP: usize = 0x108;
+        const LEN: usize = 0x40;
+        let slot = self.countries.slot(usize::from(country));
+        let block = self.block(&format!("0x19f7fd0[{slot}]"))?;
+        Some(text(block.get(AT + k * STEP..)?, LEN))
+    }
+
+    pub fn club_abroad_name(&self, country: u8, number: u16) -> Option<String> {
+        const LEN: usize = 0x40;
+        let first = usize::from(self.countries.abroad(usize::from(country)));
+        let index = first.checked_sub(1)? + usize::from(number);
+        Some(text(self.block(&format!("0x1a28dd8[{index}]"))?, LEN))
+    }
+
+    /// The same, to change.
+    pub fn block_mut(&mut self, name: &str) -> Option<&mut [u8]> {
+        self.save.blocks.iter_mut().find(|b| b.name == name).map(|b| b.data.as_mut_slice())
     }
 
     /// A person's name: both names, or the one he has (`FUN_00637cbb`).

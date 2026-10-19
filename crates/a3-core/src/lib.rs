@@ -32,6 +32,7 @@ pub mod tactics;
 pub mod talk;
 pub mod tickets;
 pub mod training;
+pub mod transfers;
 pub mod value;
 pub mod words;
 pub mod world;
