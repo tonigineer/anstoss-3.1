@@ -308,6 +308,15 @@ fn style(control: &Control) -> u8 {
     }
 }
 
+/// Where a list's rows put their icons, slot by slot, from its left edge,
+/// as the dialog file sets them.
+pub fn icon_slots(control: &Control) -> Vec<f32> {
+    match &control.kind {
+        Kind::ListBox { icons, .. } => icons.clone(),
+        _ => Vec::new(),
+    }
+}
+
 /// The colour of its scrollbar.
 fn scheme(control: &Control) -> usize {
     usize::from((style(control) & COLOUR) >> 4)

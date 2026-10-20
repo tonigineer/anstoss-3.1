@@ -1024,7 +1024,7 @@ mod tests {
             labels,
             ["Spielweise: Vorsichtig", "Härte: Normal", "Einsatz: Normal", "Zeitspiel: nie"]
         );
-        assert_eq!([text(&runner, 3741), text(&runner, 5518)], ["Stärke: 3", "0 €"]);
+        assert_eq!([text(&runner, 3741), text(&runner, 5518)], ["Stärke: 3", " 0 €"]);
         // Every kind of control once, as the original took them; then away
         // to the line-up and back.
         let then = format!(
@@ -1040,7 +1040,7 @@ mod tests {
             labels,
             ["Spielweise: Normal", "Härte: Rauh", "Einsatz: 150%", "Zeitspiel: immer"]
         );
-        assert_eq!(text(&runner, 5518), "30 €");
+        assert_eq!(text(&runner, 5518), " 30 €");
         let state = runner.host.state();
         let records = state.records.as_ref().unwrap();
         // Union's team record.
@@ -1344,6 +1344,82 @@ mod tests {
         let state = runner.host.state();
         let records = state.records.as_ref().unwrap();
         assert!(a3_core::transfers::watched(records, 0).contains(&id));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_agreed_transfers_are_read_by_their_pages() {
+        let game = game();
+        let Some(runner) = on_save(&game, "Toni", "") else { return };
+        let state = runner.host.state();
+        let agreed = state.records.as_ref().unwrap().agreed();
+        // Union buys Reis from Girona; Ilic and Markgraf come back from
+        // their loans (KADER-NAECHSTE-VERLIEHEN.md §1.2).
+        let union = (14, 84);
+        let ids: Vec<(u16, bool)> = agreed.iter().map(|a| (a.player, a.flagged)).collect();
+        assert_eq!(ids, [(7897, false), (3281, true), (3267, true)]);
+        assert!(agreed.iter().all(|a| a.buyer == union && a.fee == 0));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn next_seasons_squad_marks_and_refills() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 1\nuntil dialog 219";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&219];
+        let list = runner
+            .host
+            .view()
+            .list(crate::screens::control(dialog, 3318).unwrap())
+            .unwrap()
+            .clone();
+        assert!(list.rows.iter().all(|r| r.split('\t').count() == 14));
+        // By main position: the keepers first.
+        assert_eq!(list.rows[0].split('\t').nth(1), Some("TO"));
+        // A click marks a player and fills the list anew: nothing selected.
+        let then = format!("{open}\nnow row 3318 2");
+        let runner = on_save(&game, "Probe1", &then).unwrap();
+        let list = runner
+            .host
+            .view()
+            .list(crate::screens::control(dialog, 3318).unwrap())
+            .unwrap()
+            .clone();
+        assert_eq!(list.selected, None);
+        // The players out on loan: as many rows as loans coming home.
+        let then = "now click bar 10\nuntil dialog 218\nnow choose 5042 5\nuntil dialog 300";
+        on_save(&game, "Probe1", then).unwrap();
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn players_are_watched_and_dropped() {
+        let game = game();
+        let menu = "now click bar 10\nuntil dialog 218";
+        // Two players from the transfer list onto the watch list.
+        let watch = format!(
+            "{menu}\nnow choose 6371 0\nuntil dialog 287\nnow rclick 3937 row 0\nnow choose 9950 1\n\
+             now rclick 3937 row 1\nnow choose 9950 1\nnow press 3938\nuntil dialog 218\n\
+             now choose 6371 2\nuntil dialog 27"
+        );
+        let Some(runner) = on_save(&game, "Probe1", &watch) else { return };
+        let dialog = &game.dialogs[&27];
+        let rows = |runner: &Runner| {
+            let view = runner.host.view();
+            view.list(crate::screens::control(dialog, 1330).unwrap()).unwrap().rows.len()
+        };
+        assert_eq!(rows(&runner), 2);
+        let line =
+            runner.host.view().text(crate::screens::control(dialog, 1329).unwrap()).to_owned();
+        assert_eq!(line, "Derzeit stehen 2 Spieler unter Beobachtung.");
+        // The first dropped again through his choices.
+        let drop =
+            format!("{watch}\nnow row 1330 0\nuntil dialog 28\nnow choose 1333 1\nuntil dialog 27");
+        assert_eq!(rows(&on_save(&game, "Probe1", &drop).unwrap()), 1);
+        // The week's appointments open, as public as they are.
+        let talks = format!("{menu}\nnow choose 6371 1\nuntil dialog 25");
+        on_save(&game, "Probe1", &talks).unwrap();
     }
 
     #[test]

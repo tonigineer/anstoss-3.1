@@ -82,8 +82,16 @@ pub mod dialogs {
     pub const SQUAD_MENU: u16 = 218;
     pub const CURRENT_SQUAD: u16 = 216;
     pub const MARKET_VALUES: u16 = 217;
-    /// The transfer market's list.
+    pub const NEXT_SQUAD: u16 = 219;
+    pub const LOANED_OUT: u16 = 300;
+    /// The transfer market's list, the world's best players.
     pub const TRANSFER_LIST: u16 = 287;
+    pub const WORLDS_BEST: u16 = 462;
+    /// The week's appointments, the watch list and a watched player's
+    /// choices.
+    pub const APPOINTMENTS: u16 = 25;
+    pub const WATCH_LIST: u16 = 27;
+    pub const WATCHED_PLAYER: u16 = 28;
     /// The balance sheet's deposits, its loans, a loan paid back, the
     /// bank's refusal.
     pub const INVESTMENTS: u16 = 16;
@@ -162,6 +170,8 @@ pub enum Args {
     TextForDate(u16, usize),
     /// A text by its id, with an amount of money for its `%s`.
     TextForMoney(u16, i64),
+    /// A text by its id, with another text for its `%s`.
+    TextForText(u16, u16),
     /// A loan of the current club, by its slot.
     Loan(usize),
     /// How a player took a sick visit (`medical::Reaction`).

@@ -561,7 +561,7 @@ fn fill_balance(cx: &Cx, view: &mut View) {
 }
 
 /// A C format filled in: `%c`, `%s`, `%d` with a width and zeros, `%%`.
-fn printf(format: &str, args: &[&dyn std::fmt::Display]) -> String {
+pub(crate) fn printf(format: &str, args: &[&dyn std::fmt::Display]) -> String {
     let mut out = String::new();
     let mut args = args.iter();
     let mut chars = format.chars().peekable();

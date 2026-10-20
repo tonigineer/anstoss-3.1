@@ -679,6 +679,9 @@ record! {
     /// leagues or country, all, new or the club's own players
     /// (TRANSFERLISTE.md).
     0x1f42 => least_strength, set_least_strength: i16;
+    /// The years left of the manager's contract, which next season's squad
+    /// shows him by (KADER-NAECHSTE-VERLIEHEN.md §2.5).
+    0x172 => contract_years, set_contract_years: i16;
     0x1f6e => market_filter, set_market_filter: i16;
     0x1f70 => market_show, set_market_show: i16;
     /// How the week's player in individual training is chosen when nobody
@@ -994,6 +997,10 @@ record! {
     /// A player for each position whose market value counts a fifth more,
     /// by id.
     0xb5dfd0 => stars, set_stars: [u16; 11];
+    /// The best player of every ability, the field players' and the
+    /// keepers' (the world's best, dialog 462).
+    0xb5dfe6 => best_by_ability, set_best_by_ability: [i16; 16];
+    0xb5e006 => best_keepers_by_ability, set_best_keepers_by_ability: [i16; 9];
     /// Where the game cycle goes on after loading (`FUN_006da3a9`): 998
     /// inside the week, the half weeks at a week's turn.
     0xb5d172 => resume, set_resume: u16;
@@ -1034,20 +1041,28 @@ impl Luck {
 
 /// The block of tables by country (`0xae5b18`, its data from `0xae5b38`).
 /// The transfers agreed for the season's end (`0x1be0b40`, `FUN_0070ffef`):
-/// a u16 count, then pages of 100 entries of 0x28 bytes from +4, one
-/// after the other.
+/// a u16 count and a u16 last page, then pages of 4000 bytes, each its own
+/// count and two bytes before its 100 entries of 0x28 bytes
+/// (`FUN_0070f77a`, `FUN_0070f410`).
 const AGREED_AT: u32 = 0x1be0b40;
+const AGREED_PAGE: usize = 4000;
+const AGREED_PAGE_ENTRIES: usize = 100;
+const AGREED_PAGE_HEAD: usize = 4;
 const AGREED_ENTRY: usize = 0x28;
 
 /// A transfer agreed: the player, the club selling him and the club
-/// buying him (country and number), the fee, and a flag the buyer's sum
-/// leaves such transfers out by.
+/// buying him (country and number), the fee, the contract's salary (in
+/// 1000s), release fee (in 10.000s) and years, and the flag of a loan's
+/// way home (KADER-NAECHSTE-VERLIEHEN.md §1.1).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Agreed {
     pub player: u16,
     pub seller: (u8, i16),
     pub buyer: (u8, i16),
     pub fee: u32,
+    pub salary: u16,
+    pub fixed_fee: u16,
+    pub years: i8,
     pub flagged: bool,
 }
 
@@ -1365,7 +1380,11 @@ impl Records {
         let count = usize::from(word(0) as u16);
         (0..count)
             .filter_map(|k| {
-                let at = 4 + k * AGREED_ENTRY;
+                let page = k / AGREED_PAGE_ENTRIES;
+                let at = 4
+                    + page * AGREED_PAGE
+                    + AGREED_PAGE_HEAD
+                    + k % AGREED_PAGE_ENTRIES * AGREED_ENTRY;
                 let e = block.get(at..at + AGREED_ENTRY)?;
                 let word = |o: usize| i16::from_le_bytes([e[o], e[o + 1]]);
                 (word(0) != 0).then(|| Agreed {
@@ -1373,6 +1392,9 @@ impl Records {
                     seller: (e[4], word(6)),
                     buyer: (e[8], word(0xa)),
                     fee: u32::from_le_bytes(e[0xc..0x10].try_into().unwrap()),
+                    salary: word(0x10) as u16,
+                    fixed_fee: word(0x16) as u16,
+                    years: e[0x1c] as i8,
                     flagged: e[0x25] != 0,
                 })
             })

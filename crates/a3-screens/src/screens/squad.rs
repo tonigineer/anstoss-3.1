@@ -6,7 +6,10 @@ use std::collections::HashMap;
 
 use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::NOTICE;
-use a3_core::cycle::dialogs::{CURRENT_SQUAD, MARKET_VALUES, TRANSFER_LIST};
+use a3_core::cycle::dialogs::{
+    APPOINTMENTS, CURRENT_SQUAD, LOANED_OUT, MARKET_VALUES, NEXT_SQUAD, TRANSFER_LIST, WATCH_LIST,
+    WORLDS_BEST,
+};
 use a3_core::records::Team;
 use a3_core::season::Rules;
 use a3_core::{lineup, squadlist};
@@ -28,11 +31,23 @@ const CAPTION: u16 = 2520;
 /// The squad's screens and the market's, buttons in two groups.
 const SQUAD_SCREENS: u16 = 5042;
 const MARKET_SCREENS: u16 = 6371;
-/// The current squad's button, the market values'.
+/// The squad screens' buttons: the current squad, next season's, the
+/// players out on loan, the market values.
 const CURRENT_SQUAD_ITEM: usize = 0;
+const NEXT_SQUAD_ITEM: usize = 1;
+const LOANED_OUT_ITEM: usize = 5;
 const MARKET_VALUES_ITEM: usize = 6;
-/// The transfer list's button.
+const SQUAD_ITEMS: [(usize, u16); 4] = [
+    (CURRENT_SQUAD_ITEM, CURRENT_SQUAD),
+    (NEXT_SQUAD_ITEM, NEXT_SQUAD),
+    (LOANED_OUT_ITEM, LOANED_OUT),
+    (MARKET_VALUES_ITEM, MARKET_VALUES),
+];
+/// The market screens' buttons: the transfer list, the week's
+/// appointments, the watch list, the world's best.
 const TRANSFER_LIST_ITEM: usize = 0;
+const MARKET_ITEMS: [(usize, u16); 4] =
+    [(TRANSFER_LIST_ITEM, TRANSFER_LIST), (1, APPOINTMENTS), (2, WATCH_LIST), (5, WORLDS_BEST)];
 /// The amateurs' button, which a club's amateur department sees as its
 /// professionals' (text 4628); the market's youth poaching, which it may
 /// not (alert 4698).
@@ -90,10 +105,10 @@ impl Screen for SquadMenu {
             Target::Option { control: c, item }
                 if dialog.controls[c].id == Some(MARKET_SCREENS) =>
             {
-                item == TRANSFER_LIST_ITEM || refusal(cx, item).is_some()
+                MARKET_ITEMS.iter().any(|&(i, _)| i == item) || refusal(cx, item).is_some()
             }
             Target::Option { control: c, item } if dialog.controls[c].id == Some(SQUAD_SCREENS) => {
-                matches!(item, CURRENT_SQUAD_ITEM | MARKET_VALUES_ITEM)
+                SQUAD_ITEMS.iter().any(|&(i, _)| i == item)
             }
             _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
         };
@@ -108,20 +123,20 @@ impl Screen for SquadMenu {
         }
         self.whistle = false;
         match target {
-            Target::Option { control: c, item: CURRENT_SQUAD_ITEM }
+            Target::Option { control: c, item }
                 if cx.dialog.controls[c].id == Some(SQUAD_SCREENS) =>
             {
-                Outcome::Popup(Request::new(CURRENT_SQUAD))
+                match SQUAD_ITEMS.iter().find(|&&(i, _)| i == item) {
+                    Some(&(_, screen)) => Outcome::Popup(Request::new(screen)),
+                    None => Outcome::Stay,
+                }
             }
-            Target::Option { control: c, item: MARKET_VALUES_ITEM }
-                if cx.dialog.controls[c].id == Some(SQUAD_SCREENS) =>
+            Target::Option { control: c, item }
+                if cx.dialog.controls[c].id == Some(MARKET_SCREENS)
+                    && MARKET_ITEMS.iter().any(|&(i, _)| i == item) =>
             {
-                Outcome::Popup(Request::new(MARKET_VALUES))
-            }
-            Target::Option { control: c, item: TRANSFER_LIST_ITEM }
-                if cx.dialog.controls[c].id == Some(MARKET_SCREENS) =>
-            {
-                Outcome::Popup(Request::new(TRANSFER_LIST))
+                let screen = MARKET_ITEMS.iter().find(|&&(i, _)| i == item).map(|&(_, s)| s);
+                Outcome::Popup(Request::new(screen.unwrap_or(TRANSFER_LIST)))
             }
             Target::Option { control: c, item }
                 if cx.dialog.controls[c].id == Some(MARKET_SCREENS) =>
@@ -636,5 +651,339 @@ fn fill_values(cx: &Cx, view: &mut View) {
         list.rows = rows;
         list.keys = order;
         list.selected = None;
+    }
+}
+
+/// The transfers agreed with the club in them: those leaving, those
+/// bought, and its players on loan coming home (`FUN_0070ffef`).
+fn agreed_lists(cx: &Cx) -> [Vec<a3_core::records::Agreed>; 3] {
+    let Some((slot, number)) = cx.state.season.as_ref().and_then(|s| s.manager()?.club) else {
+        return Default::default();
+    };
+    let Some(records) = cx.state.records.as_ref() else { return Default::default() };
+    let Some(nation) = cx.game.world.country(slot).map(|c| c.nation) else {
+        return Default::default();
+    };
+    let club = (nation as u8, number as i16);
+    let mut lists: [Vec<_>; 3] = Default::default();
+    for a in records.agreed() {
+        if a.seller == club {
+            lists[0].push(a);
+        } else if a.buyer == club {
+            lists[if a.flagged { 2 } else { 1 }].push(a);
+        }
+    }
+    lists
+}
+
+/// A player as a list of the squad shows him, by his record.
+struct Shown {
+    id: u16,
+    player: a3_core::world::Player,
+    fitness: a3_core::season::Fitness,
+    status: a3_core::season::Status,
+}
+
+fn shown(cx: &Cx, id: u16) -> Option<Shown> {
+    let records = cx.state.records.as_ref()?;
+    let (player, fitness, status) = a3_core::load::any_player(records, &cx.game.data, id)?;
+    Some(Shown { id, player, fitness, status })
+}
+
+/// The figures a squad's row shows of a player: name, positions,
+/// strength, form, ES, age, nation, morale, condition, freshness, as 216
+/// and 219 write them.
+fn player_columns(cx: &Cx, s: &Shown) -> Vec<String> {
+    let game = cx.game;
+    let records = cx.state.records.as_ref();
+    let [main, second, third] = s.player.positions;
+    let sides = match (second, third) {
+        (0, _) => " ".to_owned(),
+        (a, 0) => hub::abbreviation(game, a),
+        (a, b) => format!("{}/{}", hub::abbreviation(game, a), hub::abbreviation(game, b)),
+    };
+    let picks = records.and_then(|r| r.player(s.id)).map_or(0, |r| r.picks());
+    let unknown = matches!((picks & UNKNOWN_STRENGTH) >> 6, 1 | 3);
+    let strength = if unknown { "?".to_owned() } else { s.player.strength.to_string() };
+    let pitch = &game.rules.pitch;
+    let today = cx
+        .state
+        .season
+        .as_ref()
+        .map_or_else(|| a3_core::calendar::season_start(2025), |x| x.date());
+    vec![
+        super::duties::short_name(cx, &s.player, s.id),
+        hub::abbreviation(game, main),
+        sides,
+        strength,
+        lineup::form(s.fitness).to_string(),
+        hub::tenths(pitch.strength(&s.player, s.fitness, s.status.doping)),
+        s.player.age(today).to_string(),
+        game.world.nation_codes.get(usize::from(s.status.nations[0])).cloned().unwrap_or_default(),
+        s.fitness.morale.to_string(),
+        lineup::condition(s.fitness).to_string(),
+        lineup::freshness(s.fitness).to_string(),
+    ]
+}
+
+/// Next season's squad (dialog 219, `CSpielerKaderNaechste`;
+/// KADER-NAECHSTE-VERLIEHEN.md §2): who stays and who comes, by main
+/// position; a click marks a player, up to five.
+#[derive(Default)]
+pub struct NextSquad {
+    marks: [u16; MARKS],
+    menu_player: Option<u16>,
+}
+
+const MARKS: usize = 5;
+const NEXT_LIST: u16 = 3318;
+const NEXT_LINE: u16 = 3317;
+const NEXT_FEES: u16 = 3322;
+const NEXT_TITLE: u16 = 1686;
+const NEW_INK: [u8; 3] = [255, 0, 0];
+const BLACK: [u8; 3] = [0, 0, 0];
+/// The contracts end on the 30th of June.
+const JUNE: u32 = 6;
+const LAST_JUNE_DAY: u32 = 30;
+/// The manager shows in the list while he has more than a year left.
+const MANAGER_YEARS: i16 = 1;
+/// R+0x14c: the club he signed with for next season.
+const NEXT_CLUB_COUNTRY: usize = 0x14c;
+const INFO_ONLY: [hub::Command; 1] = [hub::Command::Info];
+
+pub(crate) fn compose_next(dialogs: &mut HashMap<u16, Dialog>) {
+    for id in [NEXT_SQUAD, LOANED_OUT] {
+        if let Some(dialog) = dialogs.get_mut(&id) {
+            dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
+            if id == NEXT_SQUAD {
+                dialog.controls.push(hub::menu_control());
+            }
+        }
+    }
+}
+
+impl Screen for NextSquad {
+    fn ids(&self) -> &[u16] {
+        &[NEXT_SQUAD]
+    }
+
+    /// `FUN_00567920`: the rows, no count line, the fees of the players
+    /// bought, the caption without a date.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        self.marks = [0; MARKS];
+        self.menu_player = None;
+        if let Some(season) = cx.state.season.as_ref() {
+            set(view, dialog, CAPTION_ID, hub::club_title(game, season, NEXT_TITLE));
+        }
+        set(view, dialog, NEXT_LINE, String::new());
+        let [_, bought, _] = agreed_lists(cx);
+        let fees = bought.iter().fold(0i32, |s, a| s.wrapping_add(a.fee as i32));
+        set(view, dialog, NEXT_FEES, money(game, fees.into()));
+        self.fill(cx, view);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        if let Some(id) = self.menu_player.take() {
+            if hub::close_menu(cx, view, target).and_then(|i| INFO_ONLY.get(i)).is_some() {
+                let rows = control(dialog, NEXT_LIST).and_then(|l| view.list(l));
+                cx.state.paging_ids =
+                    rows.map(|l| l.keys.iter().rev().map(|&k| k as u16).collect());
+                return Outcome::Popup(Request::with(super::playerinfo::CURRENT, Args::Record(id)));
+            }
+            return Outcome::Stay;
+        }
+        let id = |c: usize| dialog.controls[c].id;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Menu(grip @ Grip::Row { control: c, row }) if id(c) == Some(NEXT_LIST) => {
+                let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
+                if let Some(player) = player
+                    && hub::show_menu(cx, view, grip, &INFO_ONLY).is_some()
+                {
+                    self.menu_player = Some(player as u16);
+                }
+                Outcome::Stay
+            }
+            // A click marks the player or unmarks him; while a mark
+            // changes the list is filled anew, from its top
+            // (`OnSelChange_IDC_KADER_NAECHSTE_LISTE`).
+            Target::Row { control: c, row } if id(c) == Some(NEXT_LIST) => {
+                let Some(player) = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied())
+                else {
+                    return Outcome::Stay;
+                };
+                let player = player as u16;
+                if let Some(mark) = self.marks.iter_mut().find(|m| **m == player) {
+                    *mark = 0;
+                } else if let Some(mark) = self.marks.iter_mut().find(|m| **m == 0) {
+                    *mark = player;
+                } else {
+                    return Outcome::Stay;
+                }
+                self.fill(cx, view);
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+impl NextSquad {
+    /// The rows (`FUN_00568118`): the squad that stays, then the players
+    /// bought and those coming back, sorted by main position as the game
+    /// sorts; the list at its top, nothing selected.
+    fn fill(&self, cx: &Cx, view: &mut View) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let Some(season) = cx.state.season.as_ref() else { return };
+        let Some(club) = season.manager().and_then(|m| m.club).and_then(|k| season.clubs.get(&k))
+        else {
+            return;
+        };
+        let year = i32::from(records.globals.start_year());
+        let manager_shown = records
+            .human_slot(season.current)
+            .and_then(|slot| records.managers.get(slot))
+            .is_some_and(|m| m.contract_years() > MANAGER_YEARS);
+        // Each row: the player, his contract's salary, release fee and
+        // years, whether he comes to the club.
+        let mut rows: Vec<(Shown, u16, u16, i8, bool)> = Vec::new();
+        for status in &club.status {
+            let Some(r) = records.player(status.id) else { continue };
+            let years = status.contract.unwrap_or(0).clamp(i8::MIN.into(), i8::MAX.into()) as i8;
+            let leaving = r.get::<u8>(NEXT_CLUB_COUNTRY) != 0;
+            let skip = leaving
+                || r.retiring() & RETIRING != 0
+                || years <= 1
+                || r.terms() & ON_LOAN != 0
+                || (status.id > LAST_REAL_ID && !manager_shown);
+            if skip {
+                continue;
+            }
+            if let Some(s) = shown(cx, status.id) {
+                rows.push((s, r.salary(), r.fixed_fee(), years, false));
+            }
+        }
+        let [_, bought, returning] = agreed_lists(cx);
+        for a in bought.iter().chain(&returning) {
+            if let Some(s) = shown(cx, a.player) {
+                rows.push((s, a.salary, a.fixed_fee, a.years, true));
+            }
+        }
+        let order = squadlist::exchange_sort((0..rows.len()).collect(), |p, q| {
+            rows[p].0.player.positions[0] < rows[q].0.player.positions[0]
+        });
+        let mut texts = Vec::new();
+        let mut inks = Vec::new();
+        let mut keys = Vec::new();
+        for &i in &order {
+            let (s, salary, fee, years, incoming) = &rows[i];
+            let mut columns = player_columns(cx, s);
+            columns.push(money(game, i64::from(*salary) * SALARY_UNIT));
+            let until = i32::from(*years) + i32::from(*incoming);
+            columns.push(if until >= 1 {
+                chrono::NaiveDate::from_ymd_opt(year + i32::from(*years), JUNE, LAST_JUNE_DAY)
+                    .map_or_else(|| "-".to_owned(), |d| hub::date_text(game, d))
+            } else {
+                "-".to_owned()
+            });
+            columns.push(if *fee == 0 {
+                "-".to_owned()
+            } else {
+                super::finances::amount(game, i64::from(*fee) * FEE_UNIT)
+            });
+            texts.push(columns.join("\t"));
+            inks.push(Some(if *incoming { NEW_INK } else { BLACK }));
+            keys.push(usize::from(s.id));
+        }
+        if let Some(list) = control(dialog, NEXT_LIST).and_then(|c| view.list_mut(c)) {
+            list.rows = texts;
+            list.inks = inks;
+            list.keys = keys;
+            list.scroll = 0;
+            list.selected = None;
+        }
+    }
+}
+
+/// The players out on loan (dialog 300, `CUebersichtVerliehene`;
+/// KADER-NAECHSTE-VERLIEHEN.md §3): who, his contract with the club, a
+/// purchase option, where he plays, how content he is. The list takes no
+/// click (its style lacks 0x100).
+#[derive(Default)]
+pub struct LoanedOut;
+
+const LOANED_LIST: u16 = 4029;
+/// A borrower's option to buy (R+0x15e bit 0x200).
+const PURCHASE_OPTION: u16 = 0x200;
+const YES: u16 = 1028;
+const NO: u16 = 1029;
+/// The contentment icons by level, where the list puts them.
+const CONTENT_ICONS: [u16; 4] = [1807, 1808, 1806, 1809];
+const LOANED_PLAYER_COLUMNS: usize = 8;
+
+impl Screen for LoanedOut {
+    fn ids(&self) -> &[u16] {
+        &[LOANED_OUT]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        if let Some(season) = cx.state.season.as_ref() {
+            set(view, dialog, CAPTION_ID, hub::manager_title_of(game, season, &dialog.title));
+        }
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let year = i32::from(records.globals.start_year());
+        let [_, _, returning] = agreed_lists(cx);
+        let slots = control(dialog, LOANED_LIST)
+            .map(|c| crate::controls::list::icon_slots(&dialog.controls[c]))
+            .unwrap_or_default();
+        let mut texts = Vec::new();
+        let mut icons = Vec::new();
+        for a in &returning {
+            let (Some(s), Some(r)) = (shown(cx, a.player), records.player(a.player)) else {
+                continue;
+            };
+            // Name to nation, then the contract's year, the option, his club.
+            let mut columns = player_columns(cx, &s);
+            columns.truncate(LOANED_PLAYER_COLUMNS);
+            columns.push((year + i32::from(a.years)).to_string());
+            let option = r.terms() & PURCHASE_OPTION != 0;
+            columns.push(game.text(if option { YES } else { NO }).to_owned());
+            let [country, number] = r.club();
+            columns.push(game.club_name(Some(records), country, number.into()));
+            texts.push(columns.join("\t"));
+            let level = a3_core::mood::content_level(a3_core::mood::parts(r));
+            icons.push(slots.iter().copied().zip(CONTENT_ICONS.get(level).copied()).collect());
+        }
+        if let Some(list) = control(dialog, LOANED_LIST).and_then(|c| view.list_mut(c)) {
+            list.inks = vec![Some(BLACK); texts.len()];
+            list.rows = texts;
+            list.row_icons = icons;
+            list.keyed = CONTENT_ICONS.to_vec();
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            // The list takes no click: nothing stays chosen.
+            Target::Row { control: c, .. } => {
+                if let Some(list) = view.list_mut(c) {
+                    list.selected = None;
+                }
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
     }
 }

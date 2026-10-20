@@ -142,7 +142,13 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(squad::SquadMenu::default()),
         Box::new(squad::CurrentSquad::default()),
         Box::new(squad::MarketValues::default()),
+        Box::new(squad::NextSquad::default()),
+        Box::new(squad::LoanedOut),
         Box::new(market::TransferList::default()),
+        Box::new(market::WorldsBest),
+        Box::new(market::Appointments::default()),
+        Box::new(market::WatchList::default()),
+        Box::new(market::WatchedPlayer::default()),
         Box::new(talk::TalkScreen::default()),
         Box::new(talk::Mates::default()),
         Box::new(tactics::TacticsScreen::default()),
@@ -182,7 +188,10 @@ pub fn compose(game: &mut Game) {
     squad::compose(&mut game.dialogs, &game.data.rules);
     squad::compose_squad(&mut game.dialogs);
     squad::compose_values(&mut game.dialogs);
+    squad::compose_next(&mut game.dialogs);
     market::compose(&mut game.dialogs);
+    market::compose_best(&mut game.dialogs);
+    market::compose_talks(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
 }
 

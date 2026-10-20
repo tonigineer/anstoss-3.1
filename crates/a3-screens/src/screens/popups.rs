@@ -34,6 +34,13 @@ impl Screen for Question {
                 let name = cx.state.records.as_ref().and_then(|r| r.known_as(player));
                 Some(cx.game.text(text).replacen("%s", &name.unwrap_or_default(), 1))
             }
+            Args::TextForMoney(text, amount) => {
+                let amount = super::playerinfo::money(cx.game, amount);
+                Some(cx.game.text(text).replacen("%s", &amount, 1))
+            }
+            Args::TextForText(text, other) => {
+                Some(cx.game.text(text).replacen("%s", cx.game.text(other), 1))
+            }
             Args::TextForFormation(text, formation) => {
                 let manager = cx.state.season.as_ref().and_then(|s| s.manager());
                 let name = manager.and_then(|m| m.formations.get(formation)).map(|f| f.0.as_str());

@@ -174,3 +174,107 @@ pub fn watch(records: &mut Records, slot: usize, id: u16) -> Watch {
     b[0..2].copy_from_slice(&((count + 1) as i16).to_le_bytes());
     Watch::Added
 }
+
+/// A negotiation appointment (TERMINE-BEOBACHTUNG.md §1.1): its kind, the
+/// day, the player, and the clubs taking part — his own first.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Appointment {
+    pub kind: i16,
+    pub day: i16,
+    pub player: u16,
+    pub clubs: Vec<(u8, i16)>,
+}
+
+/// The appointments' kinds: poaching a player not on the transfer list
+/// (not shown to others), a purchase, a loan; the first is never booked.
+pub const RELEASE_FEE_TALK: i16 = 1;
+pub const POACHING: i16 = 2;
+pub const PURCHASE: i16 = 3;
+pub const LOAN_TALK: i16 = 4;
+const MOST_CLUBS: usize = 10;
+const CLUB_AT: usize = 0xc;
+const CLUB: usize = 6;
+
+/// The week's appointments, in the order kept.
+pub fn appointments(records: &Records) -> Vec<Appointment> {
+    let Some(b) = records.block(&format!("{TALKS_AT:#x}")) else { return Vec::new() };
+    let count = usize::try_from(word(b, 0)).unwrap_or(0);
+    (0..count)
+        .map(|k| {
+            let e = TALKS_FIRST + k * TALK;
+            let n = usize::try_from(word(b, e + 4)).unwrap_or(0).min(MOST_CLUBS);
+            Appointment {
+                kind: word(b, e),
+                day: word(b, e + 2),
+                player: word(b, e + 6) as u16,
+                clubs: (0..n)
+                    .map(|i| {
+                        let at = e + CLUB_AT + i * CLUB;
+                        (b.get(at).copied().unwrap_or(0), word(b, at + 2))
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+/// A watched player (16 bytes): his id, the marks of his last five
+/// matches watched, newest first, the matches watched and his form's sum
+/// over them (TERMINE-BEOBACHTUNG.md §3.2).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Watched {
+    pub id: u16,
+    pub marks: [u8; 5],
+    pub matches: i16,
+    pub form_sum: i32,
+}
+
+/// The watch list's places with a player, all fifty, in place order.
+pub fn watch_list(records: &Records, slot: usize) -> Vec<Watched> {
+    let Some(b) = records.block(&watch_name(slot)) else { return Vec::new() };
+    (0..WATCH_SIZE)
+        .map(|k| WATCH_FIRST + k * WATCHED)
+        .filter_map(|e| {
+            let id = word(b, e) as u16;
+            (id != 0).then(|| Watched {
+                id,
+                marks: std::array::from_fn(|i| b.get(e + 2 + i).copied().unwrap_or(0)),
+                matches: word(b, e + 8),
+                form_sum: long(b, e + 0xc),
+            })
+        })
+        .collect()
+}
+
+/// A player taken off the watch list: the places after his move up, the
+/// last used one is cleared (`FUN_00418831`).
+pub fn unwatch(records: &mut Records, slot: usize, id: u16) {
+    let Some(b) = records.block_mut(&watch_name(slot)) else { return };
+    let count = usize::try_from(word(b, 0)).unwrap_or(0).min(WATCH_SIZE);
+    let Some(k) = (0..count).find(|&k| word(b, WATCH_FIRST + k * WATCHED) as u16 == id) else {
+        return;
+    };
+    let end = WATCH_FIRST + count * WATCHED;
+    b.copy_within(WATCH_FIRST + (k + 1) * WATCHED..end, WATCH_FIRST + k * WATCHED);
+    b[end - WATCHED..end].fill(0);
+    b[0..2].copy_from_slice(&((count - 1) as i16).to_le_bytes());
+}
+
+/// The scouts out by region: the day each comes back, 0 none
+/// (TERMINE-BEOBACHTUNG.md §3.4).
+const SCOUTS_AT: usize = 0x32e;
+pub const REGIONS: usize = 5;
+const SCOUT_DAYS: i16 = 28;
+
+pub fn scouts(records: &Records, slot: usize) -> [i16; REGIONS] {
+    let b = records.block(&watch_name(slot)).unwrap_or(&[]);
+    std::array::from_fn(|i| word(b, SCOUTS_AT + 2 * i))
+}
+
+/// A scout sent to a region for four weeks.
+pub fn send_scout(records: &mut Records, slot: usize, region: usize, today: i16) {
+    if let Some(b) = records.block_mut(&watch_name(slot)) {
+        let at = SCOUTS_AT + 2 * region;
+        b[at..at + 2].copy_from_slice(&(today + SCOUT_DAYS).to_le_bytes());
+    }
+}

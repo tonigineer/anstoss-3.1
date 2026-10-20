@@ -70,6 +70,8 @@ pub enum Kind {
         row_height: u8,
         style: u8,
         columns: Vec<Column>,
+        /// Where its rows' icons go, slot by slot, from its left edge.
+        icons: Vec<f32>,
     },
     Bitmap,
     /// The game's `AniStatic`: a picture that can play a series of frames.
@@ -330,11 +332,15 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         },
         4 => {
             let columns = columns(extra, LIST_COLUMNS);
+            // Where a row's icons go, slot by slot (words 2 to 11).
+            let icons = (ICON_SLOTS.0..ICON_SLOTS.1)
+                .map_while(|i| u16s(i).filter(|&x| x != 0).map(f32::from))
+                .collect();
             match u16s(14).unwrap_or(0).to_le_bytes() {
                 [row_height, style] if row_height < 0x40 => {
-                    Kind::ListBox { row_height, style, columns }
+                    Kind::ListBox { row_height, style, columns, icons }
                 }
-                _ => Kind::ListBox { row_height: 0, style: 0, columns },
+                _ => Kind::ListBox { row_height: 0, style: 0, columns, icons },
             }
         }
         6 => Kind::Anim,
@@ -402,6 +408,8 @@ pub struct Column {
 /// their count, the first's; each takes four words, its place — 0x4000
 /// centred, 0x8000 right-aligned — and its width first.
 const LIST_COLUMNS: (usize, usize) = (12, 15);
+/// A list's icon slots, in words of its extra data.
+const ICON_SLOTS: (usize, usize) = (2, 12);
 const HEADER_COLUMNS: (usize, usize) = (3, 4);
 const COMBO_COLUMNS: (usize, usize) = (12, 16);
 /// A stepping button whose pictures' black is see-through.

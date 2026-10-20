@@ -7,7 +7,10 @@
 use std::collections::HashMap;
 
 use a3_core::cycle::Request;
-use a3_core::cycle::dialogs::{CURRENT_SQUAD, NOTICE, QUESTION, TRANSFER_LIST};
+use a3_core::cycle::dialogs::{
+    APPOINTMENTS, CURRENT_SQUAD, NOTICE, QUESTION, TRANSFER_LIST, WATCH_LIST, WATCHED_PLAYER,
+    WORLDS_BEST,
+};
 use a3_core::finances::Balance as Figures;
 use a3_core::records::Records;
 use a3_core::transfers::{self, LOAN, LOAN_WITH_OPTION, Listing, Watch};
@@ -365,7 +368,11 @@ impl TransferList {
         let globals = &records.globals;
         let played = globals.played(e.country.into());
         match self.leagues {
-            1..=3 => played && league_level(records, e).min(2) == i32::from(self.leagues - 1),
+            1..=3 => {
+                played
+                    && league_level(records, e.country, e.number).min(2)
+                        == i32::from(self.leagues - 1)
+            }
             FIRST_COUNTRY => i16::from(e.country) == globals.main_country(),
             5..=8 => {
                 let k = usize::try_from(self.leagues - 5).unwrap_or(0);
@@ -466,15 +473,15 @@ impl TransferList {
     }
 }
 
-/// How high a listed player's club plays: its league for a country with
-/// leagues, ten for its amateur clubs, none abroad (`FUN_0063e2df`).
-fn league_level(records: &Records, e: &Listing) -> i32 {
+/// How high a club plays: its league for a country with leagues, ten for
+/// its amateur clubs, none abroad (`FUN_0063e2df`).
+fn league_level(records: &Records, country: u8, number: u16) -> i32 {
     const AMATEURS: i32 = 10;
     let countries = &records.countries;
-    let country = usize::from(e.country);
-    match countries.kind(country) {
-        1 | 2 if (e.number as i16) < countries.team_count(country) => {
-            records.team(e.country.into(), e.number).map_or(AMATEURS, |t| i32::from(t.level()))
+    let c = usize::from(country);
+    match countries.kind(c) {
+        1 | 2 if (number as i16) < countries.team_count(c) => {
+            records.team(country.into(), number).map_or(AMATEURS, |t| i32::from(t.level()))
         }
         1 | 2 => AMATEURS,
         _ => 0,
@@ -507,4 +514,659 @@ fn own_manager_mut<'a>(cx: &'a mut Cx) -> Option<&'a mut a3_core::records::Manag
     let records = cx.state.records.as_mut()?;
     let slot = records.human_slot(current)?;
     records.managers.get_mut(slot)
+}
+
+/// The world's best players (dialog 462, `CWeltbestenSpieler`): the best
+/// of every position, with up to three of his abilities, and of every
+/// ability, the keepers' last.
+#[derive(Default)]
+pub struct WorldsBest;
+
+const BY_POSITION: u16 = 6016;
+const BY_ABILITY: u16 = 6017;
+const BEST_CAPTION: u16 = 9937;
+const POSITIONS: u8 = 10;
+
+pub(crate) fn compose_best(dialogs: &mut HashMap<u16, Dialog>) {
+    if let Some(dialog) = dialogs.get_mut(&WORLDS_BEST) {
+        dialog.controls.insert(0, super::caption(dialog.frame, BEST_CAPTION, dialog.title.clone()));
+    }
+}
+
+impl Screen for WorldsBest {
+    fn ids(&self) -> &[u16] {
+        &[WORLDS_BEST]
+    }
+
+    /// Both lists (`FUN_005cbac5`).
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        set(view, dialog, BEST_CAPTION, dialog.title.clone());
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let Some(season) = cx.state.season.as_ref() else { return };
+        let pitch = &game.rules.pitch;
+        let today = season.date();
+        let year = i32::from(records.globals.start_year());
+        let stars = records.globals.stars();
+        // A best player's figures after his position or ability: name,
+        // age, his position (the ability list's), nation, club, value,
+        // the contract's end.
+        let row = |id: u16, position: bool| -> Option<(String, a3_core::world::Player)> {
+            let (player, _, status) = a3_core::load::any_player(records, &game.data, id)?;
+            let r = records.player(id)?;
+            let years = status.contract.unwrap_or(0).max(0);
+            let (value, until) = if years >= 1 {
+                let value = super::playerinfo::market_value(game, &player, r, stars, years, today);
+                (money(game, value), (year + years).to_string())
+            } else {
+                ("-".to_owned(), "-".to_owned())
+            };
+            let [country, number] = r.club();
+            let fields = [
+                records.known_as(id).unwrap_or_default(),
+                player.age(today).to_string(),
+                if position { hub::abbreviation(game, player.positions[0]) } else { String::new() },
+                game.world
+                    .nation_codes
+                    .get(usize::from(status.nations[0]))
+                    .cloned()
+                    .unwrap_or_default(),
+                game.club_name(Some(records), country, number.into()),
+                value,
+                until,
+            ];
+            Some((fields.join("\t"), player))
+        };
+        let mut rows = Vec::new();
+        let mut icons = Vec::new();
+        let mut keys = Vec::new();
+        for position in 1..=POSITIONS {
+            let id = stars[usize::from(position)];
+            if id == 0 {
+                continue;
+            }
+            let Some((text, player)) = row(id, false) else { continue };
+            // Position, name, age, nation, club, value, contract.
+            let mut fields: Vec<&str> = text.split('\t').collect();
+            fields.remove(2);
+            let abbreviation = hub::abbreviation(game, position);
+            rows.push(format!("{abbreviation}\t{}", fields.join("\t")));
+            icons.push(pitch.ability_icons(&player));
+            keys.push(usize::from(id));
+        }
+        fill_list(view, dialog, BY_POSITION, rows, icons, keys);
+        let (mut rows, mut icons, mut keys) = (Vec::new(), Vec::new(), Vec::new());
+        let field = records.globals.best_by_ability().map(|id| (id, false));
+        let keepers = records.globals.best_keepers_by_ability().map(|id| (id, true));
+        for (ability, (id, keeper)) in field
+            .iter()
+            .enumerate()
+            .chain(keepers.iter().enumerate())
+            .map(|(a, &(id, keeper))| (a, (id, keeper)))
+        {
+            let Some(id) = u16::try_from(id).ok().filter(|&id| id != 0) else { continue };
+            let Some((text, _)) = row(id, true) else { continue };
+            rows.push(format!("\t{text}"));
+            icons.push(pitch.ability_icon(keeper, true, ability).into_iter().collect());
+            keys.push(usize::from(id));
+        }
+        fill_list(view, dialog, BY_ABILITY, rows, icons, keys);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    /// A row clicked: negotiations, not built yet; the row does not stay
+    /// chosen (`OnSelChange_IDC_WELTBESTER_POSITIONEN_005cc740`).
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Row { control: c, .. } if view.list(c).is_some() => {
+                if let Some(list) = view.list_mut(c) {
+                    list.selected = None;
+                }
+                info!("Verhandlungen: not built yet");
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// A list's rows, each with its icons in the list's icon slots.
+fn fill_list(
+    view: &mut View,
+    dialog: &Dialog,
+    id: u16,
+    rows: Vec<String>,
+    icons: Vec<Vec<u16>>,
+    keys: Vec<usize>,
+) {
+    let Some(c) = control(dialog, id) else { return };
+    let slots = crate::controls::list::icon_slots(&dialog.controls[c]);
+    if let Some(list) = view.list_mut(c) {
+        list.inks = vec![None; rows.len()];
+        list.rows = rows;
+        list.row_icons =
+            icons.into_iter().map(|row| slots.iter().copied().zip(row).collect()).collect();
+        list.keys = keys;
+        list.selected = None;
+    }
+}
+
+/// The clubs human managers have, as (country, number).
+fn human_clubs(records: &Records) -> Vec<(u8, i16)> {
+    records.humans().map(|m| (m.country() as u8, m.team() as i16)).collect()
+}
+
+/// The club of a player's record, now.
+fn present_club(records: &Records, id: u16) -> (u8, i16) {
+    records.player(id).map_or((0, 0), |r| {
+        let [country, number] = r.club();
+        (country, i16::from(number))
+    })
+}
+
+/// A player's name to nation, as the market's lists write them.
+fn short_columns(cx: &Cx, id: u16) -> Option<(Vec<String>, a3_core::world::Player)> {
+    let (game, records) = (cx.game, cx.state.records.as_ref()?);
+    let (player, fitness, status) = a3_core::load::any_player(records, &game.data, id)?;
+    let today = season_date(cx);
+    let [main, second, third] = player.positions;
+    let sides = match (second, third) {
+        (0, _) => " ".to_owned(),
+        (a, 0) => hub::abbreviation(game, a),
+        (a, b) => format!("{}/{}", hub::abbreviation(game, a), hub::abbreviation(game, b)),
+    };
+    let picks = records.player(id).map_or(0, |r| r.picks());
+    let unknown = matches!((picks & 0xc0) >> 6, 1 | 3);
+    let strength = if unknown { "?".to_owned() } else { player.strength.to_string() };
+    let pitch = &game.rules.pitch;
+    let columns = vec![
+        super::duties::short_name(cx, &player, id),
+        hub::abbreviation(game, main),
+        sides,
+        strength,
+        a3_core::lineup::form(fitness).to_string(),
+        hub::tenths(pitch.strength(&player, fitness, status.doping)),
+        player.age(today).to_string(),
+        game.world.nation_codes.get(usize::from(status.nations[0])).cloned().unwrap_or_default(),
+    ];
+    Some((columns, player))
+}
+
+/// The row menu with the player's info alone.
+const INFO_ONLY: [Command; 1] = [Command::Info];
+
+/// The week's appointments (dialog 25, `CBekannteTermine`;
+/// TERMINE-BEOBACHTUNG.md §2): every public negotiation of the week, by
+/// the player's main position; red where the club's player is talked
+/// about or a human club takes part.
+#[derive(Default)]
+pub struct Appointments {
+    menu_player: Option<u16>,
+}
+
+const TALKS_LIST: u16 = 1313;
+const TALKS_CAPTION: u16 = 9938;
+const RELEASE_FEE_TEXT: u16 = 2609;
+const PURCHASE_TEXT: u16 = 3069;
+const LOAN_KIND_TEXT: u16 = 3070;
+const ALREADY_IN: u16 = 2350;
+const GERMANY: u8 = 14;
+
+pub(crate) fn compose_talks(dialogs: &mut HashMap<u16, Dialog>) {
+    for id in [APPOINTMENTS, WATCH_LIST, WATCHED_PLAYER] {
+        if let Some(dialog) = dialogs.get_mut(&id) {
+            let caption = super::caption(dialog.frame, TALKS_CAPTION, dialog.title.clone());
+            dialog.controls.insert(0, caption);
+            if id != WATCHED_PLAYER {
+                dialog.controls.push(hub::menu_control());
+            }
+        }
+    }
+}
+
+/// An exchange sort as the appointments' (`FUN_00762ba3`): every later row
+/// that goes before swaps places.
+fn swap_sort<T>(rows: &mut [T], before: impl Fn(&T, &T) -> bool) {
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            if before(&rows[j], &rows[i]) {
+                rows.swap(i, j);
+            }
+        }
+    }
+}
+
+impl Screen for Appointments {
+    fn ids(&self) -> &[u16] {
+        &[APPOINTMENTS]
+    }
+
+    /// The rows (`FUN_0047c6f7`); the dialog file's caption.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        self.menu_player = None;
+        set(view, dialog, TALKS_CAPTION, dialog.title.clone());
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let late = records.globals.day() > LATE;
+        let year = i32::from(records.globals.start_year());
+        let own = own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())));
+        let humans = human_clubs(records);
+        let position = |id: u16| records.player(id).map_or(0, |r| r.positions()[0]);
+        let mut talks = transfers::appointments(records);
+        swap_sort(&mut talks, |a, b| position(a.player) < position(b.player));
+        let mut rows = Vec::new();
+        let mut inks = Vec::new();
+        let mut keys = Vec::new();
+        for talk in talks.iter().filter(|t| t.kind != transfers::POACHING) {
+            let Some((player_columns, _)) = short_columns(cx, talk.player) else { continue };
+            let (country, number) = present_club(records, talk.player);
+            let level = league_level(records, country, number as u16).min(2);
+            let r = records.player(talk.player);
+            let years = r.map_or(0, |r| i32::from(r.contract() & 0xfff) - year);
+            let kind = match talk.kind {
+                transfers::RELEASE_FEE_TALK if country == GERMANY && level >= 2 => {
+                    game.text(RELEASE_FEE_TEXT).to_owned()
+                }
+                transfers::RELEASE_FEE_TALK => {
+                    money(game, i64::from(r.map_or(0, |r| r.fixed_fee())) * 10_000)
+                }
+                transfers::PURCHASE if years <= 0 || (years == 1 && late) => {
+                    game.text(FREE_TEXT).to_owned()
+                }
+                transfers::PURCHASE => format!("{} ({})", game.text(PURCHASE_TEXT), year + years),
+                transfers::LOAN_TALK => game.text(LOAN_KIND_TEXT).to_owned(),
+                _ => "-".to_owned(),
+            };
+            let day = if talk.day >= 0 {
+                game.text(WEEKDAYS + talk.day.rem_euclid(7) as u16).to_owned()
+            } else {
+                game.text(NO).to_owned()
+            };
+            // Name to strength, then the league, the age, the club, the
+            // kind and the day.
+            let mut columns = player_columns[..4].to_vec();
+            columns.extend([
+                (level + 1).to_string(),
+                player_columns[6].clone(),
+                game.club_name(Some(records), country, number),
+                kind,
+                day,
+            ]);
+            rows.push(columns.join("\t"));
+            let ours = own == Some((country, number));
+            let human = talk.clubs.iter().any(|c| humans.contains(c));
+            inks.push(Some(if ours || human { OWN_INK } else { OTHER_INK }));
+            keys.push(usize::from(talk.player));
+        }
+        if let Some(list) = control(dialog, TALKS_LIST).and_then(|c| view.list_mut(c)) {
+            list.rows = rows;
+            list.inks = inks;
+            list.keys = keys;
+            list.scroll = 0;
+            list.selected = None;
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        if let Some(id) = self.menu_player.take() {
+            return info_menu(cx, view, target, TALKS_LIST, id);
+        }
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Menu(grip @ Grip::Row { control: c, row })
+                if dialog.controls[c].id == Some(TALKS_LIST) =>
+            {
+                self.menu_player = open_info_menu(cx, view, grip, c, row);
+                Outcome::Stay
+            }
+            // The transfer list's request (`OnSelChange_IDC_BEKANNTE_LISTE`):
+            // a club already in the talks is told so; joining is not built.
+            Target::Row { control: c, row } if dialog.controls[c].id == Some(TALKS_LIST) => {
+                let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
+                let Some(id) = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied())
+                else {
+                    return Outcome::Stay;
+                };
+                let id = id as u16;
+                if !transfers::listings(records).iter().any(|e| e.id == id) {
+                    return Outcome::Stay;
+                }
+                let own = own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())));
+                let taking_part = transfers::appointments(records)
+                    .iter()
+                    .any(|t| t.player == id && own.is_some_and(|o| t.clubs.contains(&o)));
+                if taking_part {
+                    return Outcome::Popup(Request::with(NOTICE, Args::Text(ALREADY_IN)));
+                }
+                info!("Verhandlungen ({id}): not built yet");
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// A right click on a list's row: the player's menu with his info.
+fn open_info_menu(cx: &Cx, view: &mut View, grip: Grip, list: usize, row: usize) -> Option<u16> {
+    let player = view.list(list).and_then(|l| l.keys.get(l.scroll + row).copied())?;
+    hub::show_menu(cx, view, grip, &INFO_ONLY)?;
+    Some(player as u16)
+}
+
+/// The menu's choice: the info, paging through the list's rows backwards.
+fn info_menu(cx: &mut Cx, view: &mut View, target: Target, list: u16, id: u16) -> Outcome {
+    if hub::close_menu(cx, view, target).and_then(|i| INFO_ONLY.get(i)).is_none() {
+        return Outcome::Stay;
+    }
+    let rows = control(cx.dialog, list).and_then(|l| view.list(l));
+    cx.state.paging_ids = rows.map(|l| l.keys.iter().rev().map(|&k| k as u16).collect());
+    Outcome::Popup(Request::with(super::playerinfo::CURRENT, Args::Record(id)))
+}
+
+/// The watch list (dialog 27, `CBeobachtungslisteHaupt`;
+/// TERMINE-BEOBACHTUNG.md §4): every watched player with his marks and
+/// form; a click asks what to do with him; five scouts to send.
+#[derive(Default)]
+pub struct WatchList {
+    menu_player: Option<u16>,
+    /// The scouts' questions: the cost, then where to.
+    asking: Option<(Scout, usize)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Scout {
+    Cost,
+    Sent,
+}
+
+const WATCH_ROWS: u16 = 1330;
+const WATCH_COUNT: u16 = 1329;
+const REGIONS: u16 = 5843;
+const NONE_WATCHED: u16 = 2611;
+const ONE_WATCHED: u16 = 2612;
+/// The marks: substituted, came on, banned, injured; a grade's half.
+const MARK_TEXTS: [(u8, u16); 4] = [(0x20, 2171), (0x10, 2172), (0x80, 2174), (0x08, 2173)];
+const PLAYED: u8 = 0x40;
+const GRADE: u8 = 0x0f;
+/// The scouts: busy there, busy elsewhere, the cost and where to.
+const SCOUT_THERE: u16 = 4232;
+const SCOUT_OUT: u16 = 4627;
+const SCOUT_COST: u16 = 4626;
+const SCOUT_SENT: u16 = 4133;
+const REGION_NAMES: u16 = 4134;
+const SCOUT_PRICE: i32 = 50_000;
+/// The team's staff costs (the club object's +0x280).
+const STAFF_COSTS: usize = 0x4f8;
+
+impl Screen for WatchList {
+    fn ids(&self) -> &[u16] {
+        &[WATCH_LIST]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        self.menu_player = None;
+        self.asking = None;
+        if let Some(season) = cx.state.season.as_ref() {
+            set(view, dialog, TALKS_CAPTION, hub::manager_title_of(game, season, &dialog.title));
+        }
+        if let Some(c) = control(dialog, REGIONS) {
+            view.set_chosen(c, crate::controls::options::NONE);
+        }
+        self.fill(cx, view);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        if let Some(id) = self.menu_player.take() {
+            return info_menu(cx, view, target, WATCH_ROWS, id);
+        }
+        let id = |c: usize| dialog.controls[c].id;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Menu(grip @ Grip::Row { control: c, row }) if id(c) == Some(WATCH_ROWS) => {
+                self.menu_player = open_info_menu(cx, view, grip, c, row);
+                Outcome::Stay
+            }
+            Target::Row { control: c, row } if id(c) == Some(WATCH_ROWS) => {
+                match view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied()) {
+                    Some(player) => {
+                        Outcome::Popup(Request::with(WATCHED_PLAYER, Args::Record(player as u16)))
+                    }
+                    None => Outcome::Stay,
+                }
+            }
+            // A scout sent: not where one is, nor while one is out
+            // (`0x48067a`).
+            Target::Option { control: c, item } if id(c) == Some(REGIONS) => {
+                let Some(slot) = own_slot(cx) else { return Outcome::Stay };
+                let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
+                let scouts = transfers::scouts(records, slot);
+                let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+                if scouts.get(item).is_some_and(|&d| d > 0) {
+                    return notice(SCOUT_THERE);
+                }
+                if scouts.iter().any(|&d| d > 0) {
+                    return notice(SCOUT_OUT);
+                }
+                self.asking = Some((Scout::Cost, item));
+                let args = Args::TextForMoney(SCOUT_COST, SCOUT_PRICE.into());
+                Outcome::Popup(Request::with(QUESTION, args))
+            }
+            _ => Outcome::Stay,
+        }
+    }
+
+    /// The scout's questions; back from a watched player, the list anew if
+    /// he was dealt with.
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        match self.asking.take() {
+            Some((Scout::Cost, region)) if reply == Reply::Ok => {
+                self.asking = Some((Scout::Sent, region));
+                let args = Args::TextForText(SCOUT_SENT, REGION_NAMES + region as u16);
+                Outcome::Popup(Request::with(QUESTION, args))
+            }
+            Some((Scout::Sent, region)) => {
+                let today = cx.state.records.as_ref().map_or(0, |r| r.globals.day() as i16);
+                let (Some(slot), Some(index)) = (own_slot(cx), own_index(cx)) else {
+                    return Outcome::Stay;
+                };
+                if let Some(records) = cx.state.records.as_mut() {
+                    transfers::send_scout(records, slot, region, today);
+                    let team = &mut records.teams[index];
+                    let cost = team.observation_cost().wrapping_add(SCOUT_PRICE);
+                    team.put(OBSERVATION_COST, cost);
+                    let staff = team.get::<i32>(STAFF_COSTS).wrapping_add(SCOUT_PRICE);
+                    team.put(STAFF_COSTS, staff);
+                }
+                Outcome::Stay
+            }
+            Some(_) => Outcome::Stay,
+            None => {
+                if reply == Reply::Ok {
+                    self.fill(cx, view);
+                }
+                Outcome::Stay
+            }
+        }
+    }
+}
+
+impl WatchList {
+    /// The rows (`FUN_0047fdee`): every place with a player, in order;
+    /// the list at its top; the count of rows below.
+    fn fill(&self, cx: &Cx, view: &mut View) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let Some(slot) = own_slot(cx) else { return };
+        let year = i32::from(records.globals.start_year());
+        let mut rows = Vec::new();
+        let mut keys = Vec::new();
+        for w in transfers::watch_list(records, slot) {
+            let Some((mut columns, _)) = short_columns(cx, w.id) else { continue };
+            let Some((_, fitness, status)) = a3_core::load::any_player(records, &game.data, w.id)
+            else {
+                continue;
+            };
+            let form = a3_core::lineup::form(fitness);
+            let average = if w.matches != 0 {
+                (f64::from(w.form_sum) / f64::from(w.matches)) as f32
+            } else {
+                form as f32
+            };
+            let marks: String = w
+                .marks
+                .iter()
+                .take_while(|&&b| b != 0)
+                .map(|&b| match MARK_TEXTS.iter().find(|&&(bit, _)| b & bit != 0) {
+                    Some(&(_, text)) => game.text(text).to_owned(),
+                    None if b & PLAYED != 0 && b & GRADE == 0 => "-".to_owned(),
+                    None if b & PLAYED != 0 => ((b & GRADE) / 2).to_string(),
+                    None => String::new(),
+                })
+                .collect();
+            let trend = match (form as f32).partial_cmp(&average) {
+                Some(std::cmp::Ordering::Greater) => "+",
+                Some(std::cmp::Ordering::Less) => "-",
+                _ => " ",
+            };
+            let years = status.contract.unwrap_or(0);
+            let until = if years >= 1 { (year + years).to_string() } else { "-".to_owned() };
+            columns.extend([
+                super::playerinfo::one_decimal(f64::from(average)),
+                marks,
+                trend.to_owned(),
+                until,
+            ]);
+            rows.push(columns.join("\t"));
+            keys.push(usize::from(w.id));
+        }
+        let count = rows.len();
+        if let Some(list) = control(dialog, WATCH_ROWS).and_then(|c| view.list_mut(c)) {
+            list.inks = vec![Some(OTHER_INK); count];
+            list.rows = rows;
+            list.keys = keys;
+            list.scroll = 0;
+            list.selected = None;
+        }
+        let line = match count {
+            0 => game.text(NONE_WATCHED).to_owned(),
+            1 => game.text(ONE_WATCHED).to_owned(),
+            n => control(dialog, WATCH_COUNT)
+                .map(|c| dialog.controls[c].text.replacen("%d", &n.to_string(), 1))
+                .unwrap_or_default(),
+        };
+        set(view, dialog, WATCH_COUNT, line);
+    }
+}
+
+/// The club's human slot, which its watch list is kept by.
+fn own_slot(cx: &Cx) -> Option<usize> {
+    own_team(cx).and_then(|(_, t)| usize::from(t.human()).checked_sub(1))
+}
+
+/// A watched player's choices (dialog 28, `CBeobachtungAngeklickt`):
+/// negotiations, off the list, nothing.
+#[derive(Default)]
+pub struct WatchedPlayer {
+    id: u16,
+}
+
+const CHOICES: u16 = 1333;
+const NEGOTIATE: usize = 0;
+const UNWATCH: usize = 1;
+const QUESTION_FRAMES: std::ops::RangeInclusive<u16> = 1745..=1753;
+const BALL: u16 = 1336;
+/// The refusals the replica can tell, in the game's order
+/// (`FUN_005a5ac2` with the flags 0x0dd00000).
+const ON_LIST: u16 = 2360;
+const RETIRING_TEXT: u16 = 3135;
+const SIGNED_ELSEWHERE: u16 = 3077;
+const TALK_THIS_WEEK: u16 = 2512;
+const IN_OWN_TEAM: u16 = 4307;
+
+impl Screen for WatchedPlayer {
+    fn ids(&self) -> &[u16] {
+        &[WATCHED_PLAYER]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let dialog = cx.dialog;
+        set(view, dialog, TALKS_CAPTION, dialog.title.clone());
+        if let Args::Record(id) = args {
+            self.id = id;
+        }
+        if let Some(c) = control(dialog, CHOICES) {
+            view.set_chosen(c, crate::controls::options::NONE);
+        }
+        if let Some(ball) = control(dialog, BALL).and_then(|b| view.anim_mut(b)) {
+            ball.frames = QUESTION_FRAMES.chain(QUESTION_FRAMES.rev().skip(1)).collect();
+            ball.frames.pop();
+            ball.playing = true;
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        let Target::Option { control: c, item } = target else { return Outcome::Stay };
+        if cx.dialog.controls[c].id != Some(CHOICES) {
+            return Outcome::Stay;
+        }
+        match item {
+            NEGOTIATE => self.negotiate(cx),
+            UNWATCH => {
+                if let Some(slot) = own_slot(cx)
+                    && let Some(records) = cx.state.records.as_mut()
+                {
+                    transfers::unwatch(records, slot, self.id);
+                }
+                Outcome::Close(Reply::Ok)
+            }
+            _ => Outcome::Close(Reply::Cancel),
+        }
+    }
+}
+
+impl WatchedPlayer {
+    /// The checks before a negotiation, as far as the replica can tell
+    /// them; past them, booking is not built.
+    fn negotiate(&self, cx: &Cx) -> Outcome {
+        let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+        let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
+        let id = self.id;
+        let own = own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())));
+        let talks = transfers::appointments(records);
+        if talks.iter().any(|t| t.player == id && own.is_some_and(|o| t.clubs.contains(&o))) {
+            return notice(ALREADY_IN);
+        }
+        let Some(r) = records.player(id) else { return Outcome::Stay };
+        if r.retiring() & 0x80 != 0 {
+            return notice(RETIRING_TEXT);
+        }
+        if r.get::<u8>(0x14c) != 0 {
+            return notice(SIGNED_ELSEWHERE);
+        }
+        if talks.iter().any(|t| t.player == id) {
+            return notice(TALK_THIS_WEEK);
+        }
+        if own.is_some_and(|o| present_club(records, id) == o) {
+            return notice(IN_OWN_TEAM);
+        }
+        if transfers::listings(records).iter().any(|e| e.id == id) {
+            return notice(ON_LIST);
+        }
+        info!("Verhandlungstermin ({id}): not built yet");
+        Outcome::Stay
+    }
 }

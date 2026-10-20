@@ -363,29 +363,21 @@ pub(crate) fn one_decimal(v: f64) -> String {
     if halfway { format!("{:.1}", v + 0.05f64.copysign(v)) } else { format!("{v:.1}") }
 }
 
-/// Money as the game writes it (`FUN_004daf8f`): "144.000 €", "1.36 Mio €".
+/// Money as the game writes it (`FUN_004daf8f`): "144.000 €", "1.36 Mio €",
+/// " 0 €" — the sign's place and the space after it skipped when there is
+/// none, which leaves the leading space of the smallest amounts' text.
 pub(crate) fn money(game: &Game, value: i64) -> String {
-    let sign = if value < 0 { "- " } else { "" };
-    let v = value.abs();
-    let template = |i: usize| {
-        game.text(MONEY[i]).trim_start().trim_start_matches("%c").trim_start().to_owned()
+    let sign = if value < 0 { '-' } else { ' ' };
+    let v = value.unsigned_abs();
+    let text = |i: usize| game.text(MONEY[i]);
+    let written = match v {
+        0..1_000 => super::finances::printf(text(0), &[&sign, &v]),
+        1_000..1_000_000 => super::finances::printf(text(1), &[&sign, &(v / 1000), &(v % 1000)]),
+        _ => {
+            super::finances::printf(text(2), &[&sign, &(v / 1_000_000), &(v % 1_000_000 / 10_000)])
+        }
     };
-    let body = if v < 1000 {
-        template(0).replacen("%d", &v.to_string(), 1)
-    } else if v < 1_000_000 {
-        template(1).replacen("%d", &(v / 1000).to_string(), 1).replacen(
-            "%03d",
-            &format!("{:03}", v % 1000),
-            1,
-        )
-    } else {
-        template(2).replacen("%d", &(v / 1_000_000).to_string(), 1).replacen(
-            "%02d",
-            &format!("{:02}", v % 1_000_000 / 10_000),
-            1,
-        )
-    };
-    format!("{sign}{body}")
+    if sign == ' ' { written.chars().skip(2).collect() } else { written }
 }
 
 #[cfg(test)]
