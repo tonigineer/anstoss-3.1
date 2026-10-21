@@ -1468,6 +1468,35 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_squads_friends_and_enemies_are_listed() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 0\nuntil dialog 216\n\
+                    now press 6280\nuntil dialog 500";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&500];
+        let shown = |runner: &Runner| {
+            let view = runner.host.view();
+            let list = view.list(crate::screens::control(dialog, 3298).unwrap()).unwrap().clone();
+            let titles = view.text(crate::screens::control(dialog, 6281).unwrap()).to_owned();
+            (list, titles)
+        };
+        // Every player of the squad, his group, best friend and friends.
+        let (list, friends) = shown(&runner);
+        let squad =
+            runner.host.state().season.as_ref().map_or(0, |s| {
+                s.clubs.get(&s.manager().unwrap().club.unwrap()).unwrap().players.len()
+            });
+        assert_eq!(list.rows.len(), squad);
+        assert!(list.rows.iter().all(|r| r.split('\t').count() == 4));
+        // The enmities, under titles of their own.
+        let enemies = format!("{open}\nnow choose 1884 1");
+        let (list, titles) = shown(&on_save(&game, "Probe1", &enemies).unwrap());
+        assert_eq!(list.rows.len(), squad);
+        assert_ne!(titles, friends);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn players_are_watched_and_dropped() {
         let game = game();
         let menu = "now click bar 10\nuntil dialog 218";

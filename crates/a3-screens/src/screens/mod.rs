@@ -147,6 +147,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(squad::LoanedOut),
         Box::new(squad::Extensions::default()),
         Box::new(squad::DrawOption),
+        Box::new(squad::Relations),
         Box::new(youth::Poaching::default()),
         Box::new(youth::PreContract),
         Box::new(youth::Youths::default()),

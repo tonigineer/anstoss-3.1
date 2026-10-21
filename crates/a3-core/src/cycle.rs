@@ -84,6 +84,8 @@ pub mod dialogs {
     pub const MARKET_VALUES: u16 = 217;
     pub const NEXT_SQUAD: u16 = 219;
     pub const LOANED_OUT: u16 = 300;
+    /// The squad's friendships and enmities, from the current squad.
+    pub const RELATIONS: u16 = 500;
     /// The semi-automatic contract extension, and its question whether
     /// to draw an option.
     pub const EXTENSIONS: u16 = 92;

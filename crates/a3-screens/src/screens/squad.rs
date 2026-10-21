@@ -10,7 +10,8 @@ use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::NOTICE;
 use a3_core::cycle::dialogs::{
     AMATEUR_PLAYERS, APPOINTMENTS, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT,
-    MARKET_VALUES, NEXT_SQUAD, TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
+    MARKET_VALUES, NEXT_SQUAD, RELATIONS, TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING,
+    YOUTH_TEAM,
 };
 use a3_core::records::Team;
 use a3_core::season::Rules;
@@ -284,7 +285,6 @@ impl Screen for CurrentSquad {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(MODE_BUTTONS) => {
                 matches!(MODES.get(item), Some(Mode::Bonus | Mode::Fine))
             }
-            Target::Button(c) => dialog.controls[c].id != Some(CRITICAL),
             _ => true,
         };
         mark_inert(view, dialog, works);
@@ -316,6 +316,8 @@ impl Screen for CurrentSquad {
             Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
                 Outcome::Close(Reply::Ok)
             }
+            // `0x564e6f`: no refill after.
+            Target::Button(c) if id(c) == Some(CRITICAL) => Outcome::Popup(Request::new(RELATIONS)),
             Target::Option { control: c, item } if id(c) == Some(MODE_BUTTONS) => {
                 self.mode = MODES.get(item).copied();
                 Outcome::Stay
@@ -760,9 +762,10 @@ const NEXT_CLUB_COUNTRY: usize = 0x14c;
 const INFO_ONLY: [hub::Command; 1] = [hub::Command::Info];
 
 pub(crate) fn compose_next(dialogs: &mut HashMap<u16, Dialog>) {
-    for id in [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION] {
+    for id in [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION, RELATIONS] {
         if let Some(dialog) = dialogs.get_mut(&id) {
-            let title = if id == DRAW_OPTION { dialog.title.clone() } else { String::new() };
+            let kept = matches!(id, DRAW_OPTION | RELATIONS);
+            let title = if kept { dialog.title.clone() } else { String::new() };
             dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
             if matches!(id, NEXT_SQUAD | EXTENSIONS) {
                 dialog.controls.push(hub::menu_control());
@@ -1376,5 +1379,97 @@ impl Screen for DrawOption {
             }
             _ => Outcome::Stay,
         }
+    }
+}
+
+/// The squad's friendships and enmities (dialog 500,
+/// `CSpielerkaderKritisch`): each player's group, then his best friend and
+/// his friends, or the one he hates and those he dislikes — as far as they
+/// play for the club. The list takes no click (its style lacks 0x100).
+#[derive(Default)]
+pub struct Relations;
+
+const RELATIONS_LIST: u16 = 3298;
+const RELATIONS_TITLES: u16 = 6281;
+const RELATION_MODES: u16 = 1884;
+const FRIENDSHIPS: usize = 0;
+const FRIENDSHIP_TITLES: u16 = 4426;
+const ENMITY_TITLES: u16 = 4427;
+/// R+0x280's low two bits: the player's group, 0 none; shown from "B".
+const GROUP_AT: usize = 0x280;
+const GROUPS: u8 = 3;
+const NO_ONE: &str = "-";
+
+impl Screen for Relations {
+    fn ids(&self) -> &[u16] {
+        &[RELATIONS]
+    }
+
+    /// `FUN_005656ff`: the friendships first.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        if let Some(c) = control(cx.dialog, RELATION_MODES) {
+            view.set_chosen(c, FRIENDSHIPS);
+        }
+        fill_relations(cx, view, true);
+        mark_inert(view, cx.dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        let id = |c: usize| dialog.controls[c].id;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Option { control: c, item } if id(c) == Some(RELATION_MODES) => {
+                fill_relations(cx, view, item == FRIENDSHIPS);
+                Outcome::Stay
+            }
+            Target::Row { control: c, .. } => {
+                if let Some(list) = view.list_mut(c) {
+                    list.selected = None;
+                }
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// The rows (`FUN_0056572c`), in the squad's order, and the titles of
+/// the mode; the list at its top, nothing selected.
+fn fill_relations(cx: &Cx, view: &mut View, friends: bool) {
+    let (game, dialog) = (cx.game, cx.dialog);
+    let (Some(records), Some(season)) = (cx.state.records.as_ref(), cx.state.season.as_ref())
+    else {
+        return;
+    };
+    let Some(club) = season.manager().and_then(|m| m.club).and_then(|k| season.clubs.get(&k))
+    else {
+        return;
+    };
+    let titles = if friends { FRIENDSHIP_TITLES } else { ENMITY_TITLES };
+    set(view, dialog, RELATIONS_TITLES, game.text(titles).to_owned());
+    let in_club = |id: u16| id != 0 && club.status.iter().any(|s| s.id == id);
+    let name = |id: u16| records.known_as(id).unwrap_or_default();
+    let (mut rows, mut keys) = (Vec::new(), Vec::new());
+    for status in &club.status {
+        let Some(r) = records.player(status.id) else { continue };
+        let group = r.get::<u8>(GROUP_AT) & GROUPS;
+        let group =
+            if group == 0 { NO_ONE.to_owned() } else { char::from(b'A' + group).to_string() };
+        let (one, three) =
+            if friends { (r.best_friend(), r.friends()) } else { (r.hates(), r.dislikes()) };
+        let one = if in_club(one) { name(one) } else { NO_ONE.to_owned() };
+        let three: Vec<String> = three.into_iter().filter(|&id| in_club(id)).map(name).collect();
+        rows.push(format!("{}\t{group}\t{one}\t{}", name(status.id), three.join(",")));
+        keys.push(usize::from(status.id));
+    }
+    if let Some(list) = control(dialog, RELATIONS_LIST).and_then(|c| view.list_mut(c)) {
+        list.inks = vec![Some(BLACK); rows.len()];
+        list.rows = rows;
+        list.keys = keys;
+        list.scroll = 0;
+        list.selected = None;
     }
 }
