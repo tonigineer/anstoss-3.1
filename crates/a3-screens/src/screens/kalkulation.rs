@@ -64,11 +64,11 @@ const CANCEL: u16 = 2;
 /// Club offsets c from 0x120 to 0x5f7 lie at c + 0x278 in the team record.
 const CLUB_TO_TEAM: usize = 0x278;
 
-/// Their captions: the ticket office's, the sponsors' and the agency's
-/// the file's.
+/// Their captions: the ticket office's, the sponsors', the agency's and
+/// the contract's the file's.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     let more = [STAFF, PLAYERS, AMATEUR_PLAYERS, RUNNING, OTHER_COSTS, MERCHANDISE];
-    let titled = [TICKETS, SPONSORS, AGENCY_ENGAGED];
+    let titled = [TICKETS, SPONSORS, AGENCY_ENGAGED, SPONSOR_CONTRACT];
     for id in FIGURE_DIALOGS.into_iter().chain(more).chain(titled) {
         if let Some(dialog) = dialogs.get_mut(&id) {
             let text = if titled.contains(&id) { dialog.title.clone() } else { String::new() };
@@ -1275,13 +1275,7 @@ impl Screen for Sponsors {
         let years = team.get::<u8>(club(CONTRACT_YEARS));
         if years != 0 {
             let number = team.get::<i16>(club(SPONSOR));
-            let logo = if number > LAST_LOGO { NO_LOGO } else { number };
-            if let Some(bitmap) = control(dialog, SPONSOR_LOGO).and_then(|c| view.bitmap_mut(c)) {
-                bitmap.picture = Some(Picture {
-                    black_clear: false,
-                    ..Picture::file(format!("{LOGO}{logo}.bmp"))
-                });
-            }
+            sponsor_logo(view, dialog, SPONSOR_LOGO, number);
             set(view, dialog, SPONSOR_NAME, records.sponsor_name(number).unwrap_or_default());
             if let Some(c) = control(dialog, SPONSOR_TERM) {
                 let text =
@@ -1315,12 +1309,132 @@ impl Screen for Sponsors {
         set(view, dialog, OUTFITTER_FIGURE, money(game, outfitter.into()));
         lower_button(view, dialog, BOARDS_DETAILS);
         lower_button(view, dialog, OUTFITTER_DETAILS);
-        // The contract's details (246) are not built.
-        mark_inert(view, dialog, |t| !is_button(dialog, t, CONTRACT_DETAILS));
+        mark_inert(view, dialog, |_| true);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        if is_button(cx.dialog, target, CONTRACT_DETAILS) {
+            return Outcome::Popup(a3_core::cycle::Request::new(SPONSOR_CONTRACT));
+        }
         carousel_input(cx, view, target).unwrap_or(Outcome::Stay)
+    }
+}
+
+/// A sponsor's logo (`FUN_006960ed`), drawn as it is.
+fn sponsor_logo(view: &mut View, dialog: &Dialog, id: u16, number: i16) {
+    let logo = if number > LAST_LOGO { NO_LOGO } else { number };
+    if let Some(bitmap) = control(dialog, id).and_then(|c| view.bitmap_mut(c)) {
+        bitmap.picture =
+            Some(Picture { black_clear: false, ..Picture::file(format!("{LOGO}{logo}.bmp")) });
+    }
+}
+
+/// The main sponsor's contract (dialog 246, `CSponsorAktuellerVertrag`;
+/// KALKULATION.md §4.1): its amounts, the relegation cut, the term, the
+/// most it can pay and the sponsor pool; it writes nothing.
+#[derive(Default)]
+pub struct SponsorContract;
+
+const SPONSOR_CONTRACT: u16 = 246;
+/// The contract's amounts (club +0x510 …) and their figures (0x889778):
+/// the base, title or promotion, international, the cup won, each cup
+/// round, the European cup won, the attendance bonus.
+const CONTRACT_FIGURES: [(usize, u16); 7] = [
+    (0x510, 3412),
+    (0x514, 3414),
+    (0x518, 3415),
+    (0x51c, 3418),
+    (0x520, 3417),
+    (0x524, 3419),
+    (0x528, 3413),
+];
+const TITLE: usize = 0x514;
+const INTERNATIONAL: usize = 0x518;
+const CUP_ROUND: usize = 0x520;
+/// The most counts five cup rounds.
+const CUP_ROUNDS: i32 = 5;
+/// The relegation cut in percent, the term, the most it pays.
+const RELEGATION_CUT: (usize, u16) = (0x50a, 3416);
+const TERM_FIGURE: u16 = 3420;
+const MOST_FIGURE: u16 = 3421;
+/// The attendance the bonus asks for, in its label.
+const ATTENDANCE_LABEL: u16 = 3403;
+const ATTENDANCE: usize = 0x52c;
+const POOL_LABEL: u16 = 3424;
+const CONTRACT_POOL_FIGURE: u16 = 3425;
+const CONTRACT_LOGO: u16 = 3423;
+/// The title row, hidden for a club with a professional club above it.
+const TITLE_ROW: [u16; 2] = [3404, 3414];
+
+impl Screen for SponsorContract {
+    fn ids(&self) -> &[u16] {
+        &[SPONSOR_CONTRACT]
+    }
+
+    /// `0x571911`.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let (Some(team), Some(records)) = (own_team(cx), cx.state.records.as_ref()) else { return };
+        let club = |o: usize| team.get::<i32>(o + CLUB_TO_TEAM);
+        let mut most = 0i32;
+        for (o, id) in CONTRACT_FIGURES {
+            set(view, dialog, id, money(game, club(o).into()));
+            let counted = match o {
+                TITLE if club(INTERNATIONAL) >= club(TITLE) => 0,
+                INTERNATIONAL if club(TITLE) > club(INTERNATIONAL) => 0,
+                CUP_ROUND => club(o).wrapping_mul(CUP_ROUNDS),
+                _ => club(o),
+            };
+            most = most.wrapping_add(counted);
+        }
+        let cut = team.get::<u8>(RELEGATION_CUT.0 + CLUB_TO_TEAM);
+        set(view, dialog, RELEGATION_CUT.1, format!("{cut} %"));
+        set(
+            view,
+            dialog,
+            TERM_FIGURE,
+            years_text(cx, team.get::<u8>(CONTRACT_YEARS + CLUB_TO_TEAM)),
+        );
+        set(view, dialog, MOST_FIGURE, money(game, most.into()));
+        let printf = super::finances::printf;
+        for (id, arg) in [
+            (ATTENDANCE_LABEL, club(ATTENDANCE)),
+            (POOL_LABEL, i32::from(team.get::<i16>(PLANNED_MEMBERS + CLUB_TO_TEAM))),
+        ] {
+            if let Some(c) = control(dialog, id) {
+                let own = &dialog.controls[c].text;
+                let text =
+                    if id == POOL_LABEL { format!("{own} ({arg}):") } else { printf(own, &[&arg]) };
+                view.set_text(c, text);
+            }
+        }
+        let members = i32::from(team.get::<i16>(PLANNED_MEMBERS + CLUB_TO_TEAM));
+        set(
+            view,
+            dialog,
+            CONTRACT_POOL_FIGURE,
+            money(game, members.wrapping_mul(club(FEE)).into()),
+        );
+        sponsor_logo(view, dialog, CONTRACT_LOGO, team.get::<i16>(SPONSOR + CLUB_TO_TEAM));
+        // `FUN_0063e7cf`: a club of a country played, below a professional
+        // one (team +0x873).
+        if records.globals.played(i16::from(team.country())) && team.linked()[1] >= 0 {
+            for id in TITLE_ROW {
+                if let Some(c) = control(dialog, id) {
+                    view.controls[c].hidden = true;
+                }
+            }
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&cx.dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            _ => Outcome::Stay,
+        }
     }
 }
 

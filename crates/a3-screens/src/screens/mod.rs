@@ -152,6 +152,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(kalkulation::Sponsors),
         Box::new(kalkulation::Merchandise),
         Box::new(kalkulation::AgencyEngaged),
+        Box::new(kalkulation::SponsorContract),
         Box::new(squad::SquadMenu::default()),
         Box::new(squad::CurrentSquad::default()),
         Box::new(squad::MarketValues::default()),

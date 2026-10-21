@@ -1630,6 +1630,16 @@ mod tests {
              until dialog 115\nnow click at 606 449\nuntil dialog 417"
         );
         on_save(&game, "Probe1", &merchandise).unwrap();
+        // The main sponsor's contract, from the sponsors' page and back.
+        let contract = format!(
+            "{open}\nnow click at 88 133\nuntil dialog 125\nnow press 2351\nuntil dialog 246"
+        );
+        let runner = on_save(&game, "Probe1", &contract).unwrap();
+        let text =
+            |id| runner.host.view().text(control(&game.dialogs[&246], id).unwrap()).to_owned();
+        assert!(text(3424).starts_with("Sponsorenpool ("), "{}", text(3424));
+        assert!(text(3416).ends_with(" %"), "{}", text(3416));
+        on_save(&game, "Probe1", &format!("{contract}\nnow press 3422\nuntil dialog 125")).unwrap();
     }
 
     #[test]
