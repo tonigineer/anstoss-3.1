@@ -48,11 +48,6 @@ const SEASON_WEEKS: i32 = 52;
 /// A stadium's level of perimeter advertising, in its block.
 const STADIUM_AT: u32 = 0x1a48138;
 const PERIMETER_LEVEL: usize = 0x66;
-/// The players whose appearance bonuses count, and the matches they
-/// count for (`FUN_0061f222`).
-const BONUS_PLAYERS: usize = 20;
-const BONUS_UNIT: i32 = 14;
-const BONUS_SCALE: i32 = 100;
 
 /// The game's tables of the forecasts.
 pub struct ForecastTables {
@@ -328,27 +323,10 @@ impl<'a> Forecast<'a> {
     /// or the plan's if more (`FUN_006202c1`, `FUN_0062023c`,
     /// `FUN_0061f222`).
     fn players_carried_on(&self) -> i64 {
-        let teams = self.teams;
-        let squad: Vec<_> =
-            self.team.players().iter().filter_map(|&id| self.records.player(id)).collect();
-        let wages = squad.iter().fold(0i32, |s, p| s.wrapping_add(i32::from(p.salary()) * 1000));
-        // The strongest twenty, by insertion: a later player goes before
-        // earlier ones as strong.
-        let mut sorted: Vec<(u8, u16)> = Vec::new();
-        for p in &squad {
-            let at = sorted.iter().position(|&(s, _)| s <= p.strength()).unwrap_or(sorted.len());
-            sorted.insert(at, (p.strength(), p.appearance_bonus()));
-        }
-        let n = sorted.len().min(BONUS_PLAYERS) as i32;
-        let bonuses = if n > 0 {
-            let sum: i32 = sorted.iter().take(n as usize).map(|&(_, b)| i32::from(b)).sum();
-            sum * BONUS_UNIT / n * (teams - 1) * 2 * BONUS_SCALE
-        } else {
-            0
-        };
+        let bill = finances::wage_bill(self.records, self.team, self.teams);
         let v = self
             .players_booked()
-            .wrapping_add(self.rest(wages.wrapping_add(bonuses)))
+            .wrapping_add(self.rest(bill))
             .wrapping_add(self.i32_(0x290))
             .wrapping_add(self.i32_(0x294));
         let planned = self.sum(&self.plan, finances::PLAYERS_SLOT);

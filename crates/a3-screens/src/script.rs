@@ -1568,6 +1568,43 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_calculations_page_and_book_what_they_may() {
+        let game = game();
+        let open = "now click bar 9\nuntil dialog 417";
+        let staff = format!("{open}\nnow click at 88 225\nuntil dialog 447");
+        let Some(runner) = on_save(&game, "Probe1", &staff) else { return };
+        let booked = |runner: &Runner, c: usize| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            (team.get::<u8>(c + 0x278), team.get::<i32>(0x228 + 0x50 + 0x278))
+        };
+        // Ulm's groundsman, level 0: raised by his spinner, booked on OK.
+        assert_eq!(booked(&runner, 0x301), (0, 12_000));
+        let raise = format!("{staff}\nnow spin 5704 up\nnow click at 606 449\nuntil dialog 417");
+        assert_eq!(booked(&on_save(&game, "Probe1", &raise).unwrap(), 0x301), (1, 24_000));
+        // The arrow bar pages on to the players' calculation and back.
+        let paging = format!(
+            "{staff}\nnow click at 479 439\nuntil dialog 454\nnow click at 440 439\n\
+             until dialog 447\nnow click at 547 449\nuntil dialog 417"
+        );
+        on_save(&game, "Probe1", &paging).unwrap();
+        // A better statistics department, booked at its yearly price.
+        let statistics = format!(
+            "{open}\nnow click at 88 318\nuntil dialog 122\nnow click at 273 274\n\
+             now click at 606 449\nuntil dialog 417"
+        );
+        let runner = on_save(&game, "Probe1", &statistics).unwrap();
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = records.humans().next().unwrap();
+        let team = records.team(manager.country(), manager.team()).unwrap();
+        assert_eq!(team.get::<u8>(0x5e1 + 0x278), 1);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn players_are_watched_and_dropped() {
         let game = game();
         let menu = "now click bar 10\nuntil dialog 218";

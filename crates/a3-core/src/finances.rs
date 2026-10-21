@@ -4,7 +4,7 @@
 //! what its deposits are worth now. The game bands it for the opponent's
 //! info and weighs it in offers and the board's verdict.
 
-use crate::records::{Agreed, Extra, Manager, Team};
+use crate::records::{Agreed, Extra, Manager, Records, Team};
 
 /// The club object's fields sit this far before the team record's.
 pub(crate) const CLUB_TO_TEAM: usize = 0x278;
@@ -784,4 +784,211 @@ pub fn repay(team: &mut Team, loan: &Loan, amount: i32, bank_day: i16) {
         team.put(at(LOSSES), booked);
     }
     team.put(loan_at(loan.slot, LOAN_PRINCIPAL), loan.principal - i64::from(amount));
+}
+
+/// The players whose appearance bonuses count, and what the bonuses
+/// count by (`FUN_0061f222`).
+const BONUS_PLAYERS: usize = 20;
+const BONUS_MATCHES: i32 = 14;
+const BONUS_UNIT: i32 = 100;
+const SALARY_UNIT: i32 = 1000;
+
+/// The squad's wage bill for a year: the salaries and the appearance
+/// bonuses of the twenty strongest over a season of `teams` teams
+/// (`FUN_0062029e`).
+pub fn wage_bill(records: &Records, team: &Team, teams: i32) -> i32 {
+    let squad: Vec<_> = team.players().iter().filter_map(|&id| records.player(id)).collect();
+    let wages = squad.iter().fold(0i32, |s, p| s.wrapping_add(i32::from(p.salary()) * SALARY_UNIT));
+    // The strongest twenty, by insertion: a later player goes before
+    // earlier ones as strong.
+    let mut sorted: Vec<(u8, u16)> = Vec::new();
+    for p in &squad {
+        let at = sorted.iter().position(|&(s, _)| s <= p.strength()).unwrap_or(sorted.len());
+        sorted.insert(at, (p.strength(), p.appearance_bonus()));
+    }
+    let n = sorted.len().min(BONUS_PLAYERS) as i32;
+    let bonuses = if n > 0 {
+        let sum: i32 = sorted.iter().take(n as usize).map(|&(_, b)| i32::from(b)).sum();
+        sum * BONUS_MATCHES / n * (teams - 1) * 2 * BONUS_UNIT
+    } else {
+        0
+    };
+    wages.wrapping_add(bonuses)
+}
+
+/// The team bonuses' settings (club +0x5b8…): points bonuses by place, the
+/// away surcharge in percent, the bonuses for the title, a European place,
+/// staying up and a cup.
+const POINTS_BONUSES: usize = 0x5b8;
+const AWAY_SURCHARGE: usize = 0x5c4;
+const TITLE_BONUS: usize = 0x5c8;
+const EUROPE_BONUS: usize = 0x5cc;
+const STAYING_UP_BONUS: usize = 0x5d0;
+const CUP_BONUS: usize = 0x5d4;
+/// The season's target (club +0x10c), in the team record.
+const TARGET: usize = 0x135;
+/// The points bonuses' band by the target, and the points a season brings
+/// by the target: a base and so much a team over ten (0x8911f8,
+/// 0x8a532c).
+const TARGET_BANDS: [usize; 12] = [0, 1, 1, 1, 2, 2, 3, 3, 3, 3, 4, 4];
+const TARGET_POINTS: [(i32, i32); 12] = [
+    (66, 5),
+    (60, 4),
+    (60, 4),
+    (56, 4),
+    (52, 4),
+    (48, 3),
+    (48, 3),
+    (46, 3),
+    (44, 3),
+    (40, 2),
+    (38, 2),
+    (10, 1),
+];
+const SURCHARGE_BASE: i64 = 300;
+const AMATEURS_OF: usize = 0x872;
+
+/// What the team bonuses come to in a season, as their settings make them
+/// (`FUN_0061f64f`).
+pub fn planned_bonuses(records: &Records, team: &Team, teams: i32) -> i32 {
+    let at = |c: usize| c + CLUB_TO_TEAM;
+    let target = usize::try_from(team.get::<i8>(TARGET)).unwrap_or(0).min(TARGET_BANDS.len() - 1);
+    let band = TARGET_BANDS[target];
+    let bonus = |k: usize| i32::from(team.get::<u16>(at(POINTS_BONUSES + 2 * k)));
+    let average = match band {
+        0 => (bonus(1) + bonus(2)) / 2,
+        4 => (bonus(4) + bonus(5)) / 2,
+        k => (bonus(k) + bonus(k + 1) + bonus(k + 2)) / 3,
+    };
+    let (base, per_team) = TARGET_POINTS[target];
+    let points = base + per_team * (teams - 10);
+    let surcharge = i64::from(team.get::<i16>(at(AWAY_SURCHARGE)));
+    let mut v =
+        i64::from(points * BONUS_MATCHES * average) * (surcharge + SURCHARGE_BASE) / SURCHARGE_BASE;
+    let squad = team.players();
+    let count = squad.len() as i64;
+    let each = |c: usize| count * i64::from(team.get::<i32>(at(c)));
+    if team.level() == 0 {
+        if target < 2 {
+            v += each(TITLE_BONUS);
+        }
+        if (1..4).contains(&target) {
+            v += each(EUROPE_BONUS);
+        }
+    } else if team.get::<i8>(AMATEURS_OF) < 0 && target < 4 {
+        v += each(STAYING_UP_BONUS);
+    }
+    v += each(CUP_BONUS);
+    if count > 0 {
+        let appearances: i64 = squad
+            .iter()
+            .filter_map(|&id| records.player(id))
+            .map(|p| i64::from(p.appearance_bonus()))
+            .sum();
+        v += appearances * i64::from(teams - 1) * 2 / count
+            * i64::from(BONUS_MATCHES)
+            * i64::from(BONUS_UNIT);
+    }
+    v as i32
+}
+
+/// A player's extra insurance a year, in thousands, by his knocks: one
+/// fifth of his salary if often hurt, three twentieths if now and then, a
+/// tenth else, at least one (`CKalkulationVersicherung` 0x4f2b67).
+pub fn insurance_premium(salary: u16, knocks: u16) -> i16 {
+    const OFTEN: u16 = 8;
+    const NOW_AND_THEN: u16 = 4;
+    let s = i32::from(salary);
+    let premium = if knocks & OFTEN != 0 {
+        s / 5
+    } else if knocks & NOW_AND_THEN != 0 {
+        s * 3 / 20
+    } else {
+        s / 10
+    };
+    premium.max(1) as i16
+}
+
+/// The insurance every German club must pay for its squad: 120 for each
+/// thousand of a player's salary, in hundreds (`FUN_0061fa79`).
+pub fn compulsory_insurance(records: &Records, team: &Team) -> i32 {
+    const GERMANY: u8 = 14;
+    const RATE: i32 = 120;
+    if team.country() != GERMANY {
+        return 0;
+    }
+    team.players()
+        .iter()
+        .filter_map(|&id| records.player(id))
+        .map(|p| i32::from(p.salary()) * RATE / 100 * 100)
+        .sum()
+}
+
+/// The calculations' sliders' steps, by the slider's maximum
+/// (`FUN_004ea44a`): the first table whose limit lies above it, each
+/// (up to, step) — the last step from there on (0x883920 … 0x883ba0).
+const STEP_LIMITS: [i64; 8] = [100, 200, 500, 1000, 10_000, 100_000, 1_000_000, 10_000_000];
+const ON: i64 = i64::MAX;
+const STEP_TABLES: [&[(i64, i64)]; 9] = [
+    &[(50, 1), (ON, 2)],
+    &[(50, 1), (100, 2), (150, 5), (ON, 10)],
+    &[(200, 5), (400, 10), (ON, 20)],
+    &[(100, 5), (200, 10), (500, 20), (ON, 50)],
+    &[(100, 10), (500, 20), (1000, 50), (5000, 100), (ON, 200)],
+    &[(1000, 100), (10_000, 200), (50_000, 500), (ON, 1000)],
+    &[(10_000, 500), (100_000, 1000), (200_000, 2000), (500_000, 5000), (ON, 10_000)],
+    &[(10_000, 2000), (100_000, 5000), (500_000, 10_000), (ON, 20_000)],
+    &[(100_000, 10_000), (500_000, 20_000), (1_000_000, 50_000), (ON, 100_000)],
+];
+
+/// The steps of a slider running to `max`.
+pub fn steps(max: i64) -> &'static [(i64, i64)] {
+    STEP_TABLES[STEP_LIMITS.iter().position(|&l| l > max).unwrap_or(STEP_LIMITS.len())]
+}
+
+/// The position of an amount on such a slider, rounded down
+/// (`FUN_005c690b`).
+pub fn step_of(steps: &[(i64, i64)], v: i64) -> i32 {
+    let (mut position, mut from) = (0, 0);
+    for &(to, step) in steps {
+        if v <= to {
+            return (position + (v - from) / step) as i32;
+        }
+        position += (to - from) / step;
+        from = to;
+    }
+    position as i32
+}
+
+/// The amount at a position (`FUN_005c69c9`).
+pub fn amount_at(steps: &[(i64, i64)], p: i32) -> i64 {
+    let (mut position, mut from) = (0i64, 0i64);
+    let p = i64::from(p);
+    for &(to, step) in steps {
+        let n = (to - from) / step;
+        if to == ON || p <= position + n {
+            return from + (p - position) * step;
+        }
+        position += n;
+        from = to;
+    }
+    from
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::*;
+
+    #[test]
+    fn the_calculations_steps_run_as_the_game_counts_them() {
+        // KALKULATION.md §1.4: maxima of 1, 2, 5 and 10 Mio.
+        for (max, last) in [(1_000_000, 88), (2_000_000, 138), (5_000_000, 288), (10_000_000, 130)]
+        {
+            assert_eq!(step_of(steps(max), max), last);
+            assert_eq!(amount_at(steps(max), last), max);
+        }
+        // Off the grid, rounded down.
+        assert_eq!(step_of(steps(10_000_000), 7_834_898), 108);
+        assert_eq!(amount_at(steps(10_000_000), 109), 7_900_000);
+    }
 }

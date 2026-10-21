@@ -317,7 +317,7 @@ impl Screen for Finances {
         {
             let row = usize::from(id - ROW_BUTTONS.start());
             self.calculation = Some(row);
-            return Outcome::Popup(Request::new(kalkulation::ROW_DIALOGS[row]));
+            return Outcome::Popup(Request::new(kalkulation::row_dialog(cx, row)));
         }
         // A combo's row picked: what it now shows.
         let Target::Row { control: c, .. } = target else { return Outcome::Stay };
@@ -345,7 +345,7 @@ impl Screen for Finances {
                 && let Some(next) = kalkulation::step(row, choice)
             {
                 self.calculation = Some(next);
-                return Outcome::Popup(Request::new(kalkulation::ROW_DIALOGS[next]));
+                return Outcome::Popup(Request::new(kalkulation::row_dialog(cx, next)));
             }
             self.fill(cx, view);
             return Outcome::Stay;

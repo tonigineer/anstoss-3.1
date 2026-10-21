@@ -145,11 +145,12 @@ impl View {
         }
     }
 
-    /// Lets a static or animation answer the pointer, or not.
+    /// Lets a static, an animation or a bitmap answer the pointer, or not.
     pub fn set_clickable(&mut self, control: usize, clickable: bool) {
         match self.controls.get_mut(control).map(|c| &mut c.state) {
             Some(ControlState::Static(s)) => s.clickable = clickable,
             Some(ControlState::Anim(a)) => a.clickable = clickable,
+            Some(ControlState::Bitmap(b)) => b.clickable = clickable,
             _ => {}
         }
     }

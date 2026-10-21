@@ -21,6 +21,8 @@ pub struct BitmapState {
     /// A left edge further right than the control's, which the screen moved
     /// its window's to: the picture starts there.
     pub left: Option<f32>,
+    /// Whether a click on it reaches the screen (447's groundsman).
+    pub clickable: bool,
 }
 
 impl BitmapState {

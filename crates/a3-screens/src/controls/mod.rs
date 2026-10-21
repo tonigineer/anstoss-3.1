@@ -267,6 +267,9 @@ impl ControlState {
             Self::Button(_) => out.push((Target::Button(index), geometry.rect(control))),
             Self::List(l) => list::targets(l, index, control, geometry, out),
             Self::Anim(a) => a.targets(index, control, geometry, out),
+            Self::Bitmap(b) if b.clickable => {
+                out.push((Target::Control(index), geometry.rect(control)))
+            }
             Self::Spin(_) => spin::targets(index, control, geometry, out),
             Self::Slider(_) => slider::targets(index, control, geometry, out),
             Self::Fader(v) => fader::targets(v, index, control, geometry, out),
