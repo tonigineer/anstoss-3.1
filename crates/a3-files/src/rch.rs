@@ -109,6 +109,8 @@ pub enum Kind {
         /// image).
         ink: [u8; 3],
         chosen_ink: [u8; 3],
+        /// A disabled option's label colour (`FUN_007a72c2`).
+        disabled_ink: [u8; 3],
     },
     /// A box to tick, with its label beside it.
     Check,
@@ -236,6 +238,7 @@ const OPTIONS_STYLE: usize = 11;
 /// Where a group's label colours are in its data.
 const LABEL_INK: usize = 4;
 const CHOSEN_INK: usize = 8;
+const DISABLED_INK: usize = 12;
 
 /// A COLORREF in a control's data, as red, green and blue.
 fn colour(extra: &[u8], at: usize) -> [u8; 3] {
@@ -357,6 +360,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
             style: u16s(OPTIONS_STYLE).unwrap_or(0),
             ink: colour(extra, LABEL_INK),
             chosen_ink: colour(extra, CHOSEN_INK),
+            disabled_ink: colour(extra, DISABLED_INK),
         },
         5 => Kind::Combo {
             drop: u16s(COMBO_DROP).unwrap_or(DEFAULT_DROP),

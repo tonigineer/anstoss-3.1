@@ -162,6 +162,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(squad::DrawOption),
         Box::new(squad::Relations),
         Box::new(stadium::StadiumScreen::default()),
+        Box::new(stadium::Expansion::default()),
         Box::new(search::ClubSearch::default()),
         Box::new(search::NoracsaSearch::default()),
         Box::new(search::NoracsaFound::default()),

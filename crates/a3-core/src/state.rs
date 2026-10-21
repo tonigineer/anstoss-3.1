@@ -29,4 +29,7 @@ pub struct GameState {
     pub paging_ids: Option<Vec<u16>>,
     /// The players NORACSA's search found, for the list of its result.
     pub found: Vec<crate::noracsa::Hit>,
+    /// The stadium the expansion plans, and whether it is played in; the
+    /// plan comes back in its place when it is OKed.
+    pub expansion: Option<(crate::stadium::Sub, bool)>,
 }

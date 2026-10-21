@@ -602,6 +602,17 @@ pub fn sale(records: &Records, home: (u8, i16), away: (u8, i16), day: i16) -> Op
     })
 }
 
+/// Whether more tickets were sold ahead for a home match of the club from
+/// today on than `places` (`FUN_0077d354`).
+pub fn presold_above(records: &Records, club: (u8, i16), today: i16, places: i32) -> bool {
+    let Some(block) = records.block(SALES_AT) else { return false };
+    (0..SALES).any(|i| {
+        block.get(i * SALE..(i + 1) * SALE).is_some_and(|r| {
+            (r[0], word(r, 2)) == club && word(r, SALE_DAY) >= today && long(r, SALE_SOLD) > places
+        })
+    })
+}
+
 /// The prices a class can be given (`FUN_00686684`, the factor 1.0):
 /// standing 5 to 40, seats 10 to 90, boxes 50 to 210 by twos.
 pub fn price_table(class: usize) -> Vec<i16> {

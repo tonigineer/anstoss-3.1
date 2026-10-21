@@ -3,6 +3,10 @@
 //! with the places of the four stands, their age and building weeks, the
 //! roofs, tracks and heaters, the comfort, the scoreboard and the pitch.
 
+use std::io;
+
+use a3_files::exe::Exe;
+
 use crate::finances::CLUB_TO_TEAM;
 use crate::records::{Records, Stadium, Team};
 
@@ -220,6 +224,444 @@ impl Sub {
     pub fn building_weeks(&self) -> u8 {
         (0..STANDS).map(|s| self.weeks(s)).max().unwrap_or(0)
     }
+
+    pub fn set_vip(&mut self, stand: usize, v: u16) {
+        self.put_u16(VIP + 2 * stand, v);
+    }
+
+    pub fn set_seats(&mut self, stand: usize, v: u16) {
+        self.put_u16(SEATS + 2 * stand, v);
+    }
+
+    pub fn set_standing(&mut self, stand: usize, v: u16) {
+        self.put_u16(STANDING + 2 * stand, v);
+    }
+
+    fn set_bit(&mut self, bit: u16, on: bool) {
+        let bits = self.u16_(STAND_BITS);
+        self.put_u16(STAND_BITS, if on { bits | bit } else { bits & !bit });
+    }
+
+    pub fn set_roof(&mut self, stand: usize, on: bool) {
+        self.set_bit(ROOF << stand, on);
+    }
+
+    pub fn set_track(&mut self, stand: usize, on: bool) {
+        self.set_bit(TRACK << stand, on);
+    }
+
+    pub fn set_heaters(&mut self, stand: usize, on: bool) {
+        self.set_bit(HEATERS << stand, on);
+    }
+
+    /// The years into its condition step (`FUN_00718c3d`).
+    pub fn started(&self, stand: usize) -> i32 {
+        i32::from(self.0[AGE + stand]) - i32::from(AGE_STEP) * self.condition(stand) as i32
+    }
+
+    /// A stand put at the start of a condition (`FUN_00718c04`).
+    pub fn set_condition(&mut self, stand: usize, condition: usize) {
+        self.0[AGE + stand] = (condition as u8).wrapping_mul(AGE_STEP);
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        let (at, len) = NAME;
+        let bytes: Vec<u8> = name.chars().filter_map(a3_files::bitmap_font::to_cp1252).collect();
+        let field = &mut self.0[at..at + len];
+        field.fill(0);
+        let n = bytes.len().min(len - 1);
+        field[..n].copy_from_slice(&bytes[..n]);
+    }
+
+    /// Whether its site is a big one (+0x70), where a stand may hold
+    /// 50,000 weighted places, not 6,000.
+    pub fn big_site(&self) -> bool {
+        self.large_view()
+    }
+
+    /// A stand's weighted places (`FUN_00717bfa`, `FUN_00717c0d`).
+    pub fn weighted(&self, stand: usize) -> i32 {
+        i32::from(self.standing(stand))
+            + seats_weight(self.seats(stand).into())
+            + vip_weight(self.vip(stand).into())
+    }
+
+    /// A stand's places as the cost compares them: standing, seats, VIP.
+    fn three(&self, stand: usize) -> [i32; 3] {
+        [self.standing(stand).into(), self.seats(stand).into(), self.vip(stand).into()]
+    }
+
+    /// Whether every stand is being built (`FUN_00718cd5`).
+    pub fn all_building(&self) -> bool {
+        (0..STANDS).all(|s| self.weeks(s) != 0)
+    }
+}
+
+/// Seats and VIP places weigh more than standing places
+/// (`FUN_00717bfa`, `FUN_00717c0d`), and back.
+pub fn seats_weight(x: i32) -> i32 {
+    x * 100 / 65
+}
+
+pub fn vip_weight(x: i32) -> i32 {
+    x * 10 / 3
+}
+
+pub fn seats_of(weight: i32) -> i32 {
+    weight * 65 / 100
+}
+
+pub fn vip_of(weight: i32) -> i32 {
+    weight * 3 / 10
+}
+
+fn ceil10(x: i32) -> i32 {
+    (x + 9) / 10 * 10
+}
+
+fn tens(x: i32) -> i32 {
+    (x + 9) / 10
+}
+
+/// What building costs, by ten places (× `UNIT`): new places, demolished
+/// ones, and places converted from standing, seats and VIP to each class
+/// (0x8a7bfc …); renovating a step by a place, by the condition
+/// (0x8a7c38).
+const UNIT: i32 = 10;
+const NEW_PLACES: [i32; 3] = [1000, 3000, 9000];
+const DEMOLISHED: [i32; 3] = [100, 150, 450];
+const CONVERTED: [[i32; 3]; 3] = [[0, 1500, 8000], [750, 0, 7500], [1000, 1500, 0]];
+const RENOVATION: [i64; 7] = [200, 400, 700, 1000, 1500, 2000, 3000];
+/// A roof taken off and a new one, by ten places of each class; heaters
+/// by place; heated seats by seat.
+const ROOF_OFF: [i32; 3] = [500, 1000, 3000];
+const ROOF_ON: [i32; 3] = [10_000, 20_000, 60_000];
+const HEATER: i32 = 20;
+const HEATED_SEAT: i32 = 5;
+
+/// The kind of a stand's work as the expansion shows it (texts 4257,
+/// 4260): new places, places converted, or nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Work {
+    New,
+    Conversion,
+    Nothing,
+}
+
+/// What a stand's plan costs: its building, its kind, the roofs, the
+/// renovation and heaters, the weeks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StandCost {
+    pub cost: i32,
+    pub work: Work,
+    pub roof: i32,
+    pub renovation: i32,
+    pub weeks: i16,
+}
+
+/// The cost of stand `i` built from `old` to `new` (`FUN_00719f38`;
+/// STADION-AUSBAU.md §4).
+pub fn stand_cost(new: &Sub, old: &Sub, i: usize) -> StandCost {
+    let (o, n) = (old.three(i), new.three(i));
+    let mut work = Work::New;
+    let (mut c, mut roof, mut reno, mut weeks) = (0i32, 0i32, 0i32, 0i32);
+    let mut steps = 0i32;
+    let mut renovate = true;
+    let (mut ns, mut nse, mut nv) = (0, 0, 0);
+    let mut m = [[0i32; 3]; 3];
+    let wo = o[0] + seats_weight(o[1]) - vip_weight(o[2]);
+    let wn = n[0] + seats_weight(n[1]) - vip_weight(n[2]);
+    let same_track = old.track(i) == new.track(i);
+    if same_track {
+        if n == o {
+            work = Work::Nothing;
+        } else {
+            let ladder = |p: [i32; 3]| {
+                let a = p[0];
+                let b = a + seats_weight(p[1]);
+                [a, b, b + vip_weight(p[2])]
+            };
+            let (ol, nl) = (ladder(o), ladder(n));
+            let (mut a, mut b, mut prev) = (0, 0, 0);
+            while a < 3 && b < 3 {
+                if nl[b] < ol[a] {
+                    m[a][b] = nl[b] - prev;
+                    prev = nl[b];
+                    b += 1;
+                } else {
+                    m[a][b] = ol[a] - prev;
+                    prev = ol[a];
+                    if ol[a] == nl[b] {
+                        b += 1;
+                    }
+                    a += 1;
+                }
+            }
+            if b == 0 {
+                let x = nl[0] - prev;
+                ns = ceil10(x);
+                c += tens(x) * NEW_PLACES[0] * UNIT;
+                prev = nl[0];
+                b = 1;
+            }
+            if b == 1 {
+                nse = ceil10(seats_of(nl[1] - prev));
+                c += nse / 10 * NEW_PLACES[1] * UNIT;
+                prev = nl[1];
+                b = 2;
+            }
+            if b == 2 {
+                let v = ceil10(vip_of(nl[2] - prev));
+                nv += v;
+                c += v / 10 * NEW_PLACES[2] * UNIT;
+            }
+            weeks += (ns + seats_weight(nse) + vip_weight(nv) + 999) / 1000 * 2;
+            let (mut ds, mut dse, mut dv) = (0, 0, 0);
+            if a == 0 {
+                let x = ol[0] - prev;
+                ds = ceil10(x);
+                c += tens(x) * DEMOLISHED[0] * UNIT;
+                prev = ol[0];
+                a = 1;
+            }
+            if a == 1 {
+                dse = ceil10(seats_of(ol[1] - prev));
+                c += dse / 10 * DEMOLISHED[1] * UNIT;
+                prev = ol[1];
+                a = 2;
+            }
+            if a == 2 {
+                let v = ceil10(vip_of(ol[2] - prev));
+                dv += v;
+                c += v / 10 * DEMOLISHED[2] * UNIT;
+            }
+            weeks += (ds + dse + dv + 999) / 1000 * 2;
+            for j in 0..3 {
+                c += (m[0][j] + 9) / 10 * CONVERTED[0][j] * UNIT;
+                c += seats_of(m[1][j] + 9) / 10 * CONVERTED[1][j] * UNIT;
+                c += vip_of(m[2][j] + 9) / 10 * CONVERTED[2][j] * UNIT;
+            }
+            let converted: i32 = (0..3)
+                .flat_map(|a| (0..3).map(move |b| (a, b)))
+                .filter(|(a, b)| a != b)
+                .map(|(a, b)| m[a][b])
+                .sum();
+            if converted != 0 {
+                work = Work::Conversion;
+                weeks += (converted + 999) / 1000 * 2;
+            }
+        }
+    } else {
+        // The track changes: the stand is pulled down and built anew.
+        [ns, nse, nv] = n.map(ceil10);
+        c += ns / 10 * NEW_PLACES[0] * UNIT
+            + nse / 10 * NEW_PLACES[1] * UNIT
+            + nv / 10 * NEW_PLACES[2] * UNIT;
+        weeks += (ns + nse + nv) / 1000 * 2;
+        let [ds, dse, dv] = o.map(ceil10);
+        c += ds / 10 * DEMOLISHED[0] * UNIT
+            + dse / 10 * DEMOLISHED[1] * UNIT
+            + dv / 10 * DEMOLISHED[2] * UNIT;
+        weeks += (ds + dse + dv + 999) / 1000 * 2;
+        renovate = false;
+    }
+    let co = old.condition(i);
+    let cn = if wn > wo { 0 } else { new.condition(i) };
+    let (to, tn) = (o.iter().sum::<i32>(), n.iter().sum::<i32>());
+    if renovate {
+        let step = |k: usize| RENOVATION[k] * i64::from(to) * i64::from(UNIT) / 500;
+        for k in cn..co {
+            reno = reno.wrapping_add((step(k) * 5) as i32);
+        }
+        reno = reno.wrapping_add((step(cn.max(co)) * i64::from(old.started(i))) as i32);
+        steps = co as i32 - cn as i32;
+    }
+    let mut had = old.roof(i);
+    if had && (ns > 0 || nse > 0 || nv > 0 || !same_track || !new.roof(i)) {
+        roof += (0..3).map(|k| tens(o[k]) * ROOF_OFF[k]).sum::<i32>();
+        had = false;
+        weeks += 1;
+    }
+    if new.roof(i) && !had {
+        roof += (0..3).map(|k| tens(n[k]) * ROOF_ON[k]).sum::<i32>();
+        let t = (tn + 999) / 1000;
+        weeks += match t {
+            20.. => 10 + (t - 20) / 10,
+            10.. => 7 + (t - 10) / 5,
+            5.. => 6,
+            _ => 5,
+        };
+    }
+    if new.heaters(i) {
+        let places = if old.heaters(i) { ns + nse + nv } else { tn };
+        reno = reno.wrapping_add(places * HEATER);
+    }
+    if new.has(Comfort::HeatedSeats) {
+        c += (nse + m[0][1] + m[2][1]) * HEATED_SEAT;
+    }
+    if ns > 0 || nse > 0 || nv > 0 {
+        work = Work::New;
+    }
+    StandCost { cost: c, work, roof, renovation: reno, weeks: weeks.max(steps) as i16 }
+}
+
+/// Whether a plan changes a stand not being built: its places, its roof or
+/// its track (`FUN_00718d14`).
+pub fn plan_changed(stadium: &Sub, plan: &Sub) -> bool {
+    (0..STANDS).filter(|&s| plan.weeks(s) == 0).any(|s| {
+        stadium.three(s) != plan.three(s)
+            || stadium.roof(s) != plan.roof(s)
+            || stadium.track(s) != plan.track(s)
+    })
+}
+
+/// The places a stand gives by its condition, in percent (0x8a7b50).
+const BY_CONDITION: [i32; 7] = [100, 100, 100, 100, 80, 50, 20];
+
+/// The capacity anew (`FUN_00718b1c`): the stands not being built, fewer
+/// places for a run-down one.
+pub fn recount(sub: &mut Sub) {
+    let capacity = (0..STANDS)
+        .filter(|&s| sub.weeks(s) == 0)
+        .map(|s| sub.three(s).iter().sum::<i32>() * BY_CONDITION[sub.condition(s)] / 100)
+        .fold(0i32, i32::wrapping_add);
+    sub.0[CAPACITY..CAPACITY + 4].copy_from_slice(&capacity.to_le_bytes());
+}
+
+/// A dream stadium's price in millions, by its kind (0x889e50); its
+/// building time.
+const DREAM_PRICES: [i64; 3] = [1000, 1500, 2000];
+const MILLION: i64 = 1_000_000;
+const DREAM_WEEKS: u8 = 100;
+/// The fields a changed plan carries besides the stands (`FUN_0071b2e3`):
+/// the kind, comfort, scoreboard, +0x67, the pitch, +0x69, +0x6a, +0x6b.
+const CARRIED: [(usize, usize); 2] = [(KIND, 2), (COMFORT, 8)];
+
+/// A plan carried out (`FUN_0071aee2`): a changed plan rebuilds the stands
+/// not being built and books their whole cost; an unchanged one only the
+/// renovations and heaters; a dream stadium its price and a hundred weeks.
+#[derive(Clone, Copy, Debug)]
+pub struct Carried {
+    pub weeks: i16,
+    pub cost: i32,
+    /// The stands that got weeks of building.
+    pub mask: u8,
+    pub dream: bool,
+}
+
+pub fn carry_plan(team: &mut Team, stadium: &mut Sub, plan: &Sub) -> Carried {
+    let changed = plan_changed(stadium, plan);
+    if changed {
+        for (at, len) in CARRIED {
+            stadium.0[at..at + len].copy_from_slice(&plan.0[at..at + len]);
+        }
+    }
+    let (mut all, mut renovations) = (0i64, 0i64);
+    let mut out = Carried { weeks: 0, cost: 0, mask: 0, dream: false };
+    for s in 0..STANDS {
+        if stadium.weeks(s) != 0 {
+            continue;
+        }
+        let sc = stand_cost(plan, stadium, s);
+        all += i64::from(sc.cost);
+        if changed {
+            all += i64::from(sc.roof) + i64::from(sc.renovation);
+            stadium.set_vip(s, plan.vip(s));
+            stadium.set_seats(s, plan.seats(s));
+            stadium.set_standing(s, plan.standing(s));
+            stadium.set_roof(s, plan.roof(s));
+            stadium.set_track(s, plan.track(s));
+            stadium.set_heaters(s, plan.heaters(s));
+            stadium.0[AGE + s] = plan.0[AGE + s];
+            stadium.0[WEEKS + s] = sc.weeks as u8;
+            out.weeks = out.weeks.max(sc.weeks);
+            if sc.weeks > 0 {
+                out.mask |= 1 << s;
+            }
+        } else {
+            renovations += i64::from(sc.renovation);
+            stadium.set_condition(s, plan.condition(s));
+            stadium.set_heaters(s, plan.heaters(s));
+        }
+    }
+    out.cost = all as i32;
+    recount(stadium);
+    let booked = if plan.kind() >= 2 && changed {
+        stadium.0[WEEKS..WEEKS + STANDS].fill(DREAM_WEEKS);
+        out.dream = true;
+        let k = usize::try_from(plan.kind() - 2).unwrap_or(0).min(DREAM_PRICES.len() - 1);
+        DREAM_PRICES[k] * MILLION
+    } else if changed {
+        all
+    } else {
+        renovations
+    };
+    book(team, booked);
+    out
+}
+
+/// Stadium costs booked on the club (+0x2d8, i64, and +0x4f8).
+fn book(team: &mut Team, amount: i64) {
+    let costs = COSTS + CLUB_TO_TEAM;
+    team.put(costs, team.get::<i64>(costs).wrapping_add(amount));
+    let spent = SPENT + CLUB_TO_TEAM;
+    team.put(spent, team.get::<i32>(spent).wrapping_add(amount as i32));
+}
+
+/// The builder's offer after a long plan (`0x57f74f`): for a quarter of
+/// the cost, truncated to 5,000s, a fifth of the weeks less. None when the
+/// plan is short or dear.
+const OFFER_WEEKS: i16 = 10;
+const OFFER_MOST: i32 = 250_000_000;
+const OFFER_STEP: i32 = 5000;
+
+pub fn builder_offer(carried: &Carried) -> Option<i32> {
+    (!carried.dream && carried.weeks > OFFER_WEEKS && carried.cost < OFFER_MOST)
+        .then(|| carried.cost / 4 / OFFER_STEP * OFFER_STEP)
+}
+
+/// The offer taken: the stands built a fifth faster, its price booked.
+pub fn take_offer(team: &mut Team, stadium: &mut Sub, carried: &Carried, price: i32) {
+    let weeks = carried.weeks - carried.weeks / 5;
+    for s in (0..STANDS).filter(|&s| carried.mask & (1 << s) != 0) {
+        stadium.0[WEEKS + s] = weeks as u8;
+    }
+    book(team, price.into());
+}
+
+/// The stadium's "Arena" mark (+0x64 bit 0x2) goes unless every stand
+/// holds 6,000 to 17,999 weighted places under a roof with a track
+/// (`FUN_00719047`).
+const ARENA: u16 = 0x2;
+
+pub fn check_arena(sub: &mut Sub) {
+    let fits = (0..STANDS)
+        .all(|s| (6000..=17_999).contains(&sub.weighted(s)) && sub.roof(s) && sub.track(s));
+    if !fits {
+        let bits = sub.u16_(COMFORT) & !ARENA;
+        sub.put_u16(COMFORT, bits);
+    }
+}
+
+/// The dream stadiums one can build instead (0x889bf0).
+const DREAMS_AT: u32 = 0x889bf0;
+pub const DREAMS: usize = 3;
+
+pub struct StadiumTables {
+    pub dreams: Vec<Sub>,
+}
+
+impl StadiumTables {
+    pub fn load(exe: &Exe) -> io::Result<Self> {
+        let bytes = exe.bytes(DREAMS_AT, DREAMS * SUB)?;
+        Ok(Self { dreams: bytes.chunks(SUB).map(|b| Sub(b.to_vec())).collect() })
+    }
+}
+
+/// A dream stadium's price.
+pub fn dream_price(kind: i16) -> i64 {
+    let k = usize::try_from(kind - 2).unwrap_or(0).min(DREAM_PRICES.len() - 1);
+    DREAM_PRICES[k] * MILLION
 }
 
 /// What the chosen changes come to: the cost of the comfort chosen that the
@@ -292,5 +734,58 @@ pub fn store(records: &mut Records, country: u8, number: u16, subs: &[Sub]) {
     }
     if let (Some(first), Some(cached)) = (subs.first(), records.stadiums.get_mut(index)) {
         *cached = Stadium { name: first.name(), capacity: first.capacity() };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A.an3's stadium: the main stand 27 VIP and 3,590 seats, the others
+    /// about 6,130 standing, all roofed, in their first condition step.
+    fn alte_foersterei() -> Sub {
+        let mut sub = Sub(vec![0; SUB]);
+        sub.set_vip(0, 27);
+        sub.set_seats(0, 3590);
+        for (s, standing) in [(1, 6133), (2, 6131), (3, 6131)] {
+            sub.set_standing(s, standing);
+        }
+        for s in 0..STANDS {
+            sub.set_roof(s, true);
+            sub.set_condition(s, 1);
+        }
+        sub
+    }
+
+    fn cost(plan: impl Fn(&mut Sub), stand: usize) -> (i32, i32, i32, i16) {
+        let old = alte_foersterei();
+        let mut new = old.clone();
+        plan(&mut new);
+        let c = stand_cost(&new, &old, stand);
+        (c.cost, c.roof, c.renovation, c.weeks)
+    }
+
+    #[test]
+    fn a_stands_plan_costs_what_the_original_showed() {
+        // STADION-AUSBAU.md §4 and §8, peeked on A.an3.
+        assert_eq!(cost(|s| s.set_standing(1, 6143), 1), (10_000, 6_457_000, 122_660, 9));
+        assert_eq!(cost(|s| s.set_standing(1, 6123), 1), (1_000, 0, 0, 2));
+        assert_eq!(cost(|s| s.set_roof(1, false), 1), (0, 307_000, 0, 1));
+        assert_eq!(cost(|s| s.set_heaters(0, true), 0), (0, 0, 72_340, 0));
+        assert_eq!(cost(|s| s.set_condition(0, 0), 0), (0, 0, 72_340, 1));
+        assert_eq!(cost(|s| s.set_track(0, true), 0), (11_592_000, 7_728_000, 0, 20));
+        assert_eq!(cost(|s| s.set_track(1, true), 1), (6_754_000, 6_447_000, 0, 33));
+        let old = alte_foersterei();
+        let mut fewer = old.clone();
+        fewer.set_standing(1, 6123);
+        assert_eq!(stand_cost(&fewer, &old, 1).work, Work::New);
+        assert_eq!(stand_cost(&old, &old, 1).work, Work::Nothing);
+    }
+
+    #[test]
+    fn a_long_plan_gets_the_builders_offer() {
+        let carried = Carried { weeks: 33, cost: 13_201_000, mask: 2, dream: false };
+        assert_eq!(builder_offer(&carried), Some(3_300_000));
+        assert_eq!(builder_offer(&Carried { weeks: 10, ..carried }), None);
     }
 }

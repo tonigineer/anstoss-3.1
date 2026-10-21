@@ -79,6 +79,7 @@ pub mod dialogs {
     pub const FINANCES: u16 = 417;
     /// The stadium, the bar's twelfth symbol.
     pub const STADIUM: u16 = 464;
+    pub const EXPANSION: u16 = 463;
     /// The squad and the transfer market, the bar's eleventh symbol, and
     /// its current squad.
     pub const SQUAD_MENU: u16 = 218;
@@ -211,6 +212,15 @@ pub enum Args {
     TextForDate(u16, usize),
     /// A text by its id, with an amount of money for its `%s`.
     TextForMoney(u16, i64),
+    /// A text with a number for its "%d".
+    TextForNumber(u16, i32),
+    /// The builder's offer (text 4812): its price, the weeks and the weeks
+    /// it comes to, and the cost in all.
+    BuilderOffer {
+        price: i32,
+        weeks: i16,
+        total: i32,
+    },
     /// A text by its id, with another text for its `%s`.
     TextForText(u16, u16),
     /// A loan of the current club, by its slot.

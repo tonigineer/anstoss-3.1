@@ -386,6 +386,9 @@ impl<'a> Runner<'a> {
                 self.change(change);
                 self.host.view_mut().set_text(field, "");
                 self.host.view_mut().type_text(controls, text);
+                // A screen that takes text as it is typed sees it at once.
+                let change = self.host.tick(game, 0.0);
+                self.change(change);
                 return Ok(());
             }
             Action::Wait => return self.wait(shown),
@@ -1493,6 +1496,40 @@ mod tests {
         let (list, titles) = shown(&on_save(&game, "Probe1", &enemies).unwrap());
         assert_eq!(list.rows.len(), squad);
         assert_ne!(titles, friends);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_stadium_is_expanded() {
+        use a3_core::stadium;
+        let game = game();
+        let crane = "now click bar 11\nuntil dialog 464\nnow click at 311 145\nuntil dialog 463";
+        let Some(runner) = on_save(&game, "Probe1", crane) else { return };
+        let club = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            let subs = stadium::subs(records, team.country(), u16::from(team.number())).unwrap();
+            (team.get::<i64>(0x2d8 + 0x278), subs[0].clone())
+        };
+        let (costs, sub) = club(&runner);
+        // Ten more standing places on the Gegentribüne are far beyond the
+        // money: refused.
+        let dear = format!("{crane}\nnow spin 5875 up\nnow press 1\nuntil dialog 380");
+        on_save(&game, "Probe1", &dear).unwrap();
+        // The right stand renovated a step: its cost booked, the stadium
+        // carried, once the screen is left.
+        let mut plan = sub.clone();
+        plan.set_condition(3, sub.condition(3) - 1);
+        let renovation = stadium::stand_cost(&plan, &sub, 3).renovation;
+        assert!(renovation > 0);
+        let renovate = format!(
+            "{crane}\nnow choose 5915 3\nnow press 1\nuntil dialog 464\nnow click bar 0\nuntil dialog 147"
+        );
+        let (after, carried) = club(&on_save(&game, "Probe1", &renovate).unwrap());
+        assert_eq!(after - costs, i64::from(renovation));
+        assert_eq!(carried.condition(3), sub.condition(3) - 1);
     }
 
     #[test]

@@ -10,6 +10,11 @@ use crate::classic::{Paint, TEXT, fill};
 #[derive(Clone, Default, Debug)]
 pub struct EditState {
     pub text: String,
+    /// Its text's colour, where the screen sets one (`CMyEditControl`
+    /// +0x118); black else.
+    pub ink: Option<[u8; 3]>,
+    /// A disabled field takes no focus; it looks the same.
+    pub disabled: bool,
 }
 
 impl EditState {
@@ -33,7 +38,8 @@ impl EditState {
         let r = paint.control.rect;
         let (x, top, right) = (r.min.x as i32, r.min.y as i32, r.max.x as i32);
         let cell = font.height() as i32;
-        font.draw_clipped(frame, x, top, &self.text, TEXT, false, right - 1);
+        let ink = self.ink.map_or(TEXT, |[r, g, b]| image::Rgba([r, g, b, 255]));
+        font.draw_clipped(frame, x, top, &self.text, ink, false, right - 1);
         if paint.caret && paint.view.focus == Some(paint.index) {
             let at = x + font.width(&self.text, false) as i32;
             fill(frame, at.min(right - 2), top, 1, cell, TEXT);

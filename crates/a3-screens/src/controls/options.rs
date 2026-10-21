@@ -37,6 +37,9 @@ pub struct OptionsState {
     pub actions: bool,
     /// Options that are switched off: they show nothing and do not answer.
     pub off: Vec<bool>,
+    /// Options disabled as the game disables a button group's
+    /// (`FUN_007a72c2`): their label in the group's disabled ink, no answer.
+    pub dimmed: Vec<bool>,
     /// A picture of its own under the options (`FUN_007a743a`).
     pub background: Option<u16>,
     /// A click on the chosen option clears it.
@@ -56,7 +59,11 @@ impl OptionsState {
     }
 
     pub fn item_on(&self, item: usize) -> bool {
-        !self.off.get(item).copied().unwrap_or(false)
+        !self.off.get(item).copied().unwrap_or(false) && !self.dimmed(item)
+    }
+
+    fn dimmed(&self, item: usize) -> bool {
+        self.dimmed.get(item).copied().unwrap_or(false)
     }
 
     /// A click on an option chooses it, unless it is switched off or the
@@ -80,7 +87,10 @@ impl OptionsState {
 
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let control = paint.control;
-        let Kind::Options { image, items, ink, chosen_ink, .. } = &control.kind else { return };
+        let Kind::Options { image, items, ink, chosen_ink, disabled_ink, .. } = &control.kind
+        else {
+            return;
+        };
         let (ink, chosen_ink) = (*ink, *chosen_ink);
         let r = control.rect;
         let (x, y) = (r.min.x as i32, r.min.y as i32);
@@ -95,7 +105,7 @@ impl OptionsState {
             // The chosen option shows lit; the game's buttons of this kind
             // do not light up when pointed at.
             let lit = !self.actions && self.chosen == item;
-            if !lit || !self.item_on(item) {
+            if !lit || self.off.get(item).copied().unwrap_or(false) {
                 continue;
             }
             if *image == 0 {
@@ -126,7 +136,13 @@ impl OptionsState {
                 continue;
             }
             let pointed = paint.pointed(Target::Option { control: paint.index, item });
-            let [ir, ig, ib] = if item == self.chosen { chosen_ink } else { ink };
+            let [ir, ig, ib] = if self.dimmed(item) {
+                *disabled_ink
+            } else if item == self.chosen {
+                chosen_ink
+            } else {
+                ink
+            };
             let color = if pointed { TEXT_HOVER } else { Rgba([ir, ig, ib, 255]) };
             if *image == 0 {
                 // Windows centres a radio button's label on its bullet.

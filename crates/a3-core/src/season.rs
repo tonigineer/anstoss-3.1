@@ -127,6 +127,8 @@ pub struct Rules {
     pub messages: std::collections::HashMap<u32, String>,
     /// NORACSA's search: its combos' choices.
     pub noracsa: crate::noracsa::NoracsaTables,
+    /// The dream stadiums.
+    pub stadium: crate::stadium::StadiumTables,
 }
 
 impl Rules {
@@ -169,6 +171,7 @@ impl Rules {
             forecast: crate::forecast::ForecastTables::load(exe)?,
             contract: crate::contract::ContractTables::load(exe)?,
             noracsa: crate::noracsa::NoracsaTables::load(exe)?,
+            stadium: crate::stadium::StadiumTables::load(exe)?,
             messages: crate::youth::MESSAGES
                 .into_iter()
                 .map(|at| (at, exe.text_at(at).unwrap_or_default()))

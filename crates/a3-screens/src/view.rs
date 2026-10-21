@@ -247,8 +247,15 @@ impl View {
                 false
             }
             Target::Edit(control) => {
-                self.focus = Some(control);
-                true
+                let disabled = self
+                    .controls
+                    .get(control)
+                    .and_then(|c| c.state.as_edit())
+                    .is_some_and(|e| e.disabled);
+                if !disabled {
+                    self.focus = Some(control);
+                }
+                !disabled
             }
             Target::Scroll { control, up } => {
                 let visible = visible_rows(&dialog.controls[control]);

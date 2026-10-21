@@ -121,7 +121,9 @@ impl ControlView {
             Kind::Spin { .. } => ControlState::Spin(Value::default()),
             Kind::Slider { .. } => ControlState::Slider(Value::default()),
             Kind::Fader { .. } => ControlState::Fader(Value::default()),
-            Kind::Edit { .. } => ControlState::Edit(EditState { text: text() }),
+            Kind::Edit { .. } => {
+                ControlState::Edit(EditState { text: text(), ..EditState::default() })
+            }
             Kind::Options { items, style, .. } => {
                 ControlState::Options(OptionsState::new(items, *style))
             }

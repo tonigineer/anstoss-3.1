@@ -8,6 +8,7 @@ use crate::screens::{Args, Cx, Outcome, Reply, Screen, control, set};
 use crate::view::View;
 
 const QUESTION_TEXT: u16 = 4738;
+const BUILDER_OFFER: u16 = 4812;
 const QUESTION_OK: u16 = 4741;
 const NOTICE_TEXT: u16 = 4730;
 /// The notice's caption (`CAlert`): "ANSTOSS 3 - Achtung!".
@@ -40,6 +41,13 @@ impl Screen for Question {
             }
             Args::TextForText(text, other) => {
                 Some(cx.game.text(text).replacen("%s", cx.game.text(other), 1))
+            }
+            Args::BuilderOffer { price, weeks, total } => {
+                let money = |v: i32| super::playerinfo::money(cx.game, v.into());
+                Some(super::finances::printf(
+                    cx.game.text(BUILDER_OFFER),
+                    &[&money(price), &weeks, &(weeks - weeks / 5), &money(total)],
+                ))
             }
             Args::TextForFormation(text, formation) => {
                 let manager = cx.state.season.as_ref().and_then(|s| s.manager());
@@ -99,6 +107,7 @@ impl Screen for Notice {
                 let amount = super::playerinfo::money(cx.game, amount);
                 cx.game.text(text).replacen("%s", &amount, 1)
             }
+            Args::TextForNumber(text, n) => super::finances::printf(cx.game.text(text), &[&n]),
             _ => return,
         };
         set(view, cx.dialog, NOTICE_TEXT, text);
