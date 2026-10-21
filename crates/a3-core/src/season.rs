@@ -120,6 +120,11 @@ pub struct Rules {
     pub year: crate::year::YearTables,
     /// The forecasts' months left and perimeter advertising.
     pub forecast: crate::forecast::ForecastTables,
+    /// What players ask and make of their contracts.
+    pub contract: crate::contract::ContractTables,
+    /// Alerts the game writes itself, not from its texts: by where they
+    /// are in the program.
+    pub messages: std::collections::HashMap<u32, String>,
 }
 
 impl Rules {
@@ -160,6 +165,11 @@ impl Rules {
             individual: crate::individual::IndividualTables::load(exe)?,
             year: crate::year::YearTables::load(exe)?,
             forecast: crate::forecast::ForecastTables::load(exe)?,
+            contract: crate::contract::ContractTables::load(exe)?,
+            messages: crate::youth::MESSAGES
+                .into_iter()
+                .map(|at| (at, exe.text_at(at).unwrap_or_default()))
+                .collect(),
         })
     }
 

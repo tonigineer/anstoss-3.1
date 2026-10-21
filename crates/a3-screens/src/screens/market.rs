@@ -1110,11 +1110,7 @@ impl Screen for WatchedPlayer {
         if let Some(c) = control(dialog, CHOICES) {
             view.set_chosen(c, crate::controls::options::NONE);
         }
-        if let Some(ball) = control(dialog, BALL).and_then(|b| view.anim_mut(b)) {
-            ball.frames = QUESTION_FRAMES.chain(QUESTION_FRAMES.rev().skip(1)).collect();
-            ball.frames.pop();
-            ball.playing = true;
-        }
+        question_ball(view, dialog);
         mark_inert(view, dialog, |_| true);
     }
 
@@ -1135,6 +1131,15 @@ impl Screen for WatchedPlayer {
             }
             _ => Outcome::Close(Reply::Cancel),
         }
+    }
+}
+
+/// A question popup's ball, back and forth.
+pub(crate) fn question_ball(view: &mut View, dialog: &Dialog) {
+    if let Some(ball) = control(dialog, BALL).and_then(|b| view.anim_mut(b)) {
+        ball.frames = QUESTION_FRAMES.chain(QUESTION_FRAMES.rev().skip(1)).collect();
+        ball.frames.pop();
+        ball.playing = true;
     }
 }
 

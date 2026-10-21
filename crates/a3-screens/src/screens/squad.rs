@@ -4,11 +4,13 @@
 
 use std::collections::HashMap;
 
+use chrono::Datelike;
+
 use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::NOTICE;
 use a3_core::cycle::dialogs::{
-    APPOINTMENTS, CURRENT_SQUAD, LOANED_OUT, MARKET_VALUES, NEXT_SQUAD, TRANSFER_LIST, WATCH_LIST,
-    WORLDS_BEST,
+    APPOINTMENTS, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT, MARKET_VALUES, NEXT_SQUAD,
+    TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING,
 };
 use a3_core::records::Team;
 use a3_core::season::Rules;
@@ -35,19 +37,26 @@ const MARKET_SCREENS: u16 = 6371;
 /// players out on loan, the market values.
 const CURRENT_SQUAD_ITEM: usize = 0;
 const NEXT_SQUAD_ITEM: usize = 1;
+const EXTENSIONS_ITEM: usize = 4;
 const LOANED_OUT_ITEM: usize = 5;
 const MARKET_VALUES_ITEM: usize = 6;
-const SQUAD_ITEMS: [(usize, u16); 4] = [
+const SQUAD_ITEMS: [(usize, u16); 5] = [
     (CURRENT_SQUAD_ITEM, CURRENT_SQUAD),
     (NEXT_SQUAD_ITEM, NEXT_SQUAD),
+    (EXTENSIONS_ITEM, EXTENSIONS),
     (LOANED_OUT_ITEM, LOANED_OUT),
     (MARKET_VALUES_ITEM, MARKET_VALUES),
 ];
 /// The market screens' buttons: the transfer list, the week's
-/// appointments, the watch list, the world's best.
+/// appointments, the watch list, the youth to poach, the world's best.
 const TRANSFER_LIST_ITEM: usize = 0;
-const MARKET_ITEMS: [(usize, u16); 4] =
-    [(TRANSFER_LIST_ITEM, TRANSFER_LIST), (1, APPOINTMENTS), (2, WATCH_LIST), (5, WORLDS_BEST)];
+const MARKET_ITEMS: [(usize, u16); 5] = [
+    (TRANSFER_LIST_ITEM, TRANSFER_LIST),
+    (1, APPOINTMENTS),
+    (2, WATCH_LIST),
+    (POACHING, YOUTH_POACHING),
+    (5, WORLDS_BEST),
+];
 /// The amateurs' button, which a club's amateur department sees as its
 /// professionals' (text 4628); the market's youth poaching, which it may
 /// not (alert 4698).
@@ -132,17 +141,13 @@ impl Screen for SquadMenu {
                 }
             }
             Target::Option { control: c, item }
-                if cx.dialog.controls[c].id == Some(MARKET_SCREENS)
-                    && MARKET_ITEMS.iter().any(|&(i, _)| i == item) =>
-            {
-                let screen = MARKET_ITEMS.iter().find(|&&(i, _)| i == item).map(|&(_, s)| s);
-                Outcome::Popup(Request::new(screen.unwrap_or(TRANSFER_LIST)))
-            }
-            Target::Option { control: c, item }
                 if cx.dialog.controls[c].id == Some(MARKET_SCREENS) =>
             {
-                match refusal(cx, item) {
-                    Some(text) => Outcome::Popup(Request::with(NOTICE, Args::Text(text))),
+                if let Some(text) = refusal(cx, item) {
+                    return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+                }
+                match MARKET_ITEMS.iter().find(|&&(i, _)| i == item) {
+                    Some(&(_, screen)) => Outcome::Popup(Request::new(screen)),
                     None => Outcome::Stay,
                 }
             }
@@ -176,7 +181,7 @@ fn refusal(cx: &Cx, item: usize) -> Option<u16> {
 }
 
 /// The manager's club's team record.
-fn own_team<'a>(cx: &'a Cx) -> Option<&'a Team> {
+pub(crate) fn own_team<'a>(cx: &'a Cx) -> Option<&'a Team> {
     let (slot, number) = cx.state.season.as_ref()?.manager()?.club?;
     let nation = cx.game.world.country(slot)?.nation;
     cx.state.records.as_ref()?.team(nation, u16::try_from(number).ok()?)
@@ -752,10 +757,11 @@ const NEXT_CLUB_COUNTRY: usize = 0x14c;
 const INFO_ONLY: [hub::Command; 1] = [hub::Command::Info];
 
 pub(crate) fn compose_next(dialogs: &mut HashMap<u16, Dialog>) {
-    for id in [NEXT_SQUAD, LOANED_OUT] {
+    for id in [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION] {
         if let Some(dialog) = dialogs.get_mut(&id) {
-            dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
-            if id == NEXT_SQUAD {
+            let title = if id == DRAW_OPTION { dialog.title.clone() } else { String::new() };
+            dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
+            if matches!(id, NEXT_SQUAD | EXTENSIONS) {
                 dialog.controls.push(hub::menu_control());
             }
         }
@@ -982,6 +988,388 @@ impl Screen for LoanedOut {
                     list.selected = None;
                 }
                 Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// The semi-automatic contract extension (dialog 92,
+/// `CHalbautomatischeAuswahl`; VERLAENGERUNG-ABWERBEN.md §1–2): first the
+/// players in their contract's last year, a click offering each a year
+/// more on his terms; then those the club holds an option on, a click
+/// drawing it.
+#[derive(Default)]
+pub struct Extensions {
+    options: bool,
+    /// What the popup open asks of the screen once it closes.
+    after: After,
+    menu_player: Option<u16>,
+}
+
+/// What follows a popup of the extensions.
+#[derive(Clone, Copy, Default)]
+enum After {
+    #[default]
+    Nothing,
+    Refill,
+    /// Back to the first mode: too late in the season for options.
+    FirstMode,
+    /// The option on the player drawn, if the question says so.
+    Draw(u16),
+}
+
+const EXTENSION_LIST: u16 = 1883;
+const EXTENSION_MODES: u16 = 1884;
+const FIRST_MODE: usize = 0;
+const OPTIONS_MODE: usize = 1;
+/// Options are drawn up to the 30th of April (alert 4299).
+const NO_OPTIONS: std::ops::RangeInclusive<u32> = 5..=6;
+const TOO_LATE: u16 = 4299;
+const EXTENDS: u16 = 4178;
+const DECLINES: u16 = 3110;
+/// R+0x26f bit 6: he declined the semi-automatic extension.
+const DECLINED: u8 = 0x40;
+/// The strength class that keeps a player out (`FUN_00706a7e`).
+const UNLISTED_CLASS: u8 = 1;
+/// The second mode's players: those the club holds an option on.
+const CLUB_OPTION: u16 = a3_core::contract::CLUB_OPTION;
+/// The first mode's: those with less than two years left.
+const LAST_YEARS: i8 = 2;
+/// The contract index below and above which a row shows green and red;
+/// a decline shows blue (`FUN_00708ca5`).
+const CHEAP: i32 = 80;
+const DEAR: i32 = 120;
+const CHEAP_INK: [u8; 3] = [0, 160, 0];
+const DEAR_INK: [u8; 3] = [200, 0, 0];
+const DECLINED_INK: [u8; 3] = [0, 0, 160];
+/// What hurts a player whose option is drawn on cheap terms (the club's
+/// reason 0x20).
+const CHEAP_OPTION: u32 = 0x20;
+/// The columns of 219 but the morale.
+const MORALE_COLUMN: usize = 8;
+const QUESTION_TEXT: u16 = 4056;
+const DRAW: u16 = 4057;
+const DONT_DRAW: u16 = 4058;
+
+impl Screen for Extensions {
+    fn ids(&self) -> &[u16] {
+        &[EXTENSIONS]
+    }
+
+    /// `FUN_004b6e56`: the first mode chosen and filled, the caption.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        *self = Self::default();
+        if let Some(season) = cx.state.season.as_ref() {
+            set(view, dialog, CAPTION_ID, hub::manager_title_of(game, season, &dialog.title));
+        }
+        if let Some(c) = control(dialog, EXTENSION_MODES) {
+            view.set_chosen(c, FIRST_MODE);
+        }
+        if let Some(list) = control(dialog, EXTENSION_LIST).and_then(|c| view.list_mut(c)) {
+            list.keyed = CONTENT_ICONS.to_vec();
+        }
+        self.fill(cx, view);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+        if let Some(id) = self.menu_player.take() {
+            if hub::close_menu(cx, view, target).and_then(|i| INFO_ONLY.get(i)).is_some() {
+                let rows = control(dialog, EXTENSION_LIST).and_then(|l| view.list(l));
+                cx.state.paging_ids =
+                    rows.map(|l| l.keys.iter().rev().map(|&k| k as u16).collect());
+                return Outcome::Popup(Request::with(super::playerinfo::CURRENT, Args::Record(id)));
+            }
+            return Outcome::Stay;
+        }
+        let id = |c: usize| dialog.controls[c].id;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Option { control: c, item } if id(c) == Some(EXTENSION_MODES) => {
+                let month = cx.state.season.as_ref().map_or(0, |s| s.date().month());
+                if item == OPTIONS_MODE && NO_OPTIONS.contains(&month) {
+                    self.after = After::FirstMode;
+                    return notice(TOO_LATE);
+                }
+                self.options = item == OPTIONS_MODE;
+                self.fill(cx, view);
+                Outcome::Stay
+            }
+            Target::Menu(grip @ Grip::Row { control: c, row }) if id(c) == Some(EXTENSION_LIST) => {
+                let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
+                if let Some(player) = player
+                    && hub::show_menu(cx, view, grip, &INFO_ONLY).is_some()
+                {
+                    self.menu_player = Some(player as u16);
+                }
+                Outcome::Stay
+            }
+            // `OnSelChange_IDC_HALB_AUSWAHL_LISTE`: the row stays selected
+            // under the popup; the refill after it drops it.
+            Target::Row { control: c, row } if id(c) == Some(EXTENSION_LIST) => {
+                let Some(player) = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied())
+                else {
+                    return Outcome::Stay;
+                };
+                let player = player as u16;
+                if self.options {
+                    let held = cx
+                        .state
+                        .records
+                        .as_ref()
+                        .and_then(|r| r.player(player))
+                        .is_some_and(|r| r.terms() & CLUB_OPTION != 0);
+                    if !held {
+                        return Outcome::Stay;
+                    }
+                    self.after = After::Draw(player);
+                    return Outcome::Popup(Request::with(DRAW_OPTION, Args::Record(player)));
+                }
+                let Some(extends) = offer(cx, player) else { return Outcome::Stay };
+                self.after = After::Refill;
+                if extends {
+                    extend(cx, player);
+                    Outcome::Popup(Request::with(NOTICE, Args::TextFor(EXTENDS, player)))
+                } else {
+                    if let Some(r) = cx
+                        .state
+                        .records
+                        .as_mut()
+                        .and_then(|r| r.players.get_mut(usize::from(player)))
+                    {
+                        r.set_retiring(r.retiring() | DECLINED);
+                    }
+                    notice(DECLINES)
+                }
+            }
+            _ => Outcome::Stay,
+        }
+    }
+
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        match std::mem::take(&mut self.after) {
+            After::Nothing => return Outcome::Stay,
+            After::Refill => {}
+            After::FirstMode => {
+                if let Some(c) = control(cx.dialog, EXTENSION_MODES) {
+                    view.set_chosen(c, FIRST_MODE);
+                }
+                self.options = false;
+            }
+            // `FUN_00709c74`: an option drawn on cheap terms hurts him.
+            After::Draw(id) if reply == Reply::Ok => {
+                let cheap = with_reckoning(cx, |club| {
+                    signee(cx, id).map(|p| cx.game.rules.contract.index(&p, club) < CHEAP)
+                });
+                if let Some(r) =
+                    cx.state.records.as_mut().and_then(|r| r.players.get_mut(usize::from(id)))
+                {
+                    if cheap.flatten() == Some(true) {
+                        cx.game.rules.discipline.mood.set_reasons(r, CHEAP_OPTION);
+                    }
+                    r.set_terms(r.terms() & !CLUB_OPTION);
+                }
+                extend(cx, id);
+            }
+            After::Draw(_) => {}
+        }
+        self.fill(cx, view);
+        Outcome::Stay
+    }
+}
+
+impl Extensions {
+    /// The rows (`FUN_004b6f95`): the squad in its order, but those on loan
+    /// with the club, ending their career, of strength class 1, signed
+    /// elsewhere or with a talk pending; the list at its top, nothing
+    /// selected.
+    fn fill(&self, cx: &Cx, view: &mut View) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let Some(club) = own_club(cx) else { return };
+        let year = i32::from(records.globals.start_year());
+        let slots = control(dialog, EXTENSION_LIST)
+            .map(|c| crate::controls::list::icon_slots(&dialog.controls[c]))
+            .unwrap_or_default();
+        let (mut texts, mut inks, mut keys, mut icons) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        with_reckoning(cx, |reckoning| {
+            for status in &club.status {
+                let Some(r) = records.player(status.id) else { continue };
+                let years = years_left(r, year);
+                let wanted = if self.options {
+                    r.terms() & CLUB_OPTION != 0
+                } else {
+                    years < LAST_YEARS && r.retiring() & DECLINED == 0
+                };
+                let skip = r.terms() & ON_LOAN != 0
+                    || r.retiring() & RETIRING != 0
+                    || (r.picks() & UNKNOWN_STRENGTH) >> 6 == UNLISTED_CLASS
+                    || r.get::<u8>(NEXT_CLUB) != 0
+                    || !wanted
+                    || a3_core::transfers::pending(records, status.id);
+                let (false, Some(s), Some(p)) = (skip, shown(cx, status.id), signee(cx, status.id))
+                else {
+                    continue;
+                };
+                let mut columns = player_columns(cx, &s);
+                columns.remove(MORALE_COLUMN);
+                columns.push(money(game, i64::from(r.salary()) * SALARY_UNIT));
+                columns.push(if years >= 1 {
+                    chrono::NaiveDate::from_ymd_opt(year + i32::from(years), JUNE, LAST_JUNE_DAY)
+                        .map_or_else(|| "-".to_owned(), |d| hub::date_text(game, d))
+                } else {
+                    "-".to_owned()
+                });
+                let option = r.terms() & CLUB_OPTION != 0;
+                columns.push(game.text(if option { YES } else { NO }).to_owned());
+                texts.push(columns.join("\t"));
+                let index = game.rules.contract.index(&p, reckoning);
+                inks.push(Some(if index < CHEAP {
+                    CHEAP_INK
+                } else if index > DEAR {
+                    DEAR_INK
+                } else if r.retiring() & DECLINED != 0 {
+                    DECLINED_INK
+                } else {
+                    BLACK
+                }));
+                icons.push(
+                    slots
+                        .iter()
+                        .copied()
+                        .zip(CONTENT_ICONS.get(p.content_level).copied())
+                        .collect(),
+                );
+                keys.push(usize::from(status.id));
+            }
+        });
+        if let Some(list) = control(dialog, EXTENSION_LIST).and_then(|c| view.list_mut(c)) {
+            list.rows = texts;
+            list.inks = inks;
+            list.keys = keys;
+            list.row_icons = icons;
+            list.scroll = 0;
+            list.selected = None;
+        }
+    }
+}
+
+/// The manager's club's state.
+fn own_club<'a>(cx: &'a Cx) -> Option<&'a a3_core::season::ClubState> {
+    let season = cx.state.season.as_ref()?;
+    season.clubs.get(&season.manager()?.club?)
+}
+
+/// A contract's years left, this season's counted, none below 0.
+fn years_left(r: &a3_core::records::Player, year: i32) -> i8 {
+    ((i32::from(r.contract() & CONTRACT_YEAR) - year) as i8).max(0)
+}
+
+/// What the manager's club is to a contract's reckoning: its squad, its
+/// league and the matchdays played, the month.
+fn with_reckoning<T>(cx: &Cx, f: impl FnOnce(&a3_core::contract::Club) -> T) -> Option<T> {
+    let records = cx.state.records.as_ref()?;
+    let season = cx.state.season.as_ref()?;
+    let club = own_club(cx)?;
+    let team = own_team(cx)?;
+    let squad: Vec<_> = club
+        .status
+        .iter()
+        .zip(&club.players)
+        .map(|(s, p)| (s.id, p.positions[0], p.strength))
+        .collect();
+    let (matchdays, played) = a3_core::tickets::league_days(records, team);
+    let month = usize::try_from(season.date().month()).unwrap_or(0);
+    Some(f(&a3_core::contract::Club {
+        level: team.level(),
+        squad: &squad,
+        matchdays,
+        played,
+        month,
+    }))
+}
+
+/// A player as his contract's reckoning sees him, by his record.
+fn signee(cx: &Cx, id: u16) -> Option<a3_core::contract::Signee> {
+    let records = cx.state.records.as_ref()?;
+    let s = shown(cx, id)?;
+    let today = cx.state.season.as_ref()?.date();
+    let star = records.globals.stars().get(usize::from(s.player.positions[0])) == Some(&id);
+    Some(a3_core::contract::Signee::of(
+        records.player(id)?,
+        s.player.age(today) as i32,
+        lineup::form(s.fitness),
+        &cx.game.rules.value,
+        star,
+        records.globals.start_year(),
+    ))
+}
+
+/// Whether he takes a year more on his terms (`FUN_004b784c`): by luck,
+/// one draw below a hundred.
+fn offer(cx: &mut Cx, id: u16) -> Option<bool> {
+    let p = signee(cx, id)?;
+    let answer = with_reckoning(cx, |club| cx.game.rules.contract.extension(&p, club))?;
+    Some(match answer {
+        a3_core::contract::Extension::Yes => true,
+        a3_core::contract::Extension::No => false,
+        a3_core::contract::Extension::ByLuck(chance) => {
+            cx.state.season.as_mut()?.random.below(100) < chance
+        }
+    })
+}
+
+/// His contract a year longer on its terms.
+fn extend(cx: &mut Cx, id: u16) {
+    let Some(records) = cx.state.records.as_mut() else { return };
+    let year = i32::from(records.globals.start_year());
+    let Some(r) = records.players.get_mut(usize::from(id)) else { return };
+    let years = years_left(r, year) + 1;
+    let until = (year + i32::from(years)) as u16 & CONTRACT_YEAR;
+    r.set_contract(r.contract() & !CONTRACT_YEAR | until);
+    let Some(season) = cx.state.season.as_mut() else { return };
+    let Some(club) = season.manager().and_then(|m| m.club) else { return };
+    if let Some(status) =
+        season.clubs.get_mut(&club).and_then(|c| c.status.iter_mut().find(|s| s.id == id))
+    {
+        status.contract = Some(years.into());
+    }
+}
+
+/// Whether the club draws its option on a player (dialog 305,
+/// `CVereinZiehtOption`).
+pub struct DrawOption;
+
+impl Screen for DrawOption {
+    fn ids(&self) -> &[u16] {
+        &[DRAW_OPTION]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let dialog = cx.dialog;
+        if let Args::Record(id) = args {
+            let name = cx.state.records.as_ref().and_then(|r| r.known_as(id)).unwrap_or_default();
+            let text = control(dialog, QUESTION_TEXT).map(|c| dialog.controls[c].text.clone());
+            set(view, dialog, QUESTION_TEXT, text.unwrap_or_default().replacen("%s", &name, 1));
+        }
+        super::market::question_ball(view, dialog);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(c) if cx.dialog.controls[c].id == Some(DRAW) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Button(c) if cx.dialog.controls[c].id == Some(DONT_DRAW) => {
+                Outcome::Close(Reply::Cancel)
             }
             _ => Outcome::Stay,
         }

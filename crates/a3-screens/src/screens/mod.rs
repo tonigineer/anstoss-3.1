@@ -27,6 +27,7 @@ pub mod tactics;
 pub mod talk;
 pub mod training;
 pub mod year;
+pub mod youth;
 
 use std::collections::HashMap;
 
@@ -144,6 +145,10 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(squad::MarketValues::default()),
         Box::new(squad::NextSquad::default()),
         Box::new(squad::LoanedOut),
+        Box::new(squad::Extensions::default()),
+        Box::new(squad::DrawOption),
+        Box::new(youth::Poaching::default()),
+        Box::new(youth::PreContract),
         Box::new(market::TransferList::default()),
         Box::new(market::WorldsBest),
         Box::new(market::Appointments::default()),
@@ -192,6 +197,7 @@ pub fn compose(game: &mut Game) {
     market::compose(&mut game.dialogs);
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);
+    youth::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
 }
 

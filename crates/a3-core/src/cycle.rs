@@ -84,6 +84,13 @@ pub mod dialogs {
     pub const MARKET_VALUES: u16 = 217;
     pub const NEXT_SQUAD: u16 = 219;
     pub const LOANED_OUT: u16 = 300;
+    /// The semi-automatic contract extension, and its question whether
+    /// to draw an option.
+    pub const EXTENSIONS: u16 = 92;
+    pub const DRAW_OPTION: u16 = 305;
+    /// Other clubs' youths to poach, and the pre-contract offered.
+    pub const YOUTH_POACHING: u16 = 107;
+    pub const PRE_CONTRACT: u16 = 325;
     /// The transfer market's list, the world's best players.
     pub const TRANSFER_LIST: u16 = 287;
     pub const WORLDS_BEST: u16 = 462;
@@ -163,6 +170,8 @@ pub enum Args {
     Player(usize),
     /// A player of the game, by his record's id.
     Record(u16),
+    /// An alert the game writes itself, by where it is in the program.
+    Message(u32),
     /// A text by its id, with a player's name for its `%s`.
     TextFor(u16, u16),
     /// A text by its id, with the date of a day of the season for its

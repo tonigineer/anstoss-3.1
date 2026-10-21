@@ -471,3 +471,17 @@ pub fn cup_winner(records: &Records, country: u8, tables: &TicketTables) -> Opti
     let winner = if *cup.get(FINAL_WINNER + at)? == 0 { 0xe } else { 0x12 };
     Some(word(cup, winner + at) as u16)
 }
+
+/// The matchdays of a club's league, and those played: none for a low or
+/// unplayed league (`FUN_00692997`, `FUN_00692744`).
+pub fn league_days(records: &Records, team: &Team) -> (i32, i32) {
+    let club = Club { records, team, country: team.country(), number: team.number() };
+    let Some(league) = club.league() else { return (0, 0) };
+    let matchdays = i32::from(word(league, LEAGUE_MATCHDAYS));
+    let played = if team.level() >= LOWEST_LEAGUE || !club.played() {
+        0
+    } else {
+        i32::from(word(league, LEAGUE_PLAYED))
+    };
+    (matchdays, played)
+}

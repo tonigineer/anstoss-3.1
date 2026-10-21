@@ -15,7 +15,7 @@ use crate::pointer::{Geometry, Target};
 
 /// Rows are as high as the dialog file says; this high where it says
 /// nothing.
-const ROW_HEIGHT: f32 = 13.0;
+const ROW_HEIGHT: f32 = 14.0;
 /// The scrollbar runs down the list's right edge this wide: an arrow at
 /// each end, a handle in between.
 const SCROLLBAR_WIDTH: f32 = 20.0;

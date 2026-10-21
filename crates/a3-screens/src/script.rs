@@ -1394,6 +1394,40 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_contract_is_offered_a_year_more() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 4\nuntil dialog 92";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&92];
+        let list = |runner: &Runner| {
+            let view = runner.host.view();
+            view.list(crate::screens::control(dialog, 1883).unwrap()).unwrap().clone()
+        };
+        // The players in their contract's last year, in the squad's order.
+        let rows = list(&runner);
+        assert_eq!(rows.rows.len(), 5);
+        assert!(rows.rows.iter().all(|r| r.split('\t').count() == 13));
+        assert!(rows.rows.iter().all(|r| r.ends_with("\t30.6.2026\tNein")));
+        let id = rows.keys[0] as u16;
+        // A click: he takes a year more, or declines; either way he is off
+        // the list once the alert is gone.
+        let offer =
+            format!("{open}\nnow row 1883 0\nuntil dialog 380\nnow press 4731\nuntil dialog 92");
+        let runner = on_save(&game, "Probe1", &offer).unwrap();
+        assert_eq!(list(&runner).rows.len(), 4);
+        let state = runner.host.state();
+        let r = state.records.as_ref().unwrap().player(id).unwrap();
+        assert!(r.contract() & 0xfff == 2027 || r.retiring() & 0x40 != 0);
+        // Nobody the club holds an option on.
+        let options = format!("{open}\nnow choose 1884 1");
+        assert!(list(&on_save(&game, "Probe1", &options).unwrap()).rows.is_empty());
+        // No youth of another club without a pre-contract.
+        let poaching = "now click bar 10\nuntil dialog 218\nnow choose 6371 3\nuntil dialog 107";
+        on_save(&game, "Probe1", poaching).unwrap();
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn players_are_watched_and_dropped() {
         let game = game();
         let menu = "now click bar 10\nuntil dialog 218";

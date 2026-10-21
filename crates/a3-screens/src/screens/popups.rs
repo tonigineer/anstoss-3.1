@@ -85,6 +85,7 @@ impl Screen for Notice {
         set(view, cx.dialog, super::discipline::CAPTION_ID, caption);
         let text = match args {
             Args::Text(text) => cx.game.text(text).to_owned(),
+            Args::Message(at) => cx.game.rules.messages.get(&at).cloned().unwrap_or_default(),
             Args::TextFor(text, player) => {
                 let name = cx.state.records.as_ref().and_then(|r| r.known_as(player));
                 cx.game.text(text).replacen("%s", &name.unwrap_or_default(), 1)

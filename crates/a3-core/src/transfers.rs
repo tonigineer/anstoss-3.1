@@ -278,3 +278,19 @@ pub fn send_scout(records: &mut Records, slot: usize, region: usize, today: i16)
         b[at..at + 2].copy_from_slice(&(today + SCOUT_DAYS).to_le_bytes());
     }
 }
+
+/// Two more lists a player can have a talk pending in: the national
+/// team's search (6-byte entries, the id first) and another (8-byte
+/// entries, the id at +2), each after an i16 count (`FUN_007647b4`).
+const PENDING_LISTS: [(u32, usize, usize); 2] = [(0x1c53d98, 6, 0), (0x1c53ee8, 8, 2)];
+
+/// Whether a talk with a player is pending anywhere (`FUN_007647b4`).
+pub fn pending(records: &Records, id: u16) -> bool {
+    let in_list = |(at, size, field): (u32, usize, usize)| {
+        records.block(&format!("{at:#x}")).is_some_and(|b| {
+            let count = usize::try_from(word(b, 0)).unwrap_or(0);
+            (0..count).any(|k| word(b, 2 + k * size + field) as u16 == id)
+        })
+    };
+    PENDING_LISTS.into_iter().any(in_list) || appointments(records).iter().any(|t| t.player == id)
+}
