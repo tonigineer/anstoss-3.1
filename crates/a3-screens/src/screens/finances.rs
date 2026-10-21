@@ -342,7 +342,7 @@ impl Screen for Finances {
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if let Some(row) = self.calculation.take() {
             if let Reply::Choice(choice @ (kalkulation::NEXT | kalkulation::PREVIOUS)) = reply
-                && let Some(next) = kalkulation::step(row, choice)
+                && let Some(next) = kalkulation::step(cx, row, choice)
             {
                 self.calculation = Some(next);
                 return Outcome::Popup(Request::new(kalkulation::row_dialog(cx, next)));
@@ -655,7 +655,7 @@ fn percent(v: i16) -> String {
 }
 
 /// A count with points between the thousands: "7.974.620" (`FUN_004dacb9`).
-fn count(n: i32) -> String {
+pub(crate) fn count(n: i32) -> String {
     let sign = if n < 0 { '-' } else { ' ' };
     let mut n = n.unsigned_abs();
     let mut rest = String::new();

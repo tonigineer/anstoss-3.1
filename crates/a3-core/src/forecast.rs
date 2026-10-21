@@ -53,7 +53,7 @@ const PERIMETER_LEVEL: usize = 0x66;
 pub struct ForecastTables {
     months_left: Vec<u8>,
     perimeter: Vec<i16>,
-    tickets: TicketTables,
+    pub tickets: TicketTables,
 }
 
 impl ForecastTables {

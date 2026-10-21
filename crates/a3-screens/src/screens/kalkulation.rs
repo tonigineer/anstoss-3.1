@@ -38,8 +38,23 @@ const AMATEUR_PLAYERS: u16 = 453;
 const RUNNING: u16 = 459;
 const OTHER_COSTS: u16 = 122;
 /// The dialogs built so far, which the carousel stops at.
-pub(crate) const BUILT: [u16; 10] =
-    [TV, PRIZES, OTHER_INCOME, TRANSFERS, STADIUM, SHARES, STAFF, PLAYERS, RUNNING, OTHER_COSTS];
+pub(crate) const BUILT: [u16; 13] = [
+    TICKETS,
+    TV,
+    PRIZES,
+    SPONSORS,
+    MERCHANDISE,
+    OTHER_INCOME,
+    TRANSFERS,
+    STADIUM,
+    SHARES,
+    STAFF,
+    PLAYERS,
+    RUNNING,
+    OTHER_COSTS,
+];
+/// The merchandise's row.
+const MERCHANDISE_ROW: usize = 4;
 /// The arrow bar: back gives 7, on gives 6 (`FUN_004a43cb`).
 const CAROUSEL: u16 = 5671;
 pub(crate) const NEXT: usize = 6;
@@ -49,32 +64,40 @@ const CANCEL: u16 = 2;
 /// Club offsets c from 0x120 to 0x5f7 lie at c + 0x278 in the team record.
 const CLUB_TO_TEAM: usize = 0x278;
 
-/// Their captions.
+/// Their captions: the ticket office's, the sponsors' and the agency's
+/// the file's.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
-    let more = [STAFF, PLAYERS, AMATEUR_PLAYERS, RUNNING, OTHER_COSTS];
-    for id in FIGURE_DIALOGS.into_iter().chain(more) {
+    let more = [STAFF, PLAYERS, AMATEUR_PLAYERS, RUNNING, OTHER_COSTS, MERCHANDISE];
+    let titled = [TICKETS, SPONSORS, AGENCY_ENGAGED];
+    for id in FIGURE_DIALOGS.into_iter().chain(more).chain(titled) {
         if let Some(dialog) = dialogs.get_mut(&id) {
-            dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
+            let text = if titled.contains(&id) { dialog.title.clone() } else { String::new() };
+            dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, text));
         }
     }
 }
 
 /// The dialog of a row: the players' of an amateur department is 453
-/// (team +0x872 set).
+/// (team +0x872 set); the merchandise, with an agency engaged, tells so.
 pub(crate) fn row_dialog(cx: &Cx, row: usize) -> u16 {
     let dialog = ROW_DIALOGS[row];
     if dialog == PLAYERS && own_team(cx).is_some_and(|t| t.linked()[0] >= 0) {
         AMATEUR_PLAYERS
+    } else if row == MERCHANDISE_ROW && agency_engaged(cx) {
+        AGENCY_ENGAGED
     } else {
         dialog
     }
 }
 
-/// The next row's dialog that is built, on or back from a row, if any.
-pub(crate) fn step(row: usize, choice: usize) -> Option<usize> {
+/// The next row's dialog that is built, on or back from a row, if any;
+/// the merchandise is stepped past while an agency has it.
+pub(crate) fn step(cx: &Cx, row: usize, choice: usize) -> Option<usize> {
     let rows = ROW_DIALOGS.len();
+    let engaged = agency_engaged(cx);
     (1..=rows)
         .map(|k| if choice == NEXT { (row + k) % rows } else { (row + rows - k) % rows })
+        .filter(|&r| !(engaged && r == MERCHANDISE_ROW))
         .find(|&r| BUILT.contains(&ROW_DIALOGS[r]))
 }
 
@@ -94,10 +117,7 @@ fn caption(cx: &Cx) -> String {
 fn open_calculation(cx: &Cx, view: &mut View, sliders: &[u16]) {
     let dialog = cx.dialog;
     set(view, dialog, CAPTION_ID, caption(cx));
-    if let Some(bar) = control(dialog, CAROUSEL).and_then(|c| view.value_mut(c)) {
-        bar.range = CAROUSEL_RANGE;
-        bar.set(1);
-    }
+    carousel(view, dialog);
     for &id in sliders {
         if let Some(c) = control(dialog, id) {
             view.controls[c].hidden = true;
@@ -491,9 +511,7 @@ impl Screen for Players {
             set(view, dialog, YOUTH_FIGURES.1, m(self.youth));
             self.show(cx, view);
         }
-        let details =
-            |t: Target| matches!(t, Target::Button(c) if dialog.controls[c].id == Some(DETAILS));
-        mark_inert(view, dialog, |t| !details(t));
+        mark_inert(view, dialog, |t| !is_button(dialog, t, DETAILS));
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -940,4 +958,478 @@ fn own_manager<'a>(cx: &'a Cx) -> Option<&'a a3_core::records::Manager> {
     let current = cx.state.season.as_ref()?.current;
     let records = cx.state.records.as_ref()?;
     records.managers.get(records.human_slot(current)?)
+}
+
+/// A club field past the team record's end, in the club's extra data.
+const CLUB_TO_EXTRA: usize = 0x148;
+
+/// Whether a target is the button with `id`.
+fn is_button(dialog: &Dialog, target: Target, id: u16) -> bool {
+    matches!(target, Target::Button(c) if dialog.controls[c].id == Some(id))
+}
+
+/// A push button that cannot be pressed: "---", disabled.
+fn lower_button(view: &mut View, dialog: &Dialog, id: u16) {
+    if let Some(b) = control(dialog, id).and_then(|c| view.controls[c].state.as_button_mut()) {
+        b.disabled = true;
+        b.text = Some(LOWER.to_owned());
+    }
+}
+
+/// A term in years: "ein Jahr" … "zehn Jahre", else "%d Jahre"
+/// (`FUN_00730bdc`).
+fn years_text(cx: &Cx, years: u8) -> String {
+    match years {
+        1..=10 => cx.game.text(YEARS + u16::from(years) - 1).to_owned(),
+        _ => super::finances::printf(cx.game.text(MANY_YEARS), &[&years]),
+    }
+}
+
+const YEARS: u16 = 1081;
+const MANY_YEARS: u16 = 1587;
+
+/// The ticket office (dialog 137, §3.1): this season's gates by
+/// competition, the season tickets, the league's prices, which the
+/// spinners change at once and for good, and the advance sales of the home
+/// matches ahead.
+#[derive(Default)]
+pub struct Tickets;
+
+const TICKETS: u16 = 137;
+const GATES_HEADING: u16 = 2439;
+const AVERAGE_GATE: u16 = 3668;
+const PRICE_FIGURES: [u16; 4] = [2402, 2403, 5790, 5793];
+const PRICE_SPINS: [u16; 4] = [2423, 2424, 5791, 5794];
+/// The league's prices of standing, the seats behind the goal and along
+/// the side, the boxes: the first of five each; the cups' side and
+/// standing prices the second.
+const LEAGUE_PRICES: [usize; 4] = [0x49c, 0x4a6, 0x4b0, 0x4ba];
+const CUP_PRICES: (usize, usize) = (0x4b2, 0x49e);
+/// The gates booked by competition: league, Europe, cup, friendlies.
+const GATE_FIGURES: [(u16, usize); 4] = [(2440, 0x8), (2441, 0x10), (2446, 0xc), (2442, 0x14)];
+const SEASON_TICKETS_FIGURE: u16 = 2444;
+const SEASON_TICKETS: usize = 0x498;
+const SALES_HEADING: u16 = 2445;
+const SALES_AVERAGE: u16 = 3312;
+const SALES_LIST: u16 = 2437;
+const MATCH_DATE: u16 = 1777;
+const LEAGUE_MATCH: u16 = 1692;
+const CUP_MATCH: u16 = 1694;
+/// The marks' texts: normal, +50%, +25%, halved (0x883f2c).
+const MARK_TEXTS: [u16; 4] = [1005, 1003, 1002, 1004];
+
+/// A row of the advance sales: the day, the kind, the opponent, the
+/// tickets sold, the league's mark or the cup's prices.
+struct SaleRow {
+    day: i16,
+    kind: u16,
+    opponent: (u8, i16),
+    sold: i32,
+    mark: Option<usize>,
+    prices: (i16, i16),
+}
+
+impl Screen for Tickets {
+    fn ids(&self) -> &[u16] {
+        &[TICKETS]
+    }
+
+    /// `0x4f7432`.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        carousel(view, dialog);
+        let (Some(team), Some(records)) = (own_team(cx), cx.state.records.as_ref()) else { return };
+        let booked = Accounts::booked(team);
+        for (id, o) in GATE_FIGURES {
+            set(view, dialog, id, money(game, booked.i32_(o).into()));
+        }
+        let season_tickets = team.get::<i32>(SEASON_TICKETS + CLUB_TO_TEAM);
+        set(view, dialog, SEASON_TICKETS_FIGURE, super::finances::count(season_tickets));
+        let games = team.home_games();
+        if games > 0
+            && let Some(c) = control(dialog, GATES_HEADING)
+        {
+            let sum =
+                team.gates().iter().take(usize::from(games)).fold(0i32, |s, &g| s.wrapping_add(g));
+            let text = super::finances::printf(
+                game.text(AVERAGE_GATE),
+                &[&dialog.controls[c].text, &(sum / i32::from(games))],
+            );
+            view.set_text(c, text);
+        }
+        for (k, (&figure, &spin)) in PRICE_FIGURES.iter().zip(&PRICE_SPINS).enumerate() {
+            let price = team.get::<i16>(LEAGUE_PRICES[k] + CLUB_TO_TEAM);
+            let table = a3_core::tickets::price_table(k);
+            if let Some(value) = control(dialog, spin).and_then(|c| view.value_mut(c)) {
+                value.range = (0, table.len() as i32 - 1);
+                value.set(a3_core::tickets::price_step(&table, price) as i32);
+            }
+            set(view, dialog, figure, money(game, price.into()));
+        }
+        super::seasonal_buttons(cx, view);
+        let (rows, average) = sales(cx, records, team);
+        if let Some(average) = average {
+            set(
+                view,
+                dialog,
+                SALES_HEADING,
+                super::finances::printf(game.text(SALES_AVERAGE), &[&average.to_string()]),
+            );
+        }
+        let texts = rows
+            .iter()
+            .map(|r| {
+                let date =
+                    records.globals.date_of(r.day).map_or_else(String::new, |d| match_date(cx, d));
+                let price = match r.mark {
+                    Some(m) => game.text(MARK_TEXTS[m]).to_owned(),
+                    None => format!("{}/{}", r.prices.0, money(game, r.prices.1.into())),
+                };
+                [
+                    date,
+                    game.text(r.kind).to_owned(),
+                    game.club_name(Some(records), r.opponent.0, r.opponent.1),
+                    super::finances::count(r.sold),
+                    price,
+                ]
+                .join("\t")
+            })
+            .collect::<Vec<_>>();
+        if let Some(list) = control(dialog, SALES_LIST).and_then(|c| view.list_mut(c)) {
+            list.inks = vec![None; texts.len()];
+            list.rows = texts;
+            list.selected = None;
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        if let Some(outcome) = carousel_input(cx, view, target) {
+            return outcome;
+        }
+        // A price written at once into the club (`0x4f8798`).
+        let Target::Spin { control: c, .. } = target else { return Outcome::Stay };
+        let Some(k) = PRICE_SPINS.iter().position(|&id| dialog.controls[c].id == Some(id)) else {
+            return Outcome::Stay;
+        };
+        let table = a3_core::tickets::price_table(k);
+        let at = view.value(c).map_or(0, |v| v.value) as usize;
+        let price = table[at.min(table.len() - 1)];
+        if let Some(team) = own_team_mut(cx) {
+            team.put(LEAGUE_PRICES[k] + CLUB_TO_TEAM, price);
+        }
+        set(view, dialog, PRICE_FIGURES[k], money(cx.game, price.into()));
+        Outcome::Stay
+    }
+}
+
+/// The date of a match: "14.9.2025" (text 1777).
+fn match_date(cx: &Cx, date: chrono::NaiveDate) -> String {
+    cx.game
+        .text(MATCH_DATE)
+        .replace("%1", &date.format("%-d").to_string())
+        .replace("%2", &date.format("%-m").to_string())
+        .replace("%3", &date.format("%Y").to_string())
+}
+
+/// The advance sales (`FUN_004f794f`): the home league matches from today
+/// on, then the home cup ties, sorted by day; and the mean sold of the
+/// league matches with a record. The European ties' lookup
+/// (`FUN_0062bd73`) is not traced: none are listed.
+fn sales(
+    cx: &Cx,
+    records: &a3_core::records::Records,
+    team: &a3_core::records::Team,
+) -> (Vec<SaleRow>, Option<i32>) {
+    let game = cx.game;
+    let today = records.globals.day();
+    let own = (team.country(), i16::from(team.number()));
+    let mut rows = Vec::new();
+    let (mut sold, mut counted) = (0i32, 0i32);
+    let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
+    for (i, f) in fixtures.iter().enumerate() {
+        let day = f.day as i16;
+        if !f.home || f.day < usize::from(today) {
+            continue;
+        }
+        let opponent = (own.0, f.opponent);
+        let sale = a3_core::tickets::sale(records, own, opponent, day);
+        if let Some(s) = sale {
+            sold = sold.wrapping_add(s.sold);
+            counted += 1;
+        }
+        rows.push(SaleRow {
+            day,
+            kind: LEAGUE_MATCH,
+            opponent,
+            sold: sale.map_or(0, |s| s.sold),
+            mark: Some(a3_core::tickets::matchday_mark(team, i as i32 + 1)),
+            prices: (0, 0),
+        });
+    }
+    let ties = a3_core::tickets::cup_ties(
+        records,
+        team,
+        &game.rules.forecast.tickets,
+        &game.calendar,
+        usize::from(today),
+    );
+    for t in ties.iter().filter(|t| t.home && !t.final_tie) {
+        let (day, opponent) = (t.day as i16, (own.0, t.number as i16));
+        let sale = a3_core::tickets::sale(records, own, opponent, day);
+        let price = |o: usize| team.get::<i16>(o + CLUB_TO_TEAM);
+        rows.push(SaleRow {
+            day,
+            kind: CUP_MATCH,
+            opponent: (t.country, t.number as i16),
+            sold: sale.map_or(0, |s| s.sold),
+            mark: None,
+            prices: sale
+                .map_or((price(CUP_PRICES.0), price(CUP_PRICES.1)), |s| (s.prices[2], s.prices[0])),
+        });
+    }
+    // The game's exchange sort.
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            if rows[i].day > rows[j].day {
+                rows.swap(i, j);
+            }
+        }
+    }
+    (rows, (counted > 0).then(|| sold / counted))
+}
+
+/// The arrow bar in its middle.
+fn carousel(view: &mut View, dialog: &Dialog) {
+    if let Some(bar) = control(dialog, CAROUSEL).and_then(|c| view.value_mut(c)) {
+        bar.range = CAROUSEL_RANGE;
+        bar.set(1);
+    }
+}
+
+/// The sponsors (dialog 125, §4.1): the main sponsor's contract, the
+/// sponsor pool, the boards and the outfitter. From the finances every
+/// input is disabled; only the contract's details (not built), the arrow
+/// bar, OK and cancel answer.
+#[derive(Default)]
+pub struct Sponsors;
+
+const SPONSORS: u16 = 125;
+const SPONSOR_NAME: u16 = 2349;
+const SPONSOR_LOGO: u16 = 2348;
+const SPONSOR_TERM: u16 = 2350;
+const CONTRACT_DETAILS: u16 = 2351;
+const LAST_FEE_FIGURE: u16 = 2361;
+const FEE_FIGURE: u16 = 2360;
+const LAST_MEMBERS_FIGURE: u16 = 2359;
+const MEMBERS_FIGURE: u16 = 2358;
+const POOL_FIGURE: u16 = 2357;
+const BOARDS_FIGURE: u16 = 5784;
+const BOARDS_DETAILS: u16 = 5732;
+const OUTFITTER_FIGURE: u16 = 6193;
+const OUTFITTER_DETAILS: u16 = 6194;
+/// The pool's fee and its planned members, the members booked; last
+/// season's fee (in the extra data).
+const FEE: usize = 0x504;
+const PLANNED_MEMBERS: usize = 0x1fc;
+const BOOKED_MEMBERS: usize = 0x304;
+const LAST_FEE: usize = 0x8ec;
+/// The main sponsor: the years its contract runs, its number.
+const CONTRACT_YEARS: usize = 0x509;
+const SPONSOR: usize = 0x4ea;
+/// A logo for each sponsor; numbers past the last have the blank one.
+const LOGO: &str = "Banden/Kom";
+const LAST_LOGO: i16 = 480;
+const NO_LOGO: i16 = 999;
+/// The boards: let to an agency for a sum, or one by one (fourteen of
+/// eight bytes: let, how many, the price); the outfitter and its sum.
+const BOARDS_AGENCY: usize = 0x5a1;
+const BOARDS_SUM: usize = 0x5a4;
+const BOARDS: usize = 0x530;
+const BOARD_COUNT: usize = 14;
+const OUTFITTER: usize = 0x5b1;
+const OUTFITTER_SUM: usize = 0x5b4;
+
+impl Screen for Sponsors {
+    fn ids(&self) -> &[u16] {
+        &[SPONSORS]
+    }
+
+    /// `0x5728e4` in view mode.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        carousel(view, dialog);
+        let (Some(team), Some(records)) = (own_team(cx), cx.state.records.as_ref()) else { return };
+        let club = |o: usize| o + CLUB_TO_TEAM;
+        let last_fee = super::finances::own_extra(game, cx)
+            .map_or(0, |(_, e)| e.get::<i32>(LAST_FEE - CLUB_TO_EXTRA));
+        set(view, dialog, LAST_FEE_FIGURE, money(game, last_fee.into()));
+        let booked = team.get::<i16>(club(BOOKED_MEMBERS));
+        set(view, dialog, LAST_MEMBERS_FIGURE, booked.to_string());
+        let (members, fee) = (team.get::<u16>(club(PLANNED_MEMBERS)), team.get::<i32>(club(FEE)));
+        set(view, dialog, MEMBERS_FIGURE, members.to_string());
+        set(view, dialog, FEE_FIGURE, money(game, fee.into()));
+        let pool = i32::from(members).wrapping_mul(fee);
+        set(view, dialog, POOL_FIGURE, money(game, pool.into()));
+        let years = team.get::<u8>(club(CONTRACT_YEARS));
+        if years != 0 {
+            let number = team.get::<i16>(club(SPONSOR));
+            let logo = if number > LAST_LOGO { NO_LOGO } else { number };
+            if let Some(bitmap) = control(dialog, SPONSOR_LOGO).and_then(|c| view.bitmap_mut(c)) {
+                bitmap.picture = Some(Picture {
+                    black_clear: false,
+                    ..Picture::file(format!("{LOGO}{logo}.bmp"))
+                });
+            }
+            set(view, dialog, SPONSOR_NAME, records.sponsor_name(number).unwrap_or_default());
+            if let Some(c) = control(dialog, SPONSOR_TERM) {
+                let text =
+                    super::finances::printf(&dialog.controls[c].text, &[&years_text(cx, years)]);
+                view.set_text(c, text);
+            }
+        } else {
+            set(view, dialog, SPONSOR_NAME, LOWER.to_owned());
+            set(view, dialog, SPONSOR_TERM, LOWER.to_owned());
+            lower_button(view, dialog, CONTRACT_DETAILS);
+        }
+        // `FUN_005730e5`: what the boards and the outfitter bring.
+        let boards = if team.get::<u8>(club(BOARDS_AGENCY)) != 0 {
+            team.get::<i32>(club(BOARDS_SUM))
+        } else {
+            (0..BOARD_COUNT).fold(0i32, |sum, i| {
+                let at = club(BOARDS + 8 * i);
+                if team.get::<u8>(at + 1) == 0 {
+                    return sum;
+                }
+                let count = i32::from(team.get::<u8>(at + 2));
+                sum.wrapping_add(count.wrapping_mul(team.get::<i32>(at + 4)))
+            })
+        };
+        set(view, dialog, BOARDS_FIGURE, money(game, boards.into()));
+        let outfitter = if team.get::<u8>(club(OUTFITTER)) != 0 {
+            team.get::<i32>(club(OUTFITTER_SUM))
+        } else {
+            0
+        };
+        set(view, dialog, OUTFITTER_FIGURE, money(game, outfitter.into()));
+        lower_button(view, dialog, BOARDS_DETAILS);
+        lower_button(view, dialog, OUTFITTER_DETAILS);
+        // The contract's details (246) are not built.
+        mark_inert(view, dialog, |t| !is_button(dialog, t, CONTRACT_DETAILS));
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        carousel_input(cx, view, target).unwrap_or(Outcome::Stay)
+    }
+}
+
+/// The merchandise (dialog 115, §5.1): the planned and the actual income,
+/// the agencies' offers (none from the finances) and the range of one's
+/// own (not built).
+#[derive(Default)]
+pub struct Merchandise;
+
+const MERCHANDISE: u16 = 115;
+const AGENCY_FIGURES: [u16; 4] = [2205, 2207, 2206, 2208];
+const AGENCY_DETAILS: [u16; 2] = [6020, 6021];
+const PLANNED_FIGURE: u16 = 2216;
+const ACTUAL_FIGURE: u16 = 6019;
+const MERCHANDISE_SLIDER: u16 = 2203;
+const RANGE_DETAILS: u16 = 2204;
+const MERCHANDISE_OK: u16 = 2214;
+/// The merchandise in the plan and as booked; an agency's: which one
+/// (from 1), its years, its sum.
+const MERCHANDISE_INCOME: usize = 0xe4;
+const AGENCY: usize = 0x5a8;
+const AGENCY_YEARS: usize = 0x5a9;
+const AGENCY_SUM: usize = 0x5ac;
+
+impl Screen for Merchandise {
+    fn ids(&self) -> &[u16] {
+        &[MERCHANDISE]
+    }
+
+    /// `0x4e6d3c` in view mode, no agency engaged.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        open_calculation(cx, view, &[MERCHANDISE_SLIDER]);
+        let Some(team) = own_team(cx) else { return };
+        let (plan, booked) = (Accounts::plan(team), Accounts::booked(team));
+        set(view, dialog, PLANNED_FIGURE, money(game, plan.i32_(MERCHANDISE_INCOME).into()));
+        for id in AGENCY_FIGURES {
+            set(view, dialog, id, LOWER.to_owned());
+        }
+        for id in AGENCY_DETAILS {
+            lower_button(view, dialog, id);
+        }
+        let engaged = team.get::<u8>(AGENCY_YEARS + CLUB_TO_TEAM) != 0;
+        let actual = if engaged {
+            team.get::<i32>(AGENCY_SUM + CLUB_TO_TEAM)
+        } else {
+            booked.i32_(MERCHANDISE_INCOME)
+        };
+        set(view, dialog, ACTUAL_FIGURE, money(game, actual.into()));
+        if engaged {
+            lower_button(view, dialog, RANGE_DETAILS);
+        }
+        // The own range (56) is not built.
+        mark_inert(view, dialog, |t| !is_button(dialog, t, RANGE_DETAILS));
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        if let Target::Button(c) = target
+            && cx.dialog.controls[c].id == Some(MERCHANDISE_OK)
+        {
+            return Outcome::Close(Reply::Ok);
+        }
+        carousel_input(cx, view, target).unwrap_or(Outcome::Stay)
+    }
+}
+
+/// An agency has taken the merchandise on (dialog 130, §5.2): which, and
+/// for how long — the sum the game passes along has no place in the text.
+#[derive(Default)]
+pub struct AgencyEngaged;
+
+pub(crate) const AGENCY_ENGAGED: u16 = 130;
+const ENGAGED_AGENCY: u16 = 2384;
+const ENGAGED_TERM: u16 = 2385;
+const AGENCY_NAMES: u16 = 1627;
+
+impl Screen for AgencyEngaged {
+    fn ids(&self) -> &[u16] {
+        &[AGENCY_ENGAGED]
+    }
+
+    /// `0x4e2384`.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let dialog = cx.dialog;
+        let Some(team) = own_team(cx) else { return };
+        let agency = team.get::<u8>(AGENCY + CLUB_TO_TEAM);
+        let years = team.get::<u8>(AGENCY_YEARS + CLUB_TO_TEAM);
+        if let Some(k) = agency.checked_sub(1) {
+            set(view, dialog, ENGAGED_AGENCY, cx.game.text(AGENCY_NAMES + u16::from(k)).to_owned());
+        }
+        if let Some(c) = control(dialog, ENGAGED_TERM) {
+            let text = super::finances::printf(&dialog.controls[c].text, &[&years_text(cx, years)]);
+            view.set_text(c, text);
+        }
+        super::popups::ball(view, cx);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&cx.dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// Whether an agency has the merchandise: its row then shows 130 when
+/// opened and is stepped past when paged to.
+fn agency_engaged(cx: &Cx) -> bool {
+    own_team(cx).is_some_and(|t| t.get::<i8>(AGENCY_YEARS + CLUB_TO_TEAM) > 0)
 }

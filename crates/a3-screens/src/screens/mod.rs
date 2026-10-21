@@ -148,6 +148,10 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(kalkulation::Players::default()),
         Box::new(kalkulation::Running::default()),
         Box::new(kalkulation::OtherCosts::default()),
+        Box::new(kalkulation::Tickets),
+        Box::new(kalkulation::Sponsors),
+        Box::new(kalkulation::Merchandise),
+        Box::new(kalkulation::AgencyEngaged),
         Box::new(squad::SquadMenu::default()),
         Box::new(squad::CurrentSquad::default()),
         Box::new(squad::MarketValues::default()),
@@ -307,6 +311,109 @@ pub(crate) fn indices(dialog: &Dialog, kind: impl Fn(&Kind) -> bool) -> Vec<usiz
     (0..dialog.controls.len()).filter(|&i| kind(&dialog.controls[i].kind)).collect()
 }
 
+/// OK's and cancel's pictures by the day (`FUN_0043ff5f`, the tables at
+/// 0x878ed8 and 0x878f68): small and big, normal and pointed at, for
+/// Christmas, the manager's birthday, autumn, carnival, spring, Easter,
+/// summer, St Valentine's and winter.
+const SEASONAL_OK: [[u16; 4]; 9] = [
+    [2891, 2892, 1086, 2511],
+    [2883, 2884, 1291, 1292],
+    [2879, 2880, 1004, 1005],
+    [2887, 2888, 1272, 1273],
+    [2887, 2888, 1272, 1273],
+    [2893, 2894, 2514, 2515],
+    [2877, 2878, 1002, 1003],
+    [2889, 2890, 1274, 1287],
+    [2881, 2882, 2591, 2513],
+];
+const SEASONAL_CANCEL: [[u16; 4]; 9] = [
+    [2909, 2910, 1268, 1269],
+    [2901, 2902, 1226, 1227],
+    [2897, 2898, 1256, 1257],
+    [2905, 2906, 1260, 1261],
+    [2905, 2906, 1260, 1261],
+    [2911, 2912, 1262, 1263],
+    [2895, 2896, 1264, 1265],
+    [2907, 2908, 1266, 1267],
+    [2899, 2900, 1270, 1271],
+];
+/// A button narrower than this takes the small pictures.
+const SMALL_BUTTON: f32 = 32.0;
+
+/// Which pictures the day gives OK and cancel.
+fn season_look(cx: &Cx) -> Option<usize> {
+    let records = cx.state.records.as_ref()?;
+    let [d, m, year] = records.globals.date();
+    let today = i32::from(records.globals.day_of_year());
+    let easter = easter(i32::from(year));
+    let manager = records.managers.get(records.human_slot(cx.state.season.as_ref()?.current)?);
+    let birthday =
+        manager.is_some_and(|r| u16::from(r.birth_day()) == d && u16::from(r.birth_month()) == m);
+    let between = |from: (u16, u16), to: (u16, u16)| {
+        let at = (m, d);
+        (from.1, from.0) <= at && at <= (to.1, to.0)
+    };
+    Some(if today == easter {
+        5
+    } else if today == easter - 49 {
+        3
+    } else if birthday {
+        1
+    } else if (d, m) == (24, 12) {
+        0
+    } else if (d, m) == (14, 2) {
+        7
+    } else if between((21, 3), (20, 6)) {
+        4
+    } else if between((21, 6), (22, 9)) {
+        6
+    } else if between((23, 9), (20, 12)) {
+        2
+    } else {
+        8
+    })
+}
+
+/// Easter Sunday's day of the year as the game reckons it
+/// (`FUN_00435d1f`).
+fn easter(year: i32) -> i32 {
+    let golden = year % 19 + 1;
+    let century = year / 100 + 1;
+    let shift = century * 3 / 4 - 12;
+    let mut epact = (golden * 11 + (century * 8 + 5) / 25 + 15 - shift) % 30;
+    if (epact == 25 && golden > 11) || epact == 24 {
+        epact += 1;
+    }
+    let mut moon = 44 - epact;
+    if moon < 21 {
+        moon = 74 - epact;
+    }
+    let leap = i32::from((year % 4 == 0 && year % 100 != 0) || year % 400 == 0);
+    moon - (year * 5 / 4 - shift - 10 + moon) % 7 + leap + 66
+}
+
+/// Gives OK and cancel the day's pictures (`FUN_0043ff5f`).
+pub(crate) fn seasonal_buttons(cx: &Cx, view: &mut View) {
+    let Some(look) = season_look(cx) else { return };
+    let dialog = cx.dialog;
+    for (id, table) in [(1, &SEASONAL_OK), (2, &SEASONAL_CANCEL)] {
+        let Some(c) = control(dialog, id) else { continue };
+        if !matches!(dialog.controls[c].kind, Kind::Button { .. }) {
+            continue;
+        }
+        let [small, small_hover, big, big_hover] = table[look];
+        let pictures = if dialog.controls[c].rect.width() < SMALL_BUTTON {
+            (small, small_hover)
+        } else {
+            (big, big_hover)
+        };
+        if let Some(button) = view.controls[c].state.as_button_mut() {
+            button.images = Some(pictures);
+            button.ready = vec![pictures.0, pictures.1];
+        }
+    }
+}
+
 /// Marks the dialog's buttons and options that do nothing yet — all those
 /// `works` does not answer for — for the looks to cross out.
 pub(crate) fn mark_inert(view: &mut View, dialog: &Dialog, works: impl Fn(Target) -> bool) {
@@ -331,5 +438,15 @@ pub(crate) fn ok_or_cancel(dialog: &Dialog, target: Target) -> (bool, bool) {
     match target {
         Target::Button(i) => (is_ok(&dialog.controls[i]), is_cancel(&dialog.controls[i])),
         _ => (false, false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn easter_falls_as_the_game_reckons_it() {
+        // 20 April 2025 and 5 April 2026, counted from 1 January as 1.
+        assert_eq!(super::easter(2025), 110);
+        assert_eq!(super::easter(2026), 95);
     }
 }

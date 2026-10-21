@@ -1345,6 +1345,14 @@ impl Records {
         Some(text(self.block(&format!("0x1a28dd8[{index}]"))?, LEN))
     }
 
+    /// A sponsor's name, by its number from 1 (`0xbdeea0`, a name every
+    /// 0x16 bytes; the block holds the object past its 0x20 bytes of head).
+    pub fn sponsor_name(&self, number: i16) -> Option<String> {
+        const LEN: usize = 0x16;
+        let k = usize::try_from(number).ok()?.checked_sub(1)?;
+        Some(text(self.block("0xbdee80")?.get(k * LEN..)?, LEN))
+    }
+
     /// The same, to change.
     pub fn block_mut(&mut self, name: &str) -> Option<&mut [u8]> {
         self.save.blocks.iter_mut().find(|b| b.name == name).map(|b| b.data.as_mut_slice())

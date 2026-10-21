@@ -293,9 +293,22 @@ pub fn stand(records: &Records, team: &Team) -> Option<Stand> {
 pub type Record = [u32; 3];
 
 /// A club's league fixtures through the season, as the calendar has them
-/// (`FUN_0062af24`): the opponent's team number and whether at home. Only a
-/// club of a country kept in full, in a league.
+/// (`FUN_0062af24`): the opponent's team number and whether at home.
 fn fixtures(records: &Records, calendar: &Calendar, team: &Team) -> Vec<(i16, bool)> {
+    fixture_days(records, calendar, team).into_iter().map(|f| (f.opponent, f.home)).collect()
+}
+
+/// A league fixture: its day, the opponent's team number, whether at home.
+#[derive(Clone, Copy, Debug)]
+pub struct Fixture {
+    pub day: usize,
+    pub opponent: i16,
+    pub home: bool,
+}
+
+/// A club's league fixtures with their days (`FUN_0062af24`). Only a club
+/// of a country kept in full, in a league.
+pub fn fixture_days(records: &Records, calendar: &Calendar, team: &Team) -> Vec<Fixture> {
     const FIRST_DAY: usize = 12;
     const LAST_DAY: usize = 363;
     const MOST: usize = 46;
@@ -310,11 +323,11 @@ fn fixtures(records: &Records, calendar: &Calendar, team: &Team) -> Vec<(i16, bo
     };
     let place = usize::from(team.league_place());
     (FIRST_DAY..=LAST_DAY)
-        .filter_map(|day| calendar.matchday(row, day))
-        .filter_map(|matchday| league.pair(matchday - 1, place))
-        .map(|(home, away)| {
+        .filter_map(|day| Some((day, calendar.matchday(row, day)?)))
+        .filter_map(|(day, matchday)| Some((day, league.pair(matchday - 1, place)?)))
+        .map(|(day, (home, away))| {
             let other = if home == place { away } else { home };
-            (league.team(other), home == place)
+            Fixture { day, opponent: league.team(other), home: home == place }
         })
         .take(MOST)
         .collect()

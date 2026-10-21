@@ -26,6 +26,8 @@ pub struct ButtonState {
     /// A text a bitmap button draws on its picture, in the middle top to
     /// bottom (`CMyBitmapButton`'s paint, `0x796da7`).
     pub label: Option<Label>,
+    /// Another text than the dialog file's, for a push button.
+    pub text: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +94,8 @@ impl ButtonState {
         if let (true, Some(font)) = (labelled, paint.font()) {
             // The dialog file breaks a label into lines with "\n": a block
             // in the middle, each line centred.
-            let lines: Vec<&str> = paint.control.text.split("\\n").collect();
+            let text = self.text.as_deref().unwrap_or(&paint.control.text);
+            let lines: Vec<&str> = text.split("\\n").collect();
             let height = font.height() as i32;
             let top = r.min.y as i32 + (r.height() as i32 - lines.len() as i32 * height) / 2;
             for (i, line) in lines.iter().enumerate() {

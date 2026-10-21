@@ -1601,6 +1601,35 @@ mod tests {
         let manager = records.humans().next().unwrap();
         let team = records.team(manager.country(), manager.team()).unwrap();
         assert_eq!(team.get::<u8>(0x5e1 + 0x278), 1);
+        // The ticket office lists the home matches ahead; its standing
+        // price, raised, is written at once and kept though it is
+        // cancelled.
+        let tickets = format!("{open}\nnow click at 88 64\nuntil dialog 137");
+        let runner = on_save(&game, "Probe1", &tickets).unwrap();
+        let list = control(&game.dialogs[&137], 2437).unwrap();
+        let first = runner.host.view().list(list).unwrap().rows[0].clone();
+        assert_eq!(first, "31.8.2025\tLigaspiel\tFC Ingolstadt 04\t0\tnormal");
+        let raised = format!("{tickets}\nnow spin 2423 up\nnow click at 547 449\nuntil dialog 417");
+        let price = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            records.team(manager.country(), manager.team()).unwrap().get::<i16>(0x49c + 0x278)
+        };
+        assert_eq!(price(&runner), 15);
+        assert_eq!(price(&on_save(&game, "Probe1", &raised).unwrap()), 16);
+        // Back from the tickets to the shares, round on to the TV money;
+        // from the sponsors on to the merchandise, whose OK closes it.
+        let round = format!(
+            "{tickets}\nnow click at 440 439\nuntil dialog 446\nnow click at 479 439\n\
+             until dialog 137\nnow click at 479 439\nuntil dialog 448"
+        );
+        on_save(&game, "Probe1", &round).unwrap();
+        let merchandise = format!(
+            "{open}\nnow click at 88 133\nuntil dialog 125\nnow click at 479 439\n\
+             until dialog 115\nnow click at 606 449\nuntil dialog 417"
+        );
+        on_save(&game, "Probe1", &merchandise).unwrap();
     }
 
     #[test]

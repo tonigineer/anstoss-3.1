@@ -117,6 +117,9 @@ const LEAGUE_CODES: u32 = 0x3c;
 const CUP_ROUND: u32 = 0x3f;
 const ONE_LEG: u32 = 0x8_0000;
 const FINAL_ONE_LEG: u32 = 0x8008_0000;
+const TURNED: u32 = 0x8000_0000;
+/// A second leg is played two weeks after the first.
+const SECOND_LEG: usize = 14;
 /// What the gates come to per match: a part of it, and percent.
 const GATE_SHARE: f64 = 0.86;
 const PERCENT: f64 = 100.0;
@@ -301,29 +304,68 @@ fn gates(club: &Club, tables: &TicketTables, start: i32, attendance: i32, played
 
 /// A matchday's mark, 0 to 3 (`FUN_00671b5a`).
 fn mark(club: &Club, matchday: i32) -> usize {
+    matchday_mark(club.team, matchday)
+}
+
+/// A matchday's mark, 0 to 3 (`FUN_00671b5a`): normal, +50%, +25%,
+/// halved.
+pub fn matchday_mark(team: &Team, matchday: i32) -> usize {
     if !(1..=MARKED_MATCHDAYS).contains(&matchday) {
         return 0;
     }
     let m = (matchday - 1) as usize;
-    usize::from((club.team.get::<u8>(MARKS + CLUB_TO_TEAM + m / 4) >> ((m % 4) * 2)) & 3)
+    usize::from((team.get::<u8>(MARKS + CLUB_TO_TEAM + m / 4) >> ((m % 4) * 2)) & 3)
 }
 
-/// Whether the club plays in a round of its country's cup
-/// (`FUN_006d1104`).
-fn in_cup_round(club: &Club, tables: &TicketTables, code: u32) -> bool {
-    let Some(cup) = club.cup() else { return false };
+/// The opponent of the club in a round of its country's cup, if it plays
+/// in it, and whether at home (`FUN_006d1104`); a code with the top bit
+/// has the sides the other way round (`FUN_00676b58`).
+fn cup_pairing(club: &Club, tables: &TicketTables, code: u32) -> Option<(u8, u16, bool)> {
+    let cup = club.cup()?;
     let cup_type = usize::try_from(word(cup, CUP_TYPE_AT)).unwrap_or(0);
     let (first, count) = tables.round(cup_type, (code & CUP_ROUND) as usize);
-    (first..first.saturating_add(count)).any(|q| {
+    let turned = code & TURNED != 0;
+    (first..first.saturating_add(count)).find_map(|q| {
         let at = PAIRINGS + usize::try_from(q).unwrap_or(0) * PAIRING;
         let side = |o: usize| (cup.get(at + o).copied().unwrap_or(0), word(cup, at + o + 2) as u16);
         let ((hc, hn), (ac, an)) = (side(0), side(4));
-        club.is(hc, hn) || club.is(ac, an)
+        if club.is(hc, hn) {
+            Some((ac, an, !turned))
+        } else if club.is(ac, an) {
+            Some((hc, hn, turned))
+        } else {
+            None
+        }
     })
 }
 
-/// Whether the club plays a cup tie on a cup day (`FUN_0062d181`): not
+/// The club's cup tie on a cup day, if it plays one (`FUN_0062d181`): not
 /// when the international row or a league matchday has the day.
+fn cup_tie_on(
+    club: &Club,
+    tables: &TicketTables,
+    calendar: &Calendar,
+    row: usize,
+    day: usize,
+) -> Option<(u8, u16, bool)> {
+    if calendar.entry(0, day) != 0 {
+        return None;
+    }
+    let league = calendar.row(club.country.into(), club.team.level().into());
+    if league.is_some_and(|r| {
+        let e = calendar.entry(r, day);
+        e != 0 && e < LEAGUE_CODES
+    }) {
+        return None;
+    }
+    let e = calendar.entry(row, day);
+    if e & KIND != NATIONAL_CUP {
+        return None;
+    }
+    cup_pairing(club, tables, e)
+}
+
+/// Whether the club plays a cup tie on a cup day.
 fn plays_cup(
     club: &Club,
     tables: &TicketTables,
@@ -331,18 +373,7 @@ fn plays_cup(
     row: usize,
     day: usize,
 ) -> bool {
-    if calendar.entry(0, day) != 0 {
-        return false;
-    }
-    let league = calendar.row(club.country.into(), club.team.level().into());
-    if league.is_some_and(|r| {
-        let e = calendar.entry(r, day);
-        e != 0 && e < LEAGUE_CODES
-    }) {
-        return false;
-    }
-    let e = calendar.entry(row, day);
-    e & KIND == NATIONAL_CUP && in_cup_round(club, tables, e)
+    cup_tie_on(club, tables, calendar, row, day).is_some()
 }
 
 /// The ties ahead in the country's cup, counted at its next round's day
@@ -484,4 +515,124 @@ pub fn league_days(records: &Records, team: &Team) -> (i32, i32) {
         i32::from(word(league, LEAGUE_PLAYED))
     };
     (matchdays, played)
+}
+
+/// A tie of a club in its country's cup: the opponent's country and
+/// number, whether at home, its day, whether the one-leg final.
+#[derive(Clone, Copy, Debug)]
+pub struct CupTie {
+    pub country: u8,
+    pub number: u16,
+    pub home: bool,
+    pub day: usize,
+    pub final_tie: bool,
+}
+
+/// The club's ties at the next round of its country's cup from a day on,
+/// a second leg two weeks after the first (`FUN_0062b8e0`). The
+/// pre-season's tournaments (`FUN_006ccbf0`) are not traced and not
+/// listed.
+pub fn cup_ties(
+    records: &Records,
+    team: &Team,
+    tables: &TicketTables,
+    calendar: &Calendar,
+    from: usize,
+) -> Vec<CupTie> {
+    let club = Club { records, team, country: team.country(), number: team.number() };
+    if records.countries.kind(usize::from(club.country)) != 1 {
+        return Vec::new();
+    }
+    let Some(row) = calendar.row(club.country.into(), 0) else { return Vec::new() };
+    let mut ties = Vec::new();
+    for day in from..DAYS {
+        let e = calendar.entry(row, day);
+        if e & KIND != NATIONAL_CUP {
+            continue;
+        }
+        if let Some((country, number, home)) = cup_tie_on(&club, tables, calendar, row, day) {
+            let final_tie = (e & 0x1f) == FINAL_ROUND as u32 && (e & FINAL_ONE_LEG) == ONE_LEG;
+            let first = CupTie { country, number, home, day, final_tie };
+            ties.push(first);
+            if !final_tie && e & ONE_LEG == 0 {
+                ties.push(CupTie { home: !home, day: day + SECOND_LEG, ..first });
+            }
+        }
+        break;
+    }
+    ties
+}
+
+/// The ticket office's sales (`0x1c5c468`, thirty records of 0x24 bytes):
+/// the home side, the away side, the day, the tickets sold, whether either
+/// order of the sides matches, the four prices.
+const SALES_AT: &str = "0x1c5c468";
+const SALES: usize = 30;
+const SALE: usize = 0x24;
+const SALE_DAY: usize = 0xc;
+const SALE_SOLD: usize = 0x14;
+const SALE_OPEN: usize = 0x18;
+const SALE_PRICES: usize = 0x1a;
+
+/// A match's advance sales: the tickets sold and the prices of the four
+/// classes, standing first.
+#[derive(Clone, Copy, Debug)]
+pub struct Sale {
+    pub sold: i32,
+    pub prices: [i16; 4],
+}
+
+/// The advance sales of a match, if the office has a record of them
+/// (`FUN_0077c9c2`): an open record matches the sides either way round.
+pub fn sale(records: &Records, home: (u8, i16), away: (u8, i16), day: i16) -> Option<Sale> {
+    let block = records.block(SALES_AT)?;
+    (0..SALES).find_map(|i| {
+        let r = block.get(i * SALE..(i + 1) * SALE)?;
+        let side = |o: usize| (r[o], word(r, o + 2));
+        if word(r, SALE_DAY) != day {
+            return None;
+        }
+        let (a, b) = (side(0), side(4));
+        let open = word(r, SALE_OPEN) != 0;
+        let found = (a == home && b == away) || (open && a == away && b == home);
+        found.then(|| Sale {
+            sold: long(r, SALE_SOLD),
+            prices: std::array::from_fn(|k| word(r, SALE_PRICES + 2 * k)),
+        })
+    })
+}
+
+/// The prices a class can be given (`FUN_00686684`, the factor 1.0):
+/// standing 5 to 40, seats 10 to 90, boxes 50 to 210 by twos.
+pub fn price_table(class: usize) -> Vec<i16> {
+    match class {
+        0 => (5..=40).collect(),
+        3 => (50..=210).step_by(2).collect(),
+        _ => (10..=90).collect(),
+    }
+}
+
+/// Where a price stands in its table (`FUN_00678260` and its kin): at the
+/// first entry it does not pass, short of the last two; the top two put it
+/// below them.
+pub fn price_step(table: &[i16], price: i16) -> usize {
+    let last = table.len().saturating_sub(1);
+    (0..last.saturating_sub(2)).find(|&i| price <= table[i]).unwrap_or(last.saturating_sub(2))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_price_stands_at_its_step_but_the_top_two_below() {
+        let standing = price_table(0);
+        assert_eq!((standing.len(), price_table(1).len(), price_table(3).len()), (36, 81, 81));
+        assert_eq!(price_step(&standing, 17), 12);
+        assert_eq!(price_step(&standing, 37), 32);
+        assert_eq!(price_step(&standing, 39), 33);
+        assert_eq!(price_step(&standing, 40), 33);
+        assert_eq!(price_step(&price_table(3), 150), 50);
+        assert_eq!(price_step(&price_table(2), 43), 33);
+    }
 }
