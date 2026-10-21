@@ -1,8 +1,11 @@
 //! The youth: the list of youths without a pre-contract, whom other clubs
-//! may poach, and each club's youth team (VERLAENGERUNG-ABWERBEN.md §3 in
-//! the RE repo).
+//! may poach, each club's youth team and its pool of amateurs, and their
+//! way up into the squad (VERLAENGERUNG-ABWERBEN.md §3, JUGEND-AMATEURE.md
+//! §1–3 in the RE repo).
 
-use crate::records::Records;
+use crate::data::Data;
+use crate::records::{Player, Records};
+use crate::season::ClubState;
 
 /// The youth list (`0xb77338`, its entries from +0x20): 50 slots of 8
 /// bytes — the player, his club's country and number, the day he was
@@ -12,12 +15,12 @@ const LIST_SIZE: usize = 50;
 const ENTRY: usize = 8;
 
 /// A club's youth team (`0xb71b48[i]`, from the object's +0x20): its
-/// youths by class (C, B, A), those the club made, their count, a second
-/// count, their ids.
+/// youths by class (C, B, A), those the club made, their count, those
+/// moved up into the squad, their ids.
 const TEAM_AT: u32 = 0xb71b48;
 const CLASSES: usize = 0;
 const COUNT: usize = 7;
-const SECOND_COUNT: usize = 8;
+const MOVED_UP: usize = 8;
 const IDS: usize = 0xa;
 /// The most a youth team holds (`FUN_0066ae46`).
 const MOST: usize = 20;
@@ -29,6 +32,32 @@ pub const FULL: usize = 15;
 const C_YOUTH_AGE: i32 = 15;
 const B_YOUTH_AGE: i32 = 17;
 const SEASON_MONTH: u8 = 7;
+
+/// A club's amateur pool (`0x8dd4c8[i]`, from +0x20): five who moved up,
+/// then five amateurs.
+const POOL_AT: u32 = 0x8dd4c8;
+const POOL: usize = 5;
+
+/// The youth talks booked (`0x1c53b88`, from +0x20): a count, then
+/// entries of 10 bytes from +2, the player first (`FUN_00763b0c`).
+const YOUTH_TALKS_AT: u32 = 0x1c53b88;
+const YOUTH_TALK: usize = 10;
+
+/// R+0x352: his goals as a youth or an amateur of the pool; R+0x1b4 bit
+/// 30: the youth his age group supports ("Förd.").
+const YOUTH_GOALS: usize = 0x352;
+pub const SUPPORTED: u32 = 0x4000_0000;
+/// On trial with the professionals: R+0x271's low four bits, and R+0x26f's
+/// bit for a youth or an amateur (`FUN_007069eb`, `FUN_0070699b`).
+const TRIAL_MASK: u8 = 0x0f;
+const TRIAL: u8 = 8;
+const YOUTH_TRIAL: u8 = 0x10;
+const AMATEUR_TRIAL: u8 = 0x20;
+/// A pre-contract runs ten years (`FUN_004d86a3`).
+const PRE_CONTRACT_YEARS: u16 = 10;
+const CONTRACT_YEAR: u16 = 0xfff;
+/// Shirt numbers run from 1 to 98 (`FUN_00407abb`).
+const SHIRTS: std::ops::Range<u8> = 1..99;
 
 /// A career station: 0x14 bytes from the record's +0x20 — begun, ended,
 /// fee, goals and appearances, club, the strength with a youth team's bit.
@@ -96,14 +125,14 @@ fn team_block(country: u8, number: u16, records: &Records) -> Option<String> {
     Some(format!("{TEAM_AT:#x}[{index}]"))
 }
 
-/// A club's youths, and the second count that adds to them.
+/// A club's youths, and those moved up, who count against its limit.
 pub fn youths(records: &Records, country: u8, number: u16) -> (Vec<u16>, usize) {
     let Some(block) = team_block(country, number, records).and_then(|b| records.block(&b)) else {
         return (Vec::new(), 0);
     };
     let count = usize::from(block.get(COUNT).copied().unwrap_or(0));
     let ids = (0..count).map(|k| word(block, IDS + 2 * k) as u16).collect();
-    (ids, usize::try_from(word(block, SECOND_COUNT)).unwrap_or(0))
+    (ids, usize::try_from(word(block, MOVED_UP)).unwrap_or(0))
 }
 
 /// His youth class by his birthday: 0 C, 1 B, 2 A (`FUN_0066b0c1`).
@@ -152,9 +181,7 @@ pub fn salary(id: u16, age: i32, level: u8) -> i32 {
 /// begun today.
 pub fn sign(records: &mut Records, id: u16, (country, number): (u8, u16), salary: i32) {
     let Some([from_country, from_number]) = records.player(id).map(|r| r.club()) else { return };
-    let (mut from, _) = youths(records, from_country, from_number.into());
-    from.retain(|&y| y != id);
-    store(records, from_country, from_number.into(), &from);
+    leave_youth(records, (from_country, from_number.into()), id);
     let (mut to, _) = youths(records, country, number);
     if to.len() < MOST {
         to.push(id);
@@ -192,6 +219,173 @@ pub fn sign(records: &mut Records, id: u16, (country, number): (u8, u16), salary
         r.set_career_count(count + 1);
     }
     store(records, country, number, &to);
+}
+
+/// Out of a club's youth team, his youth goals gone (`FUN_0066aea3`).
+fn leave_youth(records: &mut Records, (country, number): (u8, u16), id: u16) {
+    let (mut ids, _) = youths(records, country, number);
+    ids.retain(|&y| y != id);
+    store(records, country, number, &ids);
+    if let Some(r) = records.players.get_mut(usize::from(id)) {
+        r.put(YOUTH_GOALS, 0u8);
+    }
+}
+
+/// His goals as a youth or an amateur of the pool.
+pub fn goals(r: &Player) -> u8 {
+    r.get(YOUTH_GOALS)
+}
+
+/// "Förd." for a youth: off if he has it, else his age group's moves to
+/// him (`OnUserC000_004d905b`).
+pub fn support(records: &mut Records, club: (u8, u16), id: u16, group: usize) {
+    if records.player(id).is_some_and(|r| r.shown() & SUPPORTED != 0) {
+        if let Some(r) = records.players.get_mut(usize::from(id)) {
+            r.set_shown(r.shown() & !SUPPORTED);
+        }
+        return;
+    }
+    let (ids, _) = youths(records, club.0, club.1);
+    let mates: Vec<u16> = ids.iter().copied().filter(|&y| class(records, y) == group).collect();
+    for y in mates {
+        if let Some(r) = records.players.get_mut(usize::from(y)) {
+            r.set_shown(r.shown() & !SUPPORTED);
+        }
+    }
+    if let Some(r) = records.players.get_mut(usize::from(id)) {
+        r.set_shown(r.shown() | SUPPORTED);
+    }
+    store(records, club.0, club.1, &ids);
+}
+
+/// A youth's pre-contract, on a salary for ten years: off the youth list
+/// (`FUN_004d86a3`).
+pub fn pre_contract(records: &mut Records, id: u16, salary: i32) {
+    drop_prospect(records, id);
+    let year = records.globals.start_year();
+    if let Some(r) = records.players.get_mut(usize::from(id)) {
+        r.set_salary((salary / 1000) as u16);
+        r.set_contract(r.contract() & !CONTRACT_YEAR | (year + PRE_CONTRACT_YEARS) & CONTRACT_YEAR);
+    }
+}
+
+/// Whether a youth talk with him is booked (`FUN_00763b0c`).
+pub fn youth_talk_booked(records: &Records, id: u16) -> bool {
+    records.block(&format!("{YOUTH_TALKS_AT:#x}")).is_some_and(|b| {
+        let count = usize::try_from(word(b, 0)).unwrap_or(0);
+        (0..count).any(|k| word(b, 2 + k * YOUTH_TALK) as u16 == id)
+    })
+}
+
+/// A club's amateur pool: those moved up, the amateurs (`FUN_00407ecd`).
+pub fn pool(records: &Records, country: u8, number: u16) -> [Vec<u16>; 2] {
+    let Some(block) = records
+        .team_index(country.into(), number)
+        .and_then(|i| records.block(&format!("{POOL_AT:#x}[{i}]")))
+    else {
+        return Default::default();
+    };
+    let list = |from: usize| {
+        (0..POOL)
+            .map(|k| word(block, from + 2 * k))
+            .filter(|&id| id > 0)
+            .map(|id| id as u16)
+            .collect()
+    };
+    [list(0), list(2 * POOL)]
+}
+
+/// Stores a club's pool (`FUN_00408036`).
+fn store_pool(records: &mut Records, country: u8, number: u16, lists: &[Vec<u16>; 2]) {
+    let Some(i) = records.team_index(country.into(), number) else { return };
+    let Some(block) = records.block_mut(&format!("{POOL_AT:#x}[{i}]")) else { return };
+    for (n, list) in lists.iter().enumerate() {
+        for k in 0..POOL {
+            let id = list.get(k).copied().unwrap_or(0);
+            let at = (n * POOL + k) * 2;
+            block[at..at + 2].copy_from_slice(&id.to_le_bytes());
+        }
+    }
+}
+
+/// A shirt number for him unless he has one: the first no one of the
+/// squad wears (`FUN_00407abb`).
+pub fn give_shirt(records: &mut Records, squad: &[u16], id: u16) {
+    if records.player(id).is_none_or(|r| r.shirt() != 0) {
+        return;
+    }
+    let worn: Vec<u8> =
+        squad.iter().filter_map(|&p| records.player(p)).map(|r| r.shirt()).collect();
+    if let Some(free) = SHIRTS.clone().find(|n| !worn.contains(n))
+        && let Some(r) = records.players.get_mut(usize::from(id))
+    {
+        r.set_shirt(free);
+    }
+}
+
+/// Where the trial came from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Trial {
+    Youth,
+    Amateur,
+}
+
+/// A youth or an amateur of the pool joins his club's squad on trial: after
+/// its last player of his main position or one before
+/// (`FUN_0070df0b`), out of the youth team or the pool (`FUN_004d88ec`,
+/// `CAmateure` 0x4410fe). `key` is the club's place in the season.
+pub fn move_up(
+    records: &mut Records,
+    data: &Data,
+    club: &mut ClubState,
+    (key, (country, number)): ((usize, usize), (u8, u16)),
+    id: u16,
+    trial: Trial,
+) {
+    let Some(main) = records.player(id).map(|r| r.positions()[0]) else { return };
+    let Some(mut squad) = records.team(country.into(), number).map(|t| t.players()) else {
+        return;
+    };
+    let place = squad
+        .iter()
+        .rposition(|&p| records.player(p).is_some_and(|r| r.positions()[0] <= main))
+        .map_or(0, |k| k + 1);
+    squad.insert(place, id);
+    if let Some(team) = records.team_mut(country.into(), number) {
+        team.set_players(&squad);
+    }
+    if let Some(r) = records.players.get_mut(usize::from(id)) {
+        r.set_club([country, number as u8]);
+        r.set_picks(r.picks() & !TRIAL_MASK | TRIAL);
+        let bit = if trial == Trial::Youth { YOUTH_TRIAL } else { AMATEUR_TRIAL };
+        r.set_retiring(r.retiring() | bit);
+        if trial == Trial::Youth {
+            r.set_shown(r.shown() & !SUPPORTED);
+        }
+    }
+    match trial {
+        Trial::Youth => {
+            leave_youth(records, (country, number), id);
+            if let Some(block) =
+                team_block(country, number, records).and_then(|name| records.block_mut(&name))
+            {
+                let moved = word(block, MOVED_UP).wrapping_add(1);
+                block[MOVED_UP..MOVED_UP + 2].copy_from_slice(&moved.to_le_bytes());
+            }
+        }
+        // Out of the amateurs, among those moved up (`FUN_00407c2c`).
+        Trial::Amateur => {
+            let [mut up, mut amateurs] = pool(records, country, number);
+            amateurs.retain(|&a| a != id);
+            if !up.contains(&id) && up.len() < POOL {
+                up.push(id);
+            }
+            store_pool(records, country, number, &[up, amateurs]);
+        }
+    }
+    if let Some(joining) = crate::load::any_player(records, data, id) {
+        club.insert(key, place, joining);
+    }
 }
 
 #[cfg(test)]

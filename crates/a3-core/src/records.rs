@@ -536,6 +536,15 @@ impl Team {
         let count = usize::from(self.player_count()).min(SQUAD_MOST);
         (0..count).map(|i| self.get(SQUAD + 2 * i)).collect()
     }
+
+    /// Lists its players, as many as it can.
+    pub fn set_players(&mut self, ids: &[u16]) {
+        let ids = &ids[..ids.len().min(SQUAD_MOST)];
+        for (i, &id) in ids.iter().enumerate() {
+            self.put(SQUAD + 2 * i, id);
+        }
+        self.set_player_count(ids.len() as u16);
+    }
 }
 
 /// What a human club keeps besides its team record, one for each human

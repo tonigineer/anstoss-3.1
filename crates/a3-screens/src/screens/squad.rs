@@ -9,8 +9,8 @@ use chrono::Datelike;
 use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::NOTICE;
 use a3_core::cycle::dialogs::{
-    APPOINTMENTS, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT, MARKET_VALUES, NEXT_SQUAD,
-    TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING,
+    AMATEUR_PLAYERS, APPOINTMENTS, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT,
+    MARKET_VALUES, NEXT_SQUAD, TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
 };
 use a3_core::records::Team;
 use a3_core::season::Rules;
@@ -37,12 +37,15 @@ const MARKET_SCREENS: u16 = 6371;
 /// players out on loan, the market values.
 const CURRENT_SQUAD_ITEM: usize = 0;
 const NEXT_SQUAD_ITEM: usize = 1;
+const YOUTH_ITEM: usize = 2;
 const EXTENSIONS_ITEM: usize = 4;
 const LOANED_OUT_ITEM: usize = 5;
 const MARKET_VALUES_ITEM: usize = 6;
-const SQUAD_ITEMS: [(usize, u16); 5] = [
+const SQUAD_ITEMS: [(usize, u16); 7] = [
     (CURRENT_SQUAD_ITEM, CURRENT_SQUAD),
     (NEXT_SQUAD_ITEM, NEXT_SQUAD),
+    (YOUTH_ITEM, YOUTH_TEAM),
+    (AMATEURS, AMATEUR_PLAYERS),
     (EXTENSIONS_ITEM, EXTENSIONS),
     (LOANED_OUT_ITEM, LOANED_OUT),
     (MARKET_VALUES_ITEM, MARKET_VALUES),

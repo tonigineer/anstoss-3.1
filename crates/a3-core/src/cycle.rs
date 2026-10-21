@@ -91,6 +91,11 @@ pub mod dialogs {
     /// Other clubs' youths to poach, and the pre-contract offered.
     pub const YOUTH_POACHING: u16 = 107;
     pub const PRE_CONTRACT: u16 = 325;
+    /// The club's youth and its amateurs, and a trial with the
+    /// professionals offered to one of them.
+    pub const YOUTH_TEAM: u16 = 428;
+    pub const AMATEUR_PLAYERS: u16 = 427;
+    pub const TRIAL: u16 = 11;
     /// The transfer market's list, the world's best players.
     pub const TRANSFER_LIST: u16 = 287;
     pub const WORLDS_BEST: u16 = 462;
@@ -193,6 +198,12 @@ pub enum Args {
     Book(u8, u16),
     /// A club, by its country's slot and its place there.
     Club(usize, usize),
+    /// A youth or an amateur to try with the professionals, by his record's
+    /// id.
+    Trial {
+        player: u16,
+        youth: bool,
+    },
     /// A text by its id, with the name of one of the current manager's
     /// formations for its `%s`.
     TextForFormation(u16, usize),

@@ -385,6 +385,27 @@ pub struct Status {
 }
 
 impl ClubState {
+    /// A player joins the squad at a place, the club being `key`: those
+    /// after it move one place on, in the line-up, the duty lists and the
+    /// tactics' picks.
+    pub fn insert(&mut self, key: (usize, usize), at: usize, joining: (Player, Fitness, Status)) {
+        let shift = |place: &mut usize| {
+            if *place >= at {
+                *place += 1;
+            }
+        };
+        let lineup = &mut self.lineup;
+        lineup.field.iter_mut().chain(lineup.bench.iter_mut()).flatten().for_each(shift);
+        self.duties.iter_mut().flatten().for_each(shift);
+        for pick in self.tactics.picks.iter_mut().flatten().filter(|p| p.club == key) {
+            shift(&mut pick.place);
+        }
+        let (player, fitness, status) = joining;
+        self.players.insert(at, player);
+        self.fitness.insert(at, fitness);
+        self.status.insert(at, status);
+    }
+
     /// A club followed from now on: no season tickets sold yet, the week's
     /// record starting today.
     pub fn new(

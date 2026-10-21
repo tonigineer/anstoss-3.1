@@ -29,7 +29,7 @@ pub use a3_core::cycle::dialogs::{
     LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, SQUAD_MENU, TACTICS, TRAINING_PICTURES,
     UNIT_CHOICE, WEEK_PLANNER, YEAR_CALENDAR,
 };
-use a3_core::cycle::dialogs::{NOTICE, QUESTION};
+use a3_core::cycle::dialogs::{AMATEUR_PLAYERS, NOTICE, QUESTION, YOUTH_TEAM};
 
 use super::calendar::FIXTURE_AHEAD;
 use super::formations::FORMATIONS;
@@ -183,6 +183,9 @@ const KEEP_ITEM: usize = 2;
 /// The segments that open the medical department, and what the game tells
 /// of the next opponent.
 const MEDICAL_ITEM: usize = 6;
+/// The youth and the amateurs (428, 427).
+const YOUTH_ITEM: usize = 4;
+const AMATEURS_ITEM: usize = 5;
 /// The segment that switches between the pitch and the list.
 const SWITCH_ITEM: usize = 0;
 const OPPONENT_ITEM: usize = 7;
@@ -524,6 +527,8 @@ impl Screen for MenuBar {
                             | TAKERS_ITEM
                             | MEDICAL_ITEM
                             | OPPONENT_ITEM
+                            | YOUTH_ITEM
+                            | AMATEURS_ITEM
                     )
                 }
                 Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
@@ -667,6 +672,14 @@ impl Screen for MenuBar {
             self.popup = Some(medical::MEDICAL);
             return Outcome::Popup(Request::new(medical::MEDICAL));
         }
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == YOUTH_ITEM {
+            self.popup = Some(YOUTH_TEAM);
+            return Outcome::Popup(Request::new(YOUTH_TEAM));
+        }
+        if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == AMATEURS_ITEM {
+            self.popup = Some(AMATEUR_PLAYERS);
+            return Outcome::Popup(Request::new(AMATEUR_PLAYERS));
+        }
         if line_up(view.id) && cx.dialog.controls[c].id == Some(DUTIES) && item == TAKERS_ITEM {
             self.popup = Some(duties::TAKERS);
             return Outcome::Popup(Request::new(duties::TAKERS));
@@ -736,8 +749,16 @@ impl Screen for MenuBar {
                 self.popup = Some(next);
                 Outcome::Popup(Request::new(next))
             }
-            // The list box's menu fills nothing again.
-            (Some(discipline::BONUS | discipline::FINE), _) if view.id == LINEUP_LIST => {
+            // The list box's menu fills nothing again; nor do the
+            // amateurs from the list view (LINEUP-LIST.md §7).
+            (Some(discipline::BONUS | discipline::FINE | AMATEUR_PLAYERS), _)
+                if view.id == LINEUP_LIST =>
+            {
+                Outcome::Stay
+            }
+            // A youth or an amateur may have joined the squad.
+            (Some(YOUTH_TEAM | AMATEUR_PLAYERS), _) => {
+                change_lineup(cx, view, Boxes::Keep, self.sort, |_, _, _| {});
                 Outcome::Stay
             }
             // A bonus or a fine may have changed the players' morale; the

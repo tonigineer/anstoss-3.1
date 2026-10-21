@@ -1428,6 +1428,46 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_youth_is_supported_and_signs_a_pre_contract() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 2\nuntil dialog 428";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&428];
+        let rows = |runner: &Runner, id: u16| {
+            let view = runner.host.view();
+            view.list(crate::screens::control(dialog, id).unwrap()).unwrap().rows.clone()
+        };
+        // Two B youths, no A or C youth.
+        assert!(rows(&runner, 5264).is_empty() && rows(&runner, 5262).is_empty());
+        let youths = rows(&runner, 5263);
+        assert_eq!(youths.len(), 2);
+        assert!(youths.iter().all(|r| r.split('\t').count() == 10));
+        assert!(youths.iter().all(|r| r.ends_with("\tkein Vorvertrag")));
+        // A click in "Förd." gives the first the group's support.
+        let support = format!("{open}\nnow click at 397 209");
+        let runner = on_save(&game, "Probe1", &support).unwrap();
+        assert_eq!(rows(&runner, 5263)[0].split('\t').nth(7), Some("X"));
+        // Anywhere else: the parents' pre-contract, then too young for more.
+        let sign = format!(
+            "{open}\nnow click at 100 209\nuntil dialog 325\nnow press 4190\nuntil dialog 428\n\
+             now click at 100 209\nuntil dialog 380\nnow press 4731\nuntil dialog 428"
+        );
+        let runner = on_save(&game, "Probe1", &sign).unwrap();
+        assert!(rows(&runner, 5263)[0].ends_with(" €"));
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let first =
+            runner.host.view().list(crate::screens::control(dialog, 5263).unwrap()).unwrap().keys
+                [0];
+        let r = records.player(first as u16).unwrap();
+        assert_eq!(r.contract() & 0xfff, records.globals.start_year() + 10);
+        // The amateurs open from the same menu.
+        let amateurs = "now click bar 10\nuntil dialog 218\nnow choose 5042 3\nuntil dialog 427";
+        on_save(&game, "Probe1", amateurs).unwrap();
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn players_are_watched_and_dropped() {
         let game = game();
         let menu = "now click bar 10\nuntil dialog 218";
