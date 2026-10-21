@@ -20,6 +20,7 @@ pub mod opponent;
 pub mod planner;
 pub mod playerinfo;
 pub mod popups;
+pub mod search;
 pub mod special;
 pub mod squad;
 pub mod stadium;
@@ -150,6 +151,10 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(squad::DrawOption),
         Box::new(squad::Relations),
         Box::new(stadium::StadiumScreen::default()),
+        Box::new(search::ClubSearch::default()),
+        Box::new(search::NoracsaSearch::default()),
+        Box::new(search::NoracsaFound::default()),
+        Box::new(search::NoracsaRequest::default()),
         Box::new(youth::Poaching::default()),
         Box::new(youth::PreContract),
         Box::new(youth::Youths::default()),
@@ -205,6 +210,7 @@ pub fn compose(game: &mut Game) {
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);
     youth::compose(&mut game.dialogs);
+    search::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
 }
 

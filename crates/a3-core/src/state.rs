@@ -27,4 +27,6 @@ pub struct GameState {
     /// The same by the players' ids, for screens of players of any club:
     /// the transfer list's rows.
     pub paging_ids: Option<Vec<u16>>,
+    /// The players NORACSA's search found, for the list of its result.
+    pub found: Vec<crate::noracsa::Hit>,
 }

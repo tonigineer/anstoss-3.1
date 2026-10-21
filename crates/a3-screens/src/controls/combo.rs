@@ -32,6 +32,7 @@ const HANDLE_COLOUR: u8 = 0x70;
 const HANDLE_SHIFT: u8 = 4;
 
 const ROW: i32 = 16;
+const LEAST_ROW: i32 = 13;
 /// The list starts this far below the field's top; its window reaches as
 /// far below the field as the combo box says.
 const LIST_TOP: i32 = 20;
@@ -116,10 +117,18 @@ impl ComboState {
         let r = control.rect;
         let height = Self::height(control) as f32;
         if Self::above(control) {
-            return Rect::new(r.min.x, r.min.y - height, r.max.x, r.min.y);
+            let bottom = r.min.y + Self::field_excess(control);
+            return Rect::new(r.min.x, bottom - height, r.max.x, bottom);
         }
         let top = r.min.y + LIST_TOP as f32;
         Rect::new(r.min.x, top, r.max.x, top + height)
+    }
+
+    /// How much higher than the 20 pixels of a Windows combo box's field
+    /// the control is: a list above the field ends that much lower (the
+    /// nationality of 154, 22 high).
+    fn field_excess(control: &Control) -> f32 {
+        control.rect.height() - LIST_TOP as f32
     }
 
     /// Whether the list drops above the field.
@@ -171,7 +180,11 @@ impl ComboState {
         if self.open
             && let Some(held) = paint.widget(FIELD_HELD)
         {
-            let (left, up) = if Self::above(paint.control) { HELD_AT } else { HELD_AT_BELOW };
+            let (left, up) = if Self::above(paint.control) {
+                (HELD_AT.0, HELD_AT.1 - Self::field_excess(paint.control))
+            } else {
+                HELD_AT_BELOW
+            };
             paste(frame, held, Vec2::new(r.max.x - left, r.min.y - up));
         }
         let (x, y) = (r.min.x as i32, r.min.y as i32);
@@ -211,7 +224,9 @@ impl ComboState {
         let font = paint.font();
         for (i, text) in self.items.iter().enumerate().skip(self.scroll) {
             let top = ((i - self.scroll) as i32) * ROW;
-            if top >= rows.height() as i32 {
+            // A last row shows only with 13 of its 16 lines (306's tenth
+            // shows, 154's ninth trait does not).
+            if top + LEAST_ROW > rows.height() as i32 {
                 break;
             }
             if self.selected == Some(i) {

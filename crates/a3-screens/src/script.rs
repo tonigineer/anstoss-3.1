@@ -1538,6 +1538,36 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn any_clubs_squad_is_looked_through() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 6371 4\nuntil dialog 306";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&306];
+        let list = |runner: &Runner, id: u16| {
+            runner.host.view().list(crate::screens::control(dialog, id).unwrap()).unwrap().clone()
+        };
+        // The main country's clubs but our own, by name; no players yet.
+        let clubs = list(&runner, 4060);
+        assert!(!clubs.rows.is_empty());
+        let key = |name: &str| name.to_lowercase();
+        assert!(clubs.rows.windows(2).all(|w| key(&w[0]) <= key(&w[1]) || !w[0].is_ascii()));
+        assert!(list(&runner, 4059).rows.is_empty());
+        // A club: its players, by position, and the heading.
+        let club = format!("{open}\nnow row 4060 0");
+        let runner = on_save(&game, "Probe1", &club).unwrap();
+        let players = list(&runner, 4059);
+        assert!(!players.rows.is_empty());
+        assert!(players.rows.iter().all(|r| r.split('\t').count() == 7));
+        let heading =
+            runner.host.view().text(crate::screens::control(dialog, 6286).unwrap()).to_owned();
+        assert!(heading.contains("D-Stärke"), "{heading}");
+        // NORACSA needs a computer department, which Ulm lacks.
+        let noracsa = "now click bar 10\nuntil dialog 218\nnow choose 6371 6\nuntil dialog 380";
+        on_save(&game, "Probe1", noracsa).unwrap();
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn players_are_watched_and_dropped() {
         let game = game();
         let menu = "now click bar 10\nuntil dialog 218";

@@ -98,6 +98,13 @@ pub mod dialogs {
     /// The club's youth and its amateurs, and a trial with the
     /// professionals offered to one of them.
     pub const YOUTH_TEAM: u16 = 428;
+    /// Any club's squad to look through.
+    pub const CLUB_SEARCH: u16 = 306;
+    /// NORACSA's search, and what it found.
+    pub const NORACSA_SEARCH: u16 = 154;
+    pub const NORACSA_FOUND: u16 = 155;
+    /// NORACSA's request for a player, kept for a week.
+    pub const NORACSA_REQUEST: u16 = 156;
     pub const AMATEUR_PLAYERS: u16 = 427;
     pub const TRIAL: u16 = 11;
     /// The transfer market's list, the world's best players.
@@ -476,13 +483,20 @@ impl Cycle {
             self.ask(Request::new(week))?;
             for _ in 0..WEEK_DAYS {
                 self.appointments()?;
-                self.season(|s| {
+                let week_start = self.season(|s| {
                     s.pass_day();
                     s.day += 1;
-                    if s.day % WEEK_DAYS == 0 {
+                    let start = s.day % WEEK_DAYS == 0;
+                    if start {
                         s.begin_week();
                     }
+                    start
                 });
+                if week_start == Some(true)
+                    && let Some(records) = self.state().records.as_mut()
+                {
+                    crate::noracsa::age_requests(records);
+                }
                 self.ask(Request::new(week))?;
             }
         }

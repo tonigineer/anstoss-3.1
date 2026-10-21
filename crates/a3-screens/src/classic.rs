@@ -90,7 +90,7 @@ impl Classic {
         let fonts = game.fonts();
         let images = HashMap::new();
         let mut widgets = HashMap::new();
-        let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS);
+        let sliders = slider::HANDLES.into_iter().chain(slider::ARROWS).chain(slider::TRACKS);
         let lists = list::HANDLES.into_iter().chain(list::TRACKS);
         let named = [SCROLL_UP, SCROLL_DOWN, check::TICK, combo::FIELD_HELD]
             .into_iter()

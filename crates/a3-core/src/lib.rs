@@ -22,6 +22,7 @@ pub mod marking;
 pub mod medical;
 pub mod mood;
 pub mod newgame;
+pub mod noracsa;
 pub mod opponent;
 pub mod random;
 pub mod records;

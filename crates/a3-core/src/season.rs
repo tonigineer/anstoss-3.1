@@ -125,6 +125,8 @@ pub struct Rules {
     /// Alerts the game writes itself, not from its texts: by where they
     /// are in the program.
     pub messages: std::collections::HashMap<u32, String>,
+    /// NORACSA's search: its combos' choices.
+    pub noracsa: crate::noracsa::NoracsaTables,
 }
 
 impl Rules {
@@ -166,6 +168,7 @@ impl Rules {
             year: crate::year::YearTables::load(exe)?,
             forecast: crate::forecast::ForecastTables::load(exe)?,
             contract: crate::contract::ContractTables::load(exe)?,
+            noracsa: crate::noracsa::NoracsaTables::load(exe)?,
             messages: crate::youth::MESSAGES
                 .into_iter()
                 .map(|at| (at, exe.text_at(at).unwrap_or_default()))

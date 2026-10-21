@@ -26,16 +26,17 @@ impl EditState {
         self.text.pop();
     }
 
+    /// The text from the field's top left corner, as the game's edits
+    /// draw it (154's name, checked against the original).
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let Some(font) = paint.font() else { return };
         let r = paint.control.rect;
-        let (x, y, right) = (r.min.x as i32, r.min.y as i32, r.max.x as i32);
-        let cell = font.height() as f32;
-        let top = y + ((r.height() - cell) / 2.0).round() as i32;
-        font.draw_clipped(frame, x + 2, top, &self.text, TEXT, false, right - 1);
+        let (x, top, right) = (r.min.x as i32, r.min.y as i32, r.max.x as i32);
+        let cell = font.height() as i32;
+        font.draw_clipped(frame, x, top, &self.text, TEXT, false, right - 1);
         if paint.caret && paint.view.focus == Some(paint.index) {
-            let at = x + 2 + font.width(&self.text, false) as i32;
-            fill(frame, at.min(right - 2), top, 1, cell as i32, TEXT);
+            let at = x + font.width(&self.text, false) as i32;
+            fill(frame, at.min(right - 2), top, 1, cell, TEXT);
         }
     }
 }

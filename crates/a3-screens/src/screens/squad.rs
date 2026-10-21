@@ -9,9 +9,9 @@ use chrono::Datelike;
 use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::NOTICE;
 use a3_core::cycle::dialogs::{
-    AMATEUR_PLAYERS, APPOINTMENTS, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT,
-    MARKET_VALUES, NEXT_SQUAD, RELATIONS, TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING,
-    YOUTH_TEAM,
+    AMATEUR_PLAYERS, APPOINTMENTS, CLUB_SEARCH, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT,
+    MARKET_VALUES, NEXT_SQUAD, NORACSA_REQUEST, NORACSA_SEARCH, RELATIONS, TRANSFER_LIST,
+    WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
 };
 use a3_core::records::Team;
 use a3_core::season::Rules;
@@ -54,12 +54,15 @@ const SQUAD_ITEMS: [(usize, u16); 7] = [
 /// The market screens' buttons: the transfer list, the week's
 /// appointments, the watch list, the youth to poach, the world's best.
 const TRANSFER_LIST_ITEM: usize = 0;
-const MARKET_ITEMS: [(usize, u16); 5] = [
+const MARKET_ITEMS: [(usize, u16); 8] = [
     (TRANSFER_LIST_ITEM, TRANSFER_LIST),
     (1, APPOINTMENTS),
     (2, WATCH_LIST),
     (POACHING, YOUTH_POACHING),
+    (4, CLUB_SEARCH),
     (5, WORLDS_BEST),
+    (NORACSA[0], NORACSA_SEARCH),
+    (NORACSA[1], NORACSA_REQUEST),
 ];
 /// The amateurs' button, which a club's amateur department sees as its
 /// professionals' (text 4628); the market's youth poaching, which it may

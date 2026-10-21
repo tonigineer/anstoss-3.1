@@ -26,6 +26,15 @@ pub(crate) const HANDLES: [&str; 5] = [
 ];
 /// The arrows at its ends.
 pub(crate) const ARROWS: [&str; 2] = ["Pfeile/PfeilL1.bmp", "Pfeile/PfeilR1.bmp"];
+/// The tracks behind the handle, by style, drawn with the flags' bit 0x100
+/// unless bit 0x40 leaves them without a picture: this far down and this
+/// high (the schemes at 0x8ae118, `CMyScrBar`'s paint).
+pub(crate) const TRACKS: [&str; 5] =
+    ["ScrBlauH.tga", "ScrRotH.tga", "ScrBlauH.tga", "ScrGruenH.tga", "ScrGelbH.tga"];
+const WITH_TRACK: u16 = 0x100;
+const NO_TRACK: u16 = 0x40;
+const TRACK_TOP: u32 = 7;
+const TRACK_HEIGHT: u32 = 13;
 /// The ends a handle keeps of its bar, and where the bar's right end starts.
 const END: u32 = 3;
 const RIGHT_END: u32 = 0x1ba;
@@ -63,8 +72,16 @@ pub fn handle_under(control: &Control, along: f32) -> f32 {
 }
 
 pub(crate) fn draw(value: &Value, frame: &mut RgbaImage, paint: &Paint) {
-    let Kind::Slider { style } = paint.control.kind else { return };
+    let Kind::Slider { style, flags } = paint.control.kind else { return };
     let r = paint.control.rect;
+    if flags & (WITH_TRACK | NO_TRACK) == WITH_TRACK
+        && let Some(track) = paint.widget(TRACKS[usize::from(style).min(TRACKS.len() - 1)])
+    {
+        let length = ((r.width() - 2.0 * SLIDER_ARROW) as u32).min(track.width());
+        let part = imageops::crop_imm(track, 0, 0, length, TRACK_HEIGHT.min(track.height()));
+        let (x, y) = (r.min.x + SLIDER_ARROW, r.min.y as u32 + TRACK_TOP);
+        imageops::overlay(frame, &part.to_image(), x as i64, i64::from(y));
+    }
     let ends = [r.min.x, r.max.x - SLIDER_ARROW];
     for (name, x) in ARROWS.into_iter().zip(ends) {
         if let Some(arrow) = paint.widget(name) {

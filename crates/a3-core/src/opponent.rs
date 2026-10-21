@@ -179,6 +179,14 @@ impl<'a> League<'a> {
         self.data.get(LEAGUE_FIELDS + at).copied().unwrap_or(0)
     }
 
+    /// Its name, the record's first field (`FUN_006356a2`).
+    pub fn name(&self) -> String {
+        const NAME: usize = 0x30;
+        let bytes = &self.data[..self.data.len().min(NAME)];
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        a3_files::sav::cp1252(&bytes[..end])
+    }
+
     pub fn teams(&self) -> usize {
         usize::try_from(self.i16_at(0)).unwrap_or(0)
     }
@@ -196,7 +204,7 @@ impl<'a> League<'a> {
     }
 
     /// The team number at a place in the league.
-    fn team(&self, place: usize) -> i16 {
+    pub fn team(&self, place: usize) -> i16 {
         self.i16_at(0x22 + 2 * place)
     }
 

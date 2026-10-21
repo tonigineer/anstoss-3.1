@@ -1164,6 +1164,21 @@ impl Countries {
         self.get(0xae61ae + country)
     }
 
+    /// Whether a country has team records (`DAT_00ae5b38`).
+    pub fn has_teams(&self, country: usize) -> bool {
+        self.get::<u8>(0xae5b38 + country) > 0
+    }
+
+    /// The name of a country's league by its place, the first to the
+    /// amateurs, five of them (`0xae636e`, by the country's slot).
+    pub fn league_name(&self, country: usize, place: usize) -> String {
+        const AT: usize = 0xae636e;
+        const SLOT: usize = 0xa0;
+        const NAME: usize = 0x20;
+        let at = AT + usize::from(self.slot(country)) * SLOT + place.min(4) * NAME - Self::BASE;
+        self.0.get(at..).map_or_else(String::new, |b| text(b, NAME))
+    }
+
     /// By which rule yellow cards add up to a suspension in a country's
     /// league and in its cup (`FUN_0074612e`, `FUN_007464a4`).
     pub fn card_rules(&self, country: usize) -> [i32; 2] {

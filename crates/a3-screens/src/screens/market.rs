@@ -156,7 +156,7 @@ impl Screen for TransferList {
                         rows.map(|l| l.keys.iter().rev().map(|&k| k as u16).collect());
                     Outcome::Popup(Request::with(super::playerinfo::CURRENT, Args::Record(id)))
                 }
-                Some(Command::Watch) => self.watch(cx, id),
+                Some(Command::Watch) => watch_player(cx, id),
                 _ => Outcome::Stay,
             };
         }
@@ -441,41 +441,41 @@ impl TransferList {
         }
         Outcome::Stay
     }
+}
 
-    /// A player put on the club's watch list (`FUN_00418ab2`): not one of
-    /// its own; when full, told; when there already, told and charged.
-    fn watch(&self, cx: &mut Cx, id: u16) -> Outcome {
-        let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
-        let Some(season) = cx.state.season.as_ref() else { return Outcome::Stay };
-        let in_squad = season
-            .manager()
-            .and_then(|m| m.club)
-            .and_then(|k| season.clubs.get(&k))
-            .is_some_and(|c| c.status.iter().any(|s| s.id == id));
-        if in_squad {
-            return notice(IN_SQUAD);
-        }
-        let Some(index) = own_index(cx) else { return Outcome::Stay };
-        let Some(records) = cx.state.records.as_mut() else { return Outcome::Stay };
-        let Some(slot) = usize::from(records.teams[index].human()).checked_sub(1) else {
-            return Outcome::Stay;
-        };
-        match transfers::watch(records, slot, id) {
-            Watch::Added => Outcome::Stay,
-            Watch::Full => notice(WATCH_FULL),
-            Watch::Already => {
-                let team = &mut records.teams[index];
-                let cost = team.observation_cost().wrapping_add(WATCH_COST);
-                team.put(OBSERVATION_COST, cost);
-                notice(WATCHED_ALREADY)
-            }
+/// A player put on the club's watch list (`FUN_00418ab2`): not one of
+/// its own; when full, told; when there already, told and charged.
+pub(crate) fn watch_player(cx: &mut Cx, id: u16) -> Outcome {
+    let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+    let Some(season) = cx.state.season.as_ref() else { return Outcome::Stay };
+    let in_squad = season
+        .manager()
+        .and_then(|m| m.club)
+        .and_then(|k| season.clubs.get(&k))
+        .is_some_and(|c| c.status.iter().any(|s| s.id == id));
+    if in_squad {
+        return notice(IN_SQUAD);
+    }
+    let Some(index) = own_index(cx) else { return Outcome::Stay };
+    let Some(records) = cx.state.records.as_mut() else { return Outcome::Stay };
+    let Some(slot) = usize::from(records.teams[index].human()).checked_sub(1) else {
+        return Outcome::Stay;
+    };
+    match transfers::watch(records, slot, id) {
+        Watch::Added => Outcome::Stay,
+        Watch::Full => notice(WATCH_FULL),
+        Watch::Already => {
+            let team = &mut records.teams[index];
+            let cost = team.observation_cost().wrapping_add(WATCH_COST);
+            team.put(OBSERVATION_COST, cost);
+            notice(WATCHED_ALREADY)
         }
     }
 }
 
 /// How high a club plays: its league for a country with leagues, ten for
 /// its amateur clubs, none abroad (`FUN_0063e2df`).
-fn league_level(records: &Records, country: u8, number: u16) -> i32 {
+pub(crate) fn league_level(records: &Records, country: u8, number: u16) -> i32 {
     const AMATEURS: i32 = 10;
     let countries = &records.countries;
     let c = usize::from(country);
@@ -730,7 +730,7 @@ pub(crate) fn compose_talks(dialogs: &mut HashMap<u16, Dialog>) {
 
 /// An exchange sort as the appointments' (`FUN_00762ba3`): every later row
 /// that goes before swaps places.
-fn swap_sort<T>(rows: &mut [T], before: impl Fn(&T, &T) -> bool) {
+pub(crate) fn swap_sort<T>(rows: &mut [T], before: impl Fn(&T, &T) -> bool) {
     for i in 0..rows.len() {
         for j in i + 1..rows.len() {
             if before(&rows[j], &rows[i]) {
@@ -1095,6 +1095,9 @@ const RETIRING_TEXT: u16 = 3135;
 const SIGNED_ELSEWHERE: u16 = 3077;
 const TALK_THIS_WEEK: u16 = 2512;
 const IN_OWN_TEAM: u16 = 4307;
+/// A club books three negotiations a week at most.
+const TALKS_A_WEEK: usize = 3;
+const THREE_TALKS: u16 = 4237;
 
 impl Screen for WatchedPlayer {
     fn ids(&self) -> &[u16] {
@@ -1120,7 +1123,7 @@ impl Screen for WatchedPlayer {
             return Outcome::Stay;
         }
         match item {
-            NEGOTIATE => self.negotiate(cx),
+            NEGOTIATE => negotiate(cx, self.id),
             UNWATCH => {
                 if let Some(slot) = own_slot(cx)
                     && let Some(records) = cx.state.records.as_mut()
@@ -1143,35 +1146,37 @@ pub(crate) fn question_ball(view: &mut View, dialog: &Dialog) {
     }
 }
 
-impl WatchedPlayer {
-    /// The checks before a negotiation, as far as the replica can tell
-    /// them; past them, booking is not built.
-    fn negotiate(&self, cx: &Cx) -> Outcome {
-        let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
-        let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
-        let id = self.id;
-        let own = own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())));
-        let talks = transfers::appointments(records);
-        if talks.iter().any(|t| t.player == id && own.is_some_and(|o| t.clubs.contains(&o))) {
-            return notice(ALREADY_IN);
-        }
-        let Some(r) = records.player(id) else { return Outcome::Stay };
-        if r.retiring() & 0x80 != 0 {
-            return notice(RETIRING_TEXT);
-        }
-        if r.get::<u8>(0x14c) != 0 {
-            return notice(SIGNED_ELSEWHERE);
-        }
-        if talks.iter().any(|t| t.player == id) {
-            return notice(TALK_THIS_WEEK);
-        }
-        if own.is_some_and(|o| present_club(records, id) == o) {
-            return notice(IN_OWN_TEAM);
-        }
-        if transfers::listings(records).iter().any(|e| e.id == id) {
-            return notice(ON_LIST);
-        }
-        info!("Verhandlungstermin ({id}): not built yet");
-        Outcome::Stay
+/// The checks before a negotiation (`FUN_005a5ac2` with the flags
+/// 0x0dd00000), as far as the replica can tell them, for 28, 306 and 155;
+/// past them, booking is not built.
+pub(crate) fn negotiate(cx: &Cx, id: u16) -> Outcome {
+    let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+    let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
+    let own = own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())));
+    let talks = transfers::appointments(records);
+    if talks.iter().any(|t| t.player == id && own.is_some_and(|o| t.clubs.contains(&o))) {
+        return notice(ALREADY_IN);
     }
+    let Some(r) = records.player(id) else { return Outcome::Stay };
+    if r.retiring() & 0x80 != 0 {
+        return notice(RETIRING_TEXT);
+    }
+    if r.get::<u8>(0x14c) != 0 {
+        return notice(SIGNED_ELSEWHERE);
+    }
+    if talks.iter().any(|t| t.player == id) {
+        return notice(TALK_THIS_WEEK);
+    }
+    if own.is_some_and(|o| present_club(records, id) == o) {
+        return notice(IN_OWN_TEAM);
+    }
+    if transfers::listings(records).iter().any(|e| e.id == id) {
+        return notice(ON_LIST);
+    }
+    let ours = talks.iter().filter(|t| own.is_some_and(|o| t.clubs.contains(&o))).count();
+    if ours >= TALKS_A_WEEK {
+        return notice(THREE_TALKS);
+    }
+    info!("Verhandlungstermin ({id}): not built yet");
+    Outcome::Stay
 }

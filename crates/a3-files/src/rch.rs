@@ -86,6 +86,8 @@ pub enum Kind {
     /// one of the game's colours (0 blue, 1 red, 3 green, 4 yellow).
     Slider {
         style: u16,
+        /// Bit 0x100: a track behind the handle; 0x40: none (`CMyScrBar`).
+        flags: u16,
     },
     /// Column titles of a list, separated by tabs, at their columns (the
     /// game's `CMyTabStatic`).
@@ -345,7 +347,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         }
         6 => Kind::Anim,
         7 => Kind::Bitmap,
-        8 if w > h => Kind::Slider { style: u16s(0)? },
+        8 if w > h => Kind::Slider { style: u16s(0)?, flags: u16s(2).unwrap_or(0) },
         8 => Kind::Spin { color: u16s(0).unwrap_or(0), style: u16s(2).unwrap_or(0) },
         9 => Kind::Header { columns: columns(extra, HEADER_COLUMNS) },
         10 => Kind::Edit { max_len: usize::from(u16s(4)?).clamp(1, 64) },

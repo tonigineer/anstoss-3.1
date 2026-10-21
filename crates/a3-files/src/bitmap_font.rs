@@ -257,9 +257,10 @@ impl BitmapFont {
     pub fn wrap(&self, text: &str, max_width: u32, bold: bool) -> Vec<String> {
         let mut lines = Vec::new();
         let mut line = String::new();
-        for word in text.split(' ') {
-            let candidate =
-                if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
+        // A line's spaces stay as written, a leading one too (154's and
+        // 156's check boxes).
+        for (k, word) in text.split(' ').enumerate() {
+            let candidate = if k == 0 { word.to_owned() } else { format!("{line} {word}") };
             if !line.is_empty() && self.width(&candidate, bold) >= max_width {
                 lines.push(std::mem::replace(&mut line, word.to_owned()));
             } else {
