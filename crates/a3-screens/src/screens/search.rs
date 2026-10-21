@@ -156,7 +156,7 @@ impl Screen for ClubSearch {
             Target::Row { control: c, row } if id(c) == Some(PLAYERS) => {
                 let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
                 match player {
-                    Some(player) => super::market::negotiate(cx, player as u16),
+                    Some(player) => super::market::negotiate(cx, player as u16, true, false),
                     None => Outcome::Stay,
                 }
             }
@@ -644,7 +644,7 @@ impl Screen for NoracsaFound {
             Target::Row { control: c, row } if id(c) == Some(FOUND_LIST) => {
                 let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
                 match player {
-                    Some(player) => super::market::negotiate(cx, player as u16),
+                    Some(player) => super::market::negotiate(cx, player as u16, false, false),
                     None => Outcome::Stay,
                 }
             }

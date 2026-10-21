@@ -174,6 +174,22 @@ impl Request {
     }
 }
 
+/// A negotiation the week planner books (VERHANDLUNG-BUCHUNG.md): the
+/// player; the appointment's kind (2 poaching, 3 a purchase, 4 a loan) and
+/// the planner's (0x0d, 0x0e); whether the contract's terms go along;
+/// whether the prompt asks for "den gewünschten Termin" (287's purchase,
+/// 462) rather than the file's; the day of the player's appointment when
+/// the club joins it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Negotiation {
+    pub player: u16,
+    pub kind: i16,
+    pub planner: u8,
+    pub terms: bool,
+    pub chosen: bool,
+    pub join: Option<i16>,
+}
+
 /// What a screen is asked to show.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Args {
@@ -207,6 +223,8 @@ pub enum Args {
     },
     /// An appointment of a kind to book with a player, by his record's id.
     Book(u8, u16),
+    /// A negotiation to book in the week planner, or to join.
+    Negotiation(Negotiation),
     /// A club, by its country's slot and its place there.
     Club(usize, usize),
     /// A youth or an amateur to try with the professionals, by his record's

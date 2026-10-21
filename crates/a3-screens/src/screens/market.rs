@@ -6,14 +6,14 @@
 
 use std::collections::HashMap;
 
-use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::{
     APPOINTMENTS, CURRENT_SQUAD, NOTICE, QUESTION, TRANSFER_LIST, WATCH_LIST, WATCHED_PLAYER,
     WORLDS_BEST,
 };
+use a3_core::cycle::{Negotiation, Request};
 use a3_core::finances::Balance as Figures;
 use a3_core::records::Records;
-use a3_core::transfers::{self, LOAN, LOAN_WITH_OPTION, Listing, Watch};
+use a3_core::transfers::{self, FREE_TRANSFER, LOAN, LOAN_WITH_OPTION, Listing, SALE, Watch};
 use a3_files::rch::Dialog;
 use tracing::info;
 
@@ -102,9 +102,12 @@ pub struct TransferList {
     show: i16,
     least: i16,
     values: Vec<i16>,
-    /// The player whose menu is open, and the one asked about.
+    /// The player whose menu is open, and the one asked about; whether
+    /// another club's player is being dealt for, after which the list
+    /// fills anew.
     menu_player: Option<u16>,
     asking: Option<u16>,
+    dealing: bool,
 }
 
 impl Screen for TransferList {
@@ -218,10 +221,12 @@ impl Screen for TransferList {
             }
             Target::Row { control: c, row } if id(c) == Some(LIST) => {
                 let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
-                match player {
-                    Some(player) => self.click(cx, player as u16),
-                    None => Outcome::Stay,
+                let Some(player) = player else { return Outcome::Stay };
+                let outcome = self.click(cx, player as u16);
+                if outcome == Outcome::Stay && std::mem::take(&mut self.dealing) {
+                    self.fill(cx, view);
                 }
+                outcome
             }
             _ => Outcome::Stay,
         }
@@ -236,6 +241,9 @@ impl Screen for TransferList {
             if let Some(records) = cx.state.records.as_mut() {
                 transfers::take_off(records, id);
             }
+            self.fill(cx, view);
+        }
+        if std::mem::take(&mut self.dealing) {
             self.fill(cx, view);
         }
         Outcome::Stay
@@ -412,7 +420,7 @@ impl TransferList {
 
     /// A row clicked (`OnSelChange_IDC_TRANSFERLISTE_LISTE`): an own
     /// player has an appointment, will not come off, or is asked about;
-    /// another club's player is not built yet.
+    /// another club's player is bought.
     fn click(&mut self, cx: &Cx, id: u16) -> Outcome {
         let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
         let own = own_team(cx).map(|(_, t)| (t.country(), u16::from(t.number())));
@@ -421,8 +429,17 @@ impl TransferList {
             own == Some((country, u16::from(number)))
         });
         if !at_own {
-            info!("Verhandlungen ({id}): not built yet");
-            return Outcome::Stay;
+            // Another club's player: the checks without flags, then the
+            // purchase; the list fills anew whatever comes of it.
+            let Some(listing) = transfers::listings(records).into_iter().find(|e| e.id == id)
+            else {
+                return Outcome::Stay;
+            };
+            self.dealing = true;
+            if let Some(text) = refusal(cx, id, Checks::None) {
+                return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+            }
+            return purchase(cx, id, &listing).unwrap_or(Outcome::Stay);
         }
         let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
         if transfers::talk_day(records, id).is_some() {
@@ -614,20 +631,22 @@ impl Screen for WorldsBest {
         mark_inert(view, dialog, |_| true);
     }
 
-    /// A row clicked: negotiations, not built yet; the row does not stay
-    /// chosen (`OnSelChange_IDC_WELTBESTER_POSITIONEN_005cc740`).
+    /// A row clicked: a poaching talk to book, asking for the wished day,
+    /// the abilities' list with the contract's terms; the row does not stay
+    /// chosen (`0x5cc740`, `0x5cc342`).
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
         let dialog = cx.dialog;
         match target {
             Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
                 Outcome::Close(Reply::Ok)
             }
-            Target::Row { control: c, .. } if view.list(c).is_some() => {
+            Target::Row { control: c, row } if view.list(c).is_some() => {
+                let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
                 if let Some(list) = view.list_mut(c) {
                     list.selected = None;
                 }
-                info!("Verhandlungen: not built yet");
-                Outcome::Stay
+                let terms = dialog.controls[c].id == Some(BY_ABILITY);
+                player.map_or(Outcome::Stay, |p| negotiate(cx, p as u16, terms, true))
             }
             _ => Outcome::Stay,
         }
@@ -827,8 +846,9 @@ impl Screen for Appointments {
                 self.menu_player = open_info_menu(cx, view, grip, c, row);
                 Outcome::Stay
             }
-            // The transfer list's request (`OnSelChange_IDC_BEKANNTE_LISTE`):
-            // a club already in the talks is told so; joining is not built.
+            // The transfer list's request (`OnSelChange_IDC_BEKANNTE_LISTE`)
+            // for a listed player: the checks with a fixed fee's credit,
+            // then the purchase, which joins his appointment; no refill.
             Target::Row { control: c, row } if dialog.controls[c].id == Some(TALKS_LIST) => {
                 let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
                 let Some(id) = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied())
@@ -836,18 +856,14 @@ impl Screen for Appointments {
                     return Outcome::Stay;
                 };
                 let id = id as u16;
-                if !transfers::listings(records).iter().any(|e| e.id == id) {
+                let Some(listing) = transfers::listings(records).into_iter().find(|e| e.id == id)
+                else {
                     return Outcome::Stay;
+                };
+                if let Some(text) = refusal(cx, id, Checks::Credit) {
+                    return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
                 }
-                let own = own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())));
-                let taking_part = transfers::appointments(records)
-                    .iter()
-                    .any(|t| t.player == id && own.is_some_and(|o| t.clubs.contains(&o)));
-                if taking_part {
-                    return Outcome::Popup(Request::with(NOTICE, Args::Text(ALREADY_IN)));
-                }
-                info!("Verhandlungen ({id}): not built yet");
-                Outcome::Stay
+                purchase(cx, id, &listing).unwrap_or(Outcome::Stay)
             }
             _ => Outcome::Stay,
         }
@@ -1081,6 +1097,8 @@ fn own_slot(cx: &Cx) -> Option<usize> {
 #[derive(Default)]
 pub struct WatchedPlayer {
     id: u16,
+    /// Whether the planner is open to book a talk.
+    booking: bool,
 }
 
 const CHOICES: u16 = 1333;
@@ -1098,6 +1116,20 @@ const IN_OWN_TEAM: u16 = 4307;
 /// A club books three negotiations a week at most.
 const TALKS_A_WEEK: usize = 3;
 const THREE_TALKS: u16 = 4237;
+/// What a purchase or a joined day may meet: no credit for the fixed
+/// release fee or the fee, the day taken, the seller's three talks.
+const NO_CREDIT: u16 = 3071;
+const CREDIT_REFUSED: u16 = 4073;
+const DAY_TAKEN: u16 = 2503;
+const SELLER_FULL: u16 = 4963;
+/// A release fee's unit.
+const FEE_UNIT: i64 = 10_000;
+/// The week planner, and what it books for a poaching talk and for the
+/// transfer list's; a fixed day joined within a fortnight.
+const PLANNER: u16 = super::planner::PLANNER;
+const POACHING_DAY: u8 = 0x0d;
+const PURCHASE_DAY: u8 = 0x0e;
+const FORTNIGHT: i16 = 14;
 
 impl Screen for WatchedPlayer {
     fn ids(&self) -> &[u16] {
@@ -1123,7 +1155,12 @@ impl Screen for WatchedPlayer {
             return Outcome::Stay;
         }
         match item {
-            NEGOTIATE => negotiate(cx, self.id),
+            // 28 closes once the planner has booked (`0x47f6a2`).
+            NEGOTIATE => {
+                let outcome = negotiate(cx, self.id, true, false);
+                self.booking = to_planner(outcome);
+                outcome
+            }
             UNWATCH => {
                 if let Some(slot) = own_slot(cx)
                     && let Some(records) = cx.state.records.as_mut()
@@ -1135,6 +1172,19 @@ impl Screen for WatchedPlayer {
             _ => Outcome::Close(Reply::Cancel),
         }
     }
+
+    /// The planner booked: 28 closes, the watch list fills anew.
+    fn answer(&mut self, _: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+        if std::mem::take(&mut self.booking) && reply == Reply::Ok {
+            return Outcome::Close(Reply::Ok);
+        }
+        Outcome::Stay
+    }
+}
+
+/// Whether an outcome opens the week planner.
+fn to_planner(outcome: Outcome) -> bool {
+    matches!(outcome, Outcome::Popup(Request { screen: PLANNER, .. }))
 }
 
 /// A question popup's ball, back and forth.
@@ -1146,37 +1196,162 @@ pub(crate) fn question_ball(view: &mut View, dialog: &Dialog) {
     }
 }
 
-/// The checks before a negotiation (`FUN_005a5ac2` with the flags
-/// 0x0dd00000), as far as the replica can tell them, for 28, 306 and 155;
-/// past them, booking is not built.
-pub(crate) fn negotiate(cx: &Cx, id: u16) -> Outcome {
-    let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
-    let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
-    let own = own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())));
+/// Which checks an opener asks for (`FUN_005a5ac2`'s flags): the
+/// poaching talks' (28, 306 and 155 0x0dd00000, 462 0x07c00000 — they
+/// differ only in what the replica cannot tell) add 2512, 4307 and 2360;
+/// 25's (0x200000) a fixed release fee's credit; 287's none.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Checks {
+    Poaching,
+    Credit,
+    None,
+}
+
+/// The checks before a negotiation, as far as the replica can tell them,
+/// in the game's order (it cannot tell 267, 263 and 4804): the notice to
+/// give, if any.
+fn refusal(cx: &Cx, id: u16, checks: Checks) -> Option<u16> {
+    let records = cx.state.records.as_ref()?;
+    let own = own_side(cx)?;
     let talks = transfers::appointments(records);
-    if talks.iter().any(|t| t.player == id && own.is_some_and(|o| t.clubs.contains(&o))) {
-        return notice(ALREADY_IN);
+    if talks.iter().any(|t| t.player == id && t.clubs.contains(&own)) {
+        return Some(ALREADY_IN);
     }
-    let Some(r) = records.player(id) else { return Outcome::Stay };
+    let r = records.player(id)?;
     if r.retiring() & 0x80 != 0 {
-        return notice(RETIRING_TEXT);
+        return Some(RETIRING_TEXT);
     }
     if r.get::<u8>(0x14c) != 0 {
-        return notice(SIGNED_ELSEWHERE);
+        return Some(SIGNED_ELSEWHERE);
     }
-    if talks.iter().any(|t| t.player == id) {
-        return notice(TALK_THIS_WEEK);
+    if checks == Checks::Poaching {
+        if talks.iter().any(|t| t.player == id) {
+            return Some(TALK_THIS_WEEK);
+        }
+        if present_club(records, id) == own {
+            return Some(IN_OWN_TEAM);
+        }
+        if transfers::listings(records).iter().any(|e| e.id == id) {
+            return Some(ON_LIST);
+        }
     }
-    if own.is_some_and(|o| present_club(records, id) == o) {
-        return notice(IN_OWN_TEAM);
+    // A fixed release fee must be within credit until the season's late
+    // days (`FUN_00767b6a`).
+    let listing = transfers::listings(records).into_iter().find(|e| e.id == id);
+    if checks == Checks::Credit
+        && listing.is_some_and(|e| e.terms != FREE_TRANSFER)
+        && r.fixed_fee() != 0
+        && records.globals.day() <= LATE
+        && investable(cx) < i64::from(r.fixed_fee()) * FEE_UNIT
+    {
+        return Some(NO_CREDIT);
     }
-    if transfers::listings(records).iter().any(|e| e.id == id) {
-        return notice(ON_LIST);
+    if transfers::talks_in_week(records, own) >= TALKS_A_WEEK {
+        return Some(THREE_TALKS);
     }
-    let ours = talks.iter().filter(|t| own.is_some_and(|o| t.clubs.contains(&o))).count();
-    if ours >= TALKS_A_WEEK {
-        return notice(THREE_TALKS);
+    None
+}
+
+/// A poaching talk (28, 306, 155, 462): past the checks, the week
+/// planner to book it in, with the contract's terms or without; whether
+/// it asks for the wished day.
+pub(crate) fn negotiate(cx: &Cx, id: u16, terms: bool, chosen: bool) -> Outcome {
+    if let Some(text) = refusal(cx, id, Checks::Poaching) {
+        return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
     }
-    info!("Verhandlungstermin ({id}): not built yet");
-    Outcome::Stay
+    let n = Negotiation {
+        player: id,
+        kind: transfers::POACHING,
+        planner: POACHING_DAY,
+        terms,
+        chosen,
+        join: None,
+    };
+    Outcome::Popup(Request::with(PLANNER, Args::Negotiation(n)))
+}
+
+/// A listed player bought (`FUN_005a5da3` with a sale): the fee within
+/// what can be invested; with no appointment for him the planner to book
+/// one in, unless his club sits at three this week; with one this
+/// fortnight, the planner to join it, unless the day is taken. Loans are
+/// not built; nothing to do is none.
+fn purchase(cx: &Cx, id: u16, listing: &Listing) -> Option<Outcome> {
+    let notice = |text: u16| Some(Outcome::Popup(Request::with(NOTICE, Args::Text(text))));
+    if listing.kind != SALE {
+        info!("Leihe ({id}): not built yet");
+        return None;
+    }
+    let records = cx.state.records.as_ref()?;
+    let fee = if listing.terms == FREE_TRANSFER { 0 } else { transfer_fee(cx, id) };
+    if fee > investable(cx) {
+        return notice(CREDIT_REFUSED);
+    }
+    let seller = records.player(id).map(|r| r.club()).filter(|&[country, _]| country != 0);
+    let seller = seller.map(|[country, number]| (country, i16::from(number)));
+    let mut n = Negotiation {
+        player: id,
+        kind: transfers::PURCHASE,
+        planner: PURCHASE_DAY,
+        terms: false,
+        chosen: true,
+        join: None,
+    };
+    match transfers::talk_day(records, id) {
+        None => {
+            if seller.is_some_and(|s| transfers::talks_in_week(records, s) >= TALKS_A_WEEK) {
+                return notice(SELLER_FULL);
+            }
+        }
+        Some(day) => {
+            seller?;
+            let start = records.globals.week_start();
+            if !(start..start + FORTNIGHT).contains(&day) {
+                return None;
+            }
+            let own = own_side(cx)?;
+            let slot = own_slot(cx)?;
+            let taken = records.planners.get(slot).is_some_and(|p| p.day(day as usize).kind != 0);
+            if taken || transfers::talks_on(records, own, day) {
+                return notice(DAY_TAKEN);
+            }
+            n.join = Some(day);
+        }
+    }
+    Some(Outcome::Popup(Request::with(PLANNER, Args::Negotiation(n))))
+}
+
+/// What a listed player costs (`FUN_0070a393`): nothing with no contract
+/// left, or one ending this season once its late days have come; else the
+/// fixed release fee or his market value.
+fn transfer_fee(cx: &Cx, id: u16) -> i64 {
+    let game = cx.game;
+    let (Some(records), Some(season)) = (cx.state.records.as_ref(), cx.state.season.as_ref())
+    else {
+        return 0;
+    };
+    let Some((player, _, status)) = a3_core::load::any_player(records, &game.data, id) else {
+        return 0;
+    };
+    let Some(r) = records.player(id) else { return 0 };
+    let years = status.contract.unwrap_or(0);
+    if years < 1 || (years == 1 && records.globals.day() > LATE) {
+        return 0;
+    }
+    if r.fixed_fee() != 0 {
+        return i64::from(r.fixed_fee()) * FEE_UNIT;
+    }
+    let stars = records.globals.stars();
+    super::playerinfo::market_value(game, &player, r, stars, years, season.date())
+}
+
+/// What the club can invest (`FUN_00622bd9`).
+fn investable(cx: &Cx) -> i64 {
+    own_team(cx).map_or(0, |(records, team)| {
+        Figures::of(team, records.globals.fund_prices(), &records.agreed()).investable()
+    })
+}
+
+/// The club as the appointments name it.
+fn own_side(cx: &Cx) -> Option<transfers::Side> {
+    own_team(cx).map(|(_, t)| (t.country(), i16::from(t.number())))
 }

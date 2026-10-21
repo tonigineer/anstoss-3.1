@@ -3,12 +3,16 @@
 //! what is booked for it. From the line-up's menu it books a talk with a
 //! player (`Einzelgespräch`, kind 0x19), from the medical department a
 //! sick visit (`Krankenbesuch`, 0x0b), on a free day from today on
-//! (`FUN_0076640b`); a day gone or taken does not answer.
+//! (`FUN_0076640b`); a day gone or taken does not answer. From the market
+//! it books a negotiation, or joins one fixed already
+//! (`CSummeTerminplTerminSteht`; VERHANDLUNG-BUCHUNG.md).
 
 use std::collections::HashMap;
 
+use a3_core::cycle::Negotiation;
 use a3_core::records::{Appointment, Records};
 use a3_core::season::Rules;
+use a3_core::transfers;
 use a3_files::rch::Dialog;
 
 use super::hub::{self, WEEK_PLANNER, WEEK_PLANNER_SYMBOL};
@@ -32,8 +36,11 @@ pub const TALK: u8 = 0x19;
 /// A single day's appointment.
 const ONE_DAY: u8 = 1;
 
-/// Texts of the game.
+/// Texts of the game: the prompts; a negotiation fixed already, on a
+/// weekday from Sunday on.
 const CHOOSE: u16 = 3876;
+const FIXED: u16 = 4238;
+const WEEKDAYS: u16 = 3866;
 const DAY_MONTH: u16 = 1778;
 /// What each kind of appointment is called, and whether it names a player
 /// (`FUN_0058e4c9`).
@@ -183,10 +190,12 @@ fn show_week(cx: &Cx, view: &mut View) -> [bool; WEEK] {
 /// The planner, booking an appointment with a player.
 #[derive(Default)]
 pub struct Planner {
-    /// What is booked, with whom, and which days can be booked.
+    /// What is booked, with whom, and which days can be booked; a
+    /// negotiation's terms.
     kind: u8,
     player: u16,
     free: [bool; WEEK],
+    negotiation: Option<Negotiation>,
 }
 
 /// The human manager's slot and his week: its first day and today.
@@ -225,39 +234,98 @@ impl Screen for Planner {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        self.negotiation = None;
         (self.kind, self.player) = match args {
             Args::Record(player) => (TALK, player),
             Args::Book(kind, player) => (kind, player),
+            Args::Negotiation(n) => {
+                self.negotiation = Some(n);
+                (n.planner, n.player)
+            }
             _ => return,
         };
-        if let Some(ok) = control(cx.dialog, OK) {
-            view.controls[ok].hidden = true;
-        }
-        set(view, cx.dialog, PROMPT, cx.game.text(CHOOSE).to_owned());
-        // The notepad does nothing yet.
         let dialog = cx.dialog;
+        let fixed = self.negotiation.and_then(|n| n.join);
+        if let Some(ok) = control(dialog, OK) {
+            view.controls[ok].hidden = fixed.is_none();
+        }
+        // The prompt (`0x58563b`): the day fixed, the file's for a
+        // negotiation not asking for the wished day, else 3876.
+        let prompt = match self.negotiation {
+            Some(Negotiation { join: Some(day), .. }) => {
+                let weekday = cx.game.text(WEEKDAYS + day.rem_euclid(7) as u16);
+                Some(super::finances::printf(cx.game.text(FIXED), &[&weekday]))
+            }
+            Some(n) if !n.chosen => None,
+            _ => Some(cx.game.text(CHOOSE).to_owned()),
+        };
+        if let Some(prompt) = prompt {
+            set(view, dialog, PROMPT, prompt);
+        }
+        // The notepad does nothing yet.
         let notepad = |t| matches!(t, Target::Button(b) if dialog.controls[b].id == Some(NOTEPAD));
         super::mark_inert(view, dialog, |t| !notepad(t));
         self.free = show_week(cx, view);
+        // With the day fixed no row answers; OK joins.
+        if fixed.is_some() {
+            self.free = [false; WEEK];
+        }
     }
 
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
-        if ok_or_cancel(cx.dialog, target).1 {
+        let (ok, cancel) = ok_or_cancel(cx.dialog, target);
+        if cancel {
             return Outcome::Close(Reply::Cancel);
+        }
+        if ok
+            && let Some(n) = self.negotiation
+            && let Some(day) = n.join
+        {
+            self.book(cx, day);
+            return Outcome::Close(Reply::Ok);
         }
         let Target::Option { control: c, item } = target else { return Outcome::Stay };
         if cx.dialog.controls[c].id != Some(DAYS) || !self.free.get(item).copied().unwrap_or(false)
         {
             return Outcome::Stay;
         }
-        let Some((slot, start, _)) = week(cx) else { return Outcome::Stay };
-        let Some(planner) = cx.state.records.as_mut().and_then(|r| r.planners.get_mut(slot)) else {
-            return Outcome::Stay;
-        };
-        planner.book(
-            start + item,
-            Appointment { kind: self.kind, flag: ONE_DAY, player: self.player, club: 0 },
-        );
+        let Some((_, start, _)) = week(cx) else { return Outcome::Stay };
+        self.book(cx, (start + item) as i16);
         Outcome::Close(Reply::Ok)
+    }
+}
+
+impl Planner {
+    /// The day booked in the planner; a negotiation also among the
+    /// appointments, new (`FUN_00764cf8`, `FUN_00764f63`) or joined
+    /// (`FUN_007651de`) — the planner even when they are full.
+    fn book(&self, cx: &mut Cx, day: i16) {
+        let Some((slot, ..)) = week(cx) else { return };
+        let Some(records) = cx.state.records.as_mut() else { return };
+        if let Some(n) = self.negotiation
+            && let Some(m) = records.managers.get(slot)
+        {
+            let buyer = (m.country() as u8, m.team() as i16);
+            let seller = records.player(n.player).map_or((0, 0), |r| {
+                let [country, number] = r.club();
+                (country, i16::from(number))
+            });
+            if n.join.is_some() {
+                transfers::join(records, n.player, buyer);
+            } else {
+                let terms = if n.terms {
+                    transfers::terms(records, n.player)
+                } else {
+                    [0; transfers::TERMS]
+                };
+                transfers::book(records, n.kind, day, n.player, seller, buyer, terms);
+            }
+        }
+        if let Some(planner) = records.planners.get_mut(slot) {
+            planner.book(
+                day as usize,
+                Appointment { kind: self.kind, flag: ONE_DAY, player: self.player, club: 0 },
+            );
+        }
     }
 }

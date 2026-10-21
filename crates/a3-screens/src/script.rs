@@ -1664,6 +1664,70 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_purchase_is_booked_and_a_talk_joined() {
+        use a3_core::transfers;
+        let game = game();
+        let list = "now click bar 10\nuntil dialog 218\nnow choose 6371 0\nuntil dialog 287";
+        let Some(runner) = on_save(&game, "Probe1", list) else { return };
+        let rows = control(&game.dialogs[&287], 3937).unwrap();
+        let keys: Vec<u16> =
+            runner.host.view().list(rows).unwrap().keys.iter().map(|&k| k as u16).collect();
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = records.humans().next().unwrap();
+        let own = (manager.country() as u8, manager.team() as i16);
+        let start = records.globals.week_start();
+        let listed = transfers::listings(records);
+        let sale = |id: u16| listed.iter().any(|e| e.id == id && e.kind == transfers::SALE);
+        let theirs = |id: u16| records.player(id).is_some_and(|r| r.club()[0] != 0);
+        // A player of another club with no appointment, and one with an
+        // appointment this week on a day the club has free.
+        let free = keys
+            .iter()
+            .position(|&id| sale(id) && theirs(id) && transfers::talk_day(records, id).is_none())
+            .unwrap();
+        let fixed = keys
+            .iter()
+            .position(|&id| {
+                transfers::talk_day(records, id).is_some_and(|d| {
+                    (start..start + 7).contains(&d)
+                        && records.planners[0].day(d as usize).kind == 0
+                        && !transfers::talks_on(records, own, d)
+                }) && sale(id)
+                    && theirs(id)
+            })
+            .unwrap();
+        let fixed_day = transfers::talk_day(records, keys[fixed]).unwrap();
+        drop(state);
+        // The first is booked on Saturday, in the planner as a negotiation
+        // of the transfer list.
+        let buy = format!(
+            "{list}\nnow row 3937 {free}\nuntil dialog 412\nnow choose 5034 6\nuntil dialog 287"
+        );
+        let runner = on_save(&game, "Probe1", &buy).unwrap();
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let talks = transfers::appointments(records);
+        let talk = talks.iter().find(|t| t.player == keys[free]).unwrap();
+        assert_eq!((talk.kind, talk.day, talk.clubs[1]), (3, start + 6, own));
+        let booked = records.planners[0].day(start as usize + 6);
+        assert_eq!((booked.kind, booked.player), (0x0e, keys[free]));
+        drop(state);
+        // The club joins the second's, on its day.
+        let join = format!(
+            "{list}\nnow row 3937 {fixed}\nuntil dialog 412\nnow press 1\nuntil dialog 287"
+        );
+        let runner = on_save(&game, "Probe1", &join).unwrap();
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let talks = transfers::appointments(records);
+        assert!(talks.iter().find(|t| t.player == keys[fixed]).unwrap().clubs.contains(&own));
+        let booked = records.planners[0].day(fixed_day as usize);
+        assert_eq!((booked.kind, booked.player), (0x0e, keys[fixed]));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_finances_show_the_season_row_by_row() {
         let game = game();
         let texts = |then: &str, ids: &[u16]| -> Vec<String> {
