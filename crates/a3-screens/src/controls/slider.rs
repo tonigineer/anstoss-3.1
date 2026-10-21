@@ -46,7 +46,9 @@ pub fn handle(control: &Control, value: &Value) -> Rect {
     let (min, max) = value.range;
     let track = (r.width() - 2.0 * SLIDER_ARROW - SLIDER_HANDLE) as i64;
     let along = if max > min {
-        (i64::from(value.value - min) * track).div_euclid(i64::from(max - min))
+        // A C division: a track shorter than nothing (the calculations'
+        // arrow bar, -1 px) leaves the handle at its start.
+        i64::from(value.value - min) * track / i64::from(max - min)
     } else {
         0
     };

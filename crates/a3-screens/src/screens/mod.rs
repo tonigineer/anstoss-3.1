@@ -13,6 +13,7 @@ pub mod finances;
 pub mod formations;
 pub mod hub;
 pub mod jobs;
+pub mod kalkulation;
 pub mod market;
 pub mod medical;
 pub mod office;
@@ -142,6 +143,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(bank::Loans::default()),
         Box::new(bank::Repayment::default()),
         Box::new(bank::NoCredit),
+        Box::new(kalkulation::Figures),
         Box::new(squad::SquadMenu::default()),
         Box::new(squad::CurrentSquad::default()),
         Box::new(squad::MarketValues::default()),
@@ -201,6 +203,7 @@ pub fn compose(game: &mut Game) {
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);
+    kalkulation::compose(&mut game.dialogs);
     squad::compose(&mut game.dialogs, &game.data.rules);
     squad::compose_squad(&mut game.dialogs);
     squad::compose_values(&mut game.dialogs);

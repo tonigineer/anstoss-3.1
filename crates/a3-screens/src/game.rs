@@ -168,12 +168,10 @@ impl Game {
     pub fn graphic(&self, id: u16) -> Result<RgbaImage, Box<dyn Error>> {
         let path = self.graphics.get(&id).ok_or_else(|| format!("no graphic {id}"))?;
         let bytes = self.read(path)?;
-        let format = if path.to_lowercase().ends_with(".bmp") {
-            ImageFormat::Bmp
-        } else {
-            ImageFormat::Jpeg
-        };
-        Ok(image::load_from_memory_with_format(&bytes, format)?.to_rgba8())
+        if path.to_lowercase().ends_with(".bmp") {
+            return Ok(image::load_from_memory_with_format(&bytes, ImageFormat::Bmp)?.to_rgba8());
+        }
+        jpeg(&bytes)
     }
 
     /// A file of the game by its relative path, which ignores case as
@@ -212,6 +210,8 @@ impl Game {
         // A TGA does not say what it is.
         let picture = if path.to_lowercase().ends_with(".tga") {
             image::load_from_memory_with_format(&bytes, ImageFormat::Tga)?
+        } else if bytes.starts_with(&[0xff, 0xd8]) {
+            return jpeg(&bytes);
         } else {
             image::load_from_memory(&bytes)?
         };
@@ -307,6 +307,16 @@ fn read_head(path: &Path, len: usize) -> Option<Vec<u8>> {
 
 fn cstring(bytes: &[u8]) -> String {
     bytes.iter().take_while(|&&b| b != 0).map(|&b| char::from(b)).collect()
+}
+
+/// A JPEG as the game's decoder shows it: its colour planes repeated, not
+/// smoothed ([`a3_files::jpeg`]); one that decoder does not take, as
+/// another decodes it.
+fn jpeg(bytes: &[u8]) -> Result<RgbaImage, Box<dyn Error>> {
+    match a3_files::jpeg::decode(bytes) {
+        Some(picture) => Ok(image::DynamicImage::ImageRgb8(picture).to_rgba8()),
+        None => Ok(image::load_from_memory_with_format(bytes, ImageFormat::Jpeg)?.to_rgba8()),
+    }
 }
 
 #[cfg(test)]

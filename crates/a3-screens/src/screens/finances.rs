@@ -13,6 +13,7 @@ use a3_files::rch::Dialog;
 use tracing::info;
 
 use super::hub::{self, BALANCE, BALANCE_SYMBOL, FINANCES, FINANCES_SYMBOL};
+use super::kalkulation;
 use super::playerinfo::money;
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
 use crate::controls::bitmap::Picture;
@@ -170,6 +171,8 @@ impl Screen for Balance {
 pub struct Finances {
     /// Whether the whistle asks.
     whistle: bool,
+    /// The row whose calculation is open (`FUN_004a43cb`).
+    calculation: Option<usize>,
     /// How the figures are found ("Ermittlung der Zahlen"), and what they
     /// are compared with ("Darstellung"), as the combos' items have it.
     finding: usize,
@@ -263,6 +266,8 @@ const GREEN: u16 = 2625;
 const DARK_GREEN: u16 = 2626;
 /// The figures, without a currency: "1.234.567" (`FUN_004db67a`).
 const AMOUNTS: [u16; 3] = [2500, 2499, 2445];
+/// The rows' labels, buttons that open their calculations.
+const ROW_BUTTONS: std::ops::RangeInclusive<u16> = 5767..=5779;
 
 impl Screen for Finances {
     fn ids(&self) -> &[u16] {
@@ -273,6 +278,16 @@ impl Screen for Finances {
         open_screen(cx, view, FINANCES_SYMBOL);
         let game = cx.game;
         let dialog = cx.dialog;
+        self.calculation = None;
+        let works = |target: Target| match target {
+            Target::Button(c) => dialog.controls[c].id.is_some_and(|id| {
+                ROW_BUTTONS.contains(&id)
+                    && kalkulation::BUILT
+                        .contains(&kalkulation::ROW_DIALOGS[usize::from(id - ROW_BUTTONS.start())])
+            }),
+            _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
+        };
+        mark_inert(view, dialog, works);
         self.finding = CURRENT;
         self.compared = NO_COMPARISON;
         let has_last_season = own_extra(game, cx)
@@ -297,6 +312,13 @@ impl Screen for Finances {
             self.whistle = matches!(outcome, Outcome::Popup(_));
             return outcome;
         }
+        if let Target::Button(c) = target
+            && let Some(id) = cx.dialog.controls[c].id.filter(|id| ROW_BUTTONS.contains(id))
+        {
+            let row = usize::from(id - ROW_BUTTONS.start());
+            self.calculation = Some(row);
+            return Outcome::Popup(Request::new(kalkulation::ROW_DIALOGS[row]));
+        }
         // A combo's row picked: what it now shows.
         let Target::Row { control: c, .. } = target else { return Outcome::Stay };
         let Some(item) = view.combo(c).and_then(|combo| combo.selected) else {
@@ -314,7 +336,20 @@ impl Screen for Finances {
     }
 
     /// The whistle's question: a yes ends the turn.
-    fn answer(&mut self, _: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+    /// A calculation's arrow bar pages on to the next row's or back to
+    /// the last's; its OK or cancel brings the figures anew, as the
+    /// calculations may have booked.
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        if let Some(row) = self.calculation.take() {
+            if let Reply::Choice(choice @ (kalkulation::NEXT | kalkulation::PREVIOUS)) = reply
+                && let Some(next) = kalkulation::step(row, choice)
+            {
+                self.calculation = Some(next);
+                return Outcome::Popup(Request::new(kalkulation::ROW_DIALOGS[next]));
+            }
+            self.fill(cx, view);
+            return Outcome::Stay;
+        }
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
         }
@@ -472,7 +507,10 @@ pub(crate) fn amount(game: &Game, v: i64) -> String {
 }
 
 /// The manager's club's extra data, and its slot.
-fn own_extra<'a>(game: &Game, cx: &'a Cx) -> Option<(usize, &'a a3_core::records::Extra)> {
+pub(crate) fn own_extra<'a>(
+    game: &Game,
+    cx: &'a Cx,
+) -> Option<(usize, &'a a3_core::records::Extra)> {
     let (records, team) = own_team(game, cx)?;
     let slot = usize::from(team.human()).checked_sub(1)?;
     Some((slot, records.extras.get(slot)?))

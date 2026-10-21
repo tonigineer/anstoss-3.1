@@ -343,16 +343,23 @@ impl Accounts {
             .then(|| Self::at(extra.bytes(), LAST_SEASON - EXTRA_BASE))
     }
 
+    /// Last season's fields as the club keeps them, whether it had one or
+    /// not (zero then): what the calculations read live.
+    pub fn last_season_kept(extra: &Extra) -> Self {
+        Self::at(extra.bytes(), LAST_SEASON - EXTRA_BASE)
+    }
+
     /// This season's as the turn started.
     pub fn turn_copy(manager: &Manager) -> Self {
         Self::at(manager.bytes(), TURN_COPY)
     }
 
-    fn i32_(&self, at: usize) -> i32 {
+    /// A field, by its offset in the accounts.
+    pub fn i32_(&self, at: usize) -> i32 {
         i32::from_le_bytes(self.0[at..at + 4].try_into().unwrap())
     }
 
-    fn i64_(&self, at: usize) -> i64 {
+    pub fn i64_(&self, at: usize) -> i64 {
         i64::from_le_bytes(self.0[at..at + 8].try_into().unwrap())
     }
 
@@ -366,7 +373,7 @@ impl Accounts {
     }
 
     /// The stadium's costs (`FUN_006744e3`).
-    pub(crate) fn stadium(&self) -> i64 {
+    pub fn stadium(&self) -> i64 {
         self.i64_(0xb0).wrapping_add(self.i64_(0xc0)).wrapping_add(i64::from(self.i32_(0xc8)))
     }
 }

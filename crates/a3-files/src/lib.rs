@@ -7,6 +7,7 @@ pub mod an3;
 pub mod bitmap_font;
 pub mod cpr;
 pub mod exe;
+pub mod jpeg;
 pub mod rch;
 pub mod sav;
 pub mod sks;
