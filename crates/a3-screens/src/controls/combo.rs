@@ -22,9 +22,12 @@ use crate::pointer::{Geometry, Target};
 pub(crate) const LIST_UP: &str = "Pfeile/PfeilO1.bmp";
 pub(crate) const LIST_DOWN: &str = "Pfeile/PfeilU1.bmp";
 /// The field's arrow held, over the dialog's picture while the list is
-/// down, this far left of the field's right end and above its top.
+/// down, this far left of the field's right end and above its top — at
+/// its top when the list drops below the field (the stadium's
+/// scoreboard).
 pub(crate) const FIELD_HELD: &str = "Pfeile/PfeilU2.bmp";
 const HELD_AT: (f32, f32) = (21.0, 2.0);
+const HELD_AT_BELOW: (f32, f32) = (21.0, 0.0);
 const HANDLE_COLOUR: u8 = 0x70;
 const HANDLE_SHIFT: u8 = 4;
 
@@ -168,7 +171,8 @@ impl ComboState {
         if self.open
             && let Some(held) = paint.widget(FIELD_HELD)
         {
-            paste(frame, held, Vec2::new(r.max.x - HELD_AT.0, r.min.y - HELD_AT.1));
+            let (left, up) = if Self::above(paint.control) { HELD_AT } else { HELD_AT_BELOW };
+            paste(frame, held, Vec2::new(r.max.x - left, r.min.y - up));
         }
         let (x, y) = (r.min.x as i32, r.min.y as i32);
         if let (Some(font), Some(text)) =

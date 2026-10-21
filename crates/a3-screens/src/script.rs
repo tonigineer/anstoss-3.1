@@ -1497,6 +1497,47 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_stadium_is_shown_and_its_comfort_bought() {
+        let game = game();
+        let open = "now click bar 11\nuntil dialog 464";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&464];
+        let text = |runner: &Runner, id: u16| {
+            runner.host.view().text(crate::screens::control(dialog, id).unwrap()).to_owned()
+        };
+        // The places add up to the capacity.
+        let places: Vec<i32> = (5846..=5850).map(|id| text(&runner, id).parse().unwrap()).collect();
+        assert_eq!(places.iter().sum::<i32>(), text(&runner, 5851).parse::<i32>().unwrap());
+        let stands = runner
+            .host
+            .view()
+            .list(crate::screens::control(dialog, 5853).unwrap())
+            .unwrap()
+            .rows
+            .len();
+        assert_eq!(stands, 4);
+        // Box seats ticked: they cost, are carried out, and stay once left.
+        let state = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            let subs =
+                a3_core::stadium::subs(records, team.country(), team.number().into()).unwrap();
+            (team.get::<i64>(0x2d8 + 0x278), subs[0].has(a3_core::stadium::Comfort::Boxes))
+        };
+        let (costs, boxes) = state(&runner);
+        assert!(!boxes);
+        let buy = format!(
+            "{open}\nnow click at 150 427\nnow press 5917\nuntil dialog 384\nnow press 4741\n\
+             until dialog 464\nnow click bar 10\nuntil dialog 218"
+        );
+        let runner = on_save(&game, "Probe1", &buy).unwrap();
+        assert_eq!(state(&runner), (costs + 250_000, true));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn players_are_watched_and_dropped() {
         let game = game();
         let menu = "now click bar 10\nuntil dialog 218";

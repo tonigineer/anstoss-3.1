@@ -23,6 +23,8 @@ pub struct CheckState {
     pub checked: bool,
     /// The label, placeholders filled in.
     pub text: String,
+    /// A disabled box looks the same but takes no click (`WS_DISABLED`).
+    pub disabled: bool,
 }
 
 impl CheckState {
@@ -33,11 +35,12 @@ impl CheckState {
         {
             paste(frame, tick, r.min + Vec2::new(0.0, TICK_DOWN));
         }
-        let Some(font) = paint.font() else { return };
+        // A box no wider than its tick has no room for its label.
+        let Some(font) = paint.font().filter(|_| r.width() as i32 > LABEL_LEFT) else { return };
         let pointed = paint.pointed(Target::Check(paint.index));
         let color = if pointed { TEXT_HOVER } else { TEXT };
         let (x, y) = (r.min.x as i32 + LABEL_LEFT, r.min.y as i32);
-        let width = (r.width() as i32 - LABEL_LEFT).max(1) as u32;
+        let width = (r.width() as i32 - LABEL_LEFT) as u32;
         font.draw_wrapped(frame, x, y, width, &self.text, color, false);
     }
 
@@ -48,6 +51,8 @@ impl CheckState {
         geometry: &dyn Geometry,
         out: &mut Vec<(Target, Rect)>,
     ) {
-        out.push((Target::Check(index), geometry.rect(control)));
+        if !self.disabled {
+            out.push((Target::Check(index), geometry.rect(control)));
+        }
     }
 }

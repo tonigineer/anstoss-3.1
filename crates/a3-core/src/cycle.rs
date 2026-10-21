@@ -77,6 +77,8 @@ pub mod dialogs {
     /// The balance sheet, the bar's ninth symbol; the finances, its tenth.
     pub const BALANCE: u16 = 349;
     pub const FINANCES: u16 = 417;
+    /// The stadium, the bar's twelfth symbol.
+    pub const STADIUM: u16 = 464;
     /// The squad and the transfer market, the bar's eleventh symbol, and
     /// its current squad.
     pub const SQUAD_MENU: u16 = 218;

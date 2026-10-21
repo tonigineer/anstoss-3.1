@@ -28,6 +28,7 @@ pub mod records;
 pub mod refit;
 pub mod season;
 pub mod squadlist;
+pub mod stadium;
 pub mod state;
 pub mod tactics;
 pub mod talk;

@@ -127,7 +127,9 @@ impl ControlView {
             }
             Kind::Player => ControlState::Player(None),
             Kind::Marker => ControlState::Marker(None),
-            Kind::Check => ControlState::Check(CheckState { checked: false, text: text() }),
+            Kind::Check => {
+                ControlState::Check(CheckState { text: text(), ..CheckState::default() })
+            }
             Kind::Combo { .. } => ControlState::Combo(ComboState::default()),
             Kind::PushButton { .. } => ControlState::Button(ButtonState::default()),
             Kind::Menu => ControlState::Menu(MenuState::default()),

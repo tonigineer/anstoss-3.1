@@ -22,6 +22,7 @@ pub mod playerinfo;
 pub mod popups;
 pub mod special;
 pub mod squad;
+pub mod stadium;
 pub mod start;
 pub mod tactics;
 pub mod talk;
@@ -148,6 +149,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(squad::Extensions::default()),
         Box::new(squad::DrawOption),
         Box::new(squad::Relations),
+        Box::new(stadium::StadiumScreen::default()),
         Box::new(youth::Poaching::default()),
         Box::new(youth::PreContract),
         Box::new(youth::Youths::default()),
@@ -198,6 +200,7 @@ pub fn compose(game: &mut Game) {
     squad::compose_squad(&mut game.dialogs);
     squad::compose_values(&mut game.dialogs);
     squad::compose_next(&mut game.dialogs);
+    stadium::compose(&mut game.dialogs, &game.data.rules);
     market::compose(&mut game.dialogs);
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);

@@ -26,7 +26,7 @@ use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
 pub use a3_core::cycle::dialogs::{
     ABILITY_CHOICE, BALANCE, COMPARISON, DRESSING_ROOM, FINANCES, INDIVIDUAL_TRAINING, LINEUP,
-    LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, SQUAD_MENU, TACTICS, TRAINING_PICTURES,
+    LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, SQUAD_MENU, STADIUM, TACTICS, TRAINING_PICTURES,
     UNIT_CHOICE, WEEK_PLANNER, YEAR_CALENDAR,
 };
 use a3_core::cycle::dialogs::{AMATEUR_PLAYERS, NOTICE, QUESTION, YOUTH_TEAM};
@@ -60,6 +60,7 @@ pub(crate) const WEEK_PLANNER_SYMBOL: usize = 7;
 pub(crate) const BALANCE_SYMBOL: usize = 8;
 pub(crate) const FINANCES_SYMBOL: usize = 9;
 pub(crate) const SQUAD_SYMBOL: usize = 10;
+pub(crate) const STADIUM_SYMBOL: usize = 11;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 /// What the turn before a match closes: the money, the club, the national
 /// team (the table at 0x8a35b0).
@@ -68,7 +69,7 @@ const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 12] = [
+const BAR_SCREENS: [(usize, u16); 13] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
@@ -80,6 +81,7 @@ const BAR_SCREENS: [(usize, u16); 12] = [
     (BALANCE_SYMBOL, BALANCE),
     (FINANCES_SYMBOL, FINANCES),
     (SQUAD_SYMBOL, SQUAD_MENU),
+    (STADIUM_SYMBOL, STADIUM),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
 /// What the game takes for Saturday.
@@ -1613,7 +1615,7 @@ mod tests {
     use crate::screens::compose;
 
     /// A symbol not built yet.
-    const UNBUILT_SYMBOL: usize = 11;
+    const UNBUILT_SYMBOL: usize = 12;
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
@@ -1639,8 +1641,8 @@ mod tests {
         let mut view = View::new(LINEUP, dialog);
         let mut cx = Cx { game: &game, dialog, state: &mut state };
         MenuBar::default().open(&mut cx, &mut view, Args::None);
-        // Crossed out: the bar's symbols that lead nowhere yet — the first
-        // training's —, not the line-up's, the dressing room's or the
+        // Crossed out: the bar's symbols that lead nowhere yet — the
+        // contacts' —, not the line-up's, the dressing room's or the
         // whistle.
         let bar = control(dialog, BAR_ID).unwrap();
         let crossed = |item| view.inert.contains(&Target::Option { control: bar, item });
