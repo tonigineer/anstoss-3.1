@@ -240,6 +240,10 @@ pub enum Args {
         number: u16,
         value: i32,
     },
+    /// The trainers' market: the goalkeepers' coaches, or the others'.
+    Trainers {
+        keepers: bool,
+    },
     /// A cooperation contract still running (text 4456): the partner's
     /// number in the main country, the year it ends.
     Cooperation {

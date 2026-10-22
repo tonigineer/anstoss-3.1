@@ -96,7 +96,7 @@ impl Screen for Contacts {
         // The cooperation's refusals and the sub-dialogs built.
         let works = |target: Target| match target {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(BUTTONS) => {
-                BUILT.iter().any(|&(i, _)| i == item) || item == COOPERATION
+                item <= 1 || BUILT.iter().any(|&(i, _)| i == item) || item == COOPERATION
             }
             _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
         };
@@ -126,6 +126,10 @@ impl Screen for Contacts {
                 value: 0,
             };
             return Outcome::Popup(Request::with(NOTICE, args));
+        }
+        if item <= 1 {
+            let args = Args::Trainers { keepers: item == 1 };
+            return Outcome::Popup(Request::with(TRAINERS_DIALOG, args));
         }
         if let Some(&(_, screen)) = BUILT.iter().find(|&&(i, _)| i == item) {
             return Outcome::Popup(Request::new(screen));
@@ -1277,6 +1281,222 @@ impl Enquiry {
                 list.selected = None;
                 list.scroll = 0;
             }
+        }
+    }
+}
+
+/// The trainers' market (dialog 35, `CCoTrainerListe` for the
+/// co-trainers, `CToTrainerlisteDialog` for the goalkeepers' coaches;
+/// KONTAKTE.md §5): the country's free candidates by competence, and the
+/// club's own trainer below. Making an offer is not built.
+#[derive(Default)]
+pub struct Trainers {
+    keepers: bool,
+}
+
+const TRAINERS_DIALOG: u16 = 35;
+const TRAINERS_LIST: u16 = 1359;
+const EXTEND: u16 = 1361;
+const CURRENT: u16 = 1362;
+const TRAINERS_HEADER: u16 = 1375;
+/// The goalkeepers' caption and header, and the lines naming the club's
+/// own trainer.
+const KEEPERS_CAPTION: u16 = 2372;
+const KEEPERS_HEADER: u16 = 3865;
+const CURRENT_CO: u16 = 2370;
+const CURRENT_KEEPERS: u16 = 2371;
+/// What a trainer is known for, 3858 to 3864.
+const REPUTATIONS: u16 = 3858;
+const REPUTATIONS_LAST: u8 = 6;
+/// "ein Jahr" … "zehn Jahre", else "%d Jahre".
+const YEARS_TEXTS: u16 = 1081;
+const YEARS_MANY: u16 = 1587;
+/// The pools and the markets of both kinds; a market holds its count and
+/// thirty entries of an id and that trainer's competence.
+const CO_POOL: &str = "0xbe3920";
+const KEEPERS_POOL: &str = "0xbe17f8";
+const CO_MARKET: &str = "0x8e27a0";
+const KEEPERS_MARKET: &str = "0x8e2490";
+const MARKET_ENTRIES: usize = 30;
+const MARKET_ENTRY: usize = 4;
+/// A trainer's record: his name, competence, what he is known for, his
+/// birthday, the years he is still under contract, his pay, the years he
+/// asks for, and the managers he has turned down.
+const NAMES_AT: usize = 0;
+const COMPETENCE_AT: usize = 4;
+const REPUTATION_AT: usize = 6;
+const BORN_AT: usize = 8;
+const UNDER_CONTRACT_AT: usize = 0xc;
+const PAY_AT: usize = 0x10;
+const YEARS_ASKED_AT: usize = 0x15;
+const TURNED_DOWN_AT: usize = 0x18;
+/// The goalkeepers' header and list columns (`0x88b0a4`, `0x88b0b8`,
+/// `0x88b0cc`, `0x88b0e0`).
+const KEEPERS_HEAD_TABS: [f32; 5] = [0.0, 120.0, 170.0, 260.0, 360.0];
+const KEEPERS_HEAD_ALIGNS: [Option<(a3_files::rch::Align, f32)>; 5] = [
+    None,
+    Some((a3_files::rch::Align::Right, 40.0)),
+    Some((a3_files::rch::Align::Centre, 60.0)),
+    Some((a3_files::rch::Align::Centre, 100.0)),
+    Some((a3_files::rch::Align::Centre, 60.0)),
+];
+const KEEPERS_TABS: [f32; 5] = [0.0, 130.0, 190.0, 260.0, 370.0];
+const KEEPERS_ALIGNS: [Option<(a3_files::rch::Align, f32)>; 5] = [
+    None,
+    Some((a3_files::rch::Align::Right, 20.0)),
+    Some((a3_files::rch::Align::Right, 20.0)),
+    Some((a3_files::rch::Align::Centre, 100.0)),
+    Some((a3_files::rch::Align::Right, 20.0)),
+];
+/// The club's own co-trainer and goalkeepers' coach (team +0xa2, +0xa4).
+const CO_AT: usize = 0xa2;
+const KEEPERS_AT: usize = 0xa4;
+
+/// A trainer of a pool, as the lists read him.
+struct Trainer {
+    name: String,
+    age: u32,
+    competence: i8,
+    reputation: u8,
+    pay: i32,
+    years: u8,
+    under_contract: u8,
+    turned_down: i16,
+}
+
+fn trainer(cx: &Cx, keepers: bool, id: i16) -> Option<Trainer> {
+    let records = cx.state.records.as_ref()?;
+    let pool = if keepers { KEEPERS_POOL } else { CO_POOL };
+    let r = records.block(&format!("{pool}[{}]", usize::try_from(id).ok()?))?;
+    let word = |at: usize| r.get(at..at + 2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]));
+    let name = |at: usize| records.name(word(at) as u16).to_owned();
+    let born = chrono::NaiveDate::from_ymd_opt(
+        i32::from(word(BORN_AT + 2)),
+        u32::from(*r.get(BORN_AT + 1)?),
+        u32::from(*r.get(BORN_AT)?),
+    );
+    let today = cx.state.season.as_ref().map(a3_core::season::Season::date);
+    Some(Trainer {
+        name: format!("{} {}", name(NAMES_AT), name(NAMES_AT + 2)),
+        age: born.zip(today).and_then(|(b, t)| t.years_since(b)).unwrap_or(0),
+        competence: *r.get(COMPETENCE_AT)? as i8,
+        reputation: *r.get(REPUTATION_AT)?,
+        pay: i32::from_le_bytes(r.get(PAY_AT..PAY_AT + 4)?.try_into().ok()?),
+        years: *r.get(YEARS_ASKED_AT)?,
+        under_contract: *r.get(UNDER_CONTRACT_AT)?,
+        turned_down: word(TURNED_DOWN_AT),
+    })
+}
+
+impl Screen for Trainers {
+    fn ids(&self) -> &[u16] {
+        &[TRAINERS_DIALOG]
+    }
+
+    /// `0x48635c` and `0x5928ef`.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        self.keepers = matches!(args, Args::Trainers { keepers: true });
+        let caption =
+            if self.keepers { game.text(KEEPERS_CAPTION).to_owned() } else { dialog.title.clone() };
+        set(view, dialog, CAPTION_ID, caption);
+        // The goalkeepers' list has five columns of its own.
+        if self.keepers {
+            set(view, dialog, TRAINERS_HEADER, game.text(KEEPERS_HEADER).to_owned());
+            if let Some(header) = control(dialog, TRAINERS_HEADER).and_then(|c| view.header_mut(c))
+            {
+                header.tabs = KEEPERS_HEAD_TABS.into();
+                header.aligns = KEEPERS_HEAD_ALIGNS.into();
+            }
+            if let Some(list) = control(dialog, TRAINERS_LIST).and_then(|c| view.list_mut(c)) {
+                list.tabs = KEEPERS_TABS.into();
+                list.aligns = KEEPERS_ALIGNS.into();
+            }
+        }
+        let (Some(team), Some(records)) = (own_team(cx), cx.state.records.as_ref()) else { return };
+        let current = cx.state.season.as_ref().map_or(0, |s| s.current);
+        let number = records.human_slot(current).map_or(1, |s| s as i16 + 1);
+        let market = if self.keepers { KEEPERS_MARKET } else { CO_MARKET };
+        let b = usize::from(records.countries.slot(team.country().into()));
+        let ids: Vec<i16> = records
+            .block(&format!("{market}[{b}]"))
+            .map(|m| {
+                let count = i16::from_le_bytes([m[0], m[1]]).max(0) as usize;
+                (0..count.min(MARKET_ENTRIES))
+                    .map(|k| {
+                        let at = 2 + k * MARKET_ENTRY;
+                        m.get(at..at + 2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
+                    })
+                    .filter(|&id| id > 0)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut found: Vec<(i16, Trainer)> =
+            ids.into_iter().filter_map(|id| Some((id, trainer(cx, self.keepers, id)?))).collect();
+        // The game's own exchange sort, which does not keep the order of
+        // equal competences.
+        for i in 0..found.len() {
+            for j in i + 1..found.len() {
+                if found[i].1.competence < found[j].1.competence {
+                    found.swap(i, j);
+                }
+            }
+        }
+        let what = |t: &Trainer| {
+            game.text(REPUTATIONS + u16::from(t.reputation.min(REPUTATIONS_LAST))).to_owned()
+        };
+        let rows: Vec<String> = found
+            .iter()
+            .filter(|(_, t)| t.turned_down & (1 << number) == 0 && t.under_contract == 0)
+            .map(|(_, t)| {
+                let pay = super::playerinfo::money(game, t.pay.into());
+                if self.keepers {
+                    format!("{}\t{}\t{}\t{pay}\t{}", t.name, t.age, t.competence, t.years)
+                } else {
+                    let what = what(t);
+                    format!("{}\t{}\t{}\t{what}\t{pay}\t{}", t.name, t.age, t.competence, t.years)
+                }
+            })
+            .collect();
+        if let Some(list) = control(dialog, TRAINERS_LIST).and_then(|c| view.list_mut(c)) {
+            list.rows = rows;
+            list.selected = None;
+        }
+        // The club's own trainer, or neither line.
+        let own = team.get::<i16>(if self.keepers { KEEPERS_AT } else { CO_AT });
+        let line = (own != 0).then(|| trainer(cx, self.keepers, own)).flatten().map(|t| {
+            let pay = super::playerinfo::money(game, t.pay.into());
+            let years = match t.under_contract {
+                y @ 1..=10 => game.text(YEARS_TEXTS + u16::from(y) - 1).to_owned(),
+                y => game.text(YEARS_MANY).replacen("%d", &y.to_string(), 1),
+            };
+            let text = game.text(if self.keepers { CURRENT_KEEPERS } else { CURRENT_CO });
+            let known = what(&t);
+            let mut parts: Vec<&dyn std::fmt::Display> = vec![&t.name, &pay, &years, &t.competence];
+            if !self.keepers {
+                parts.push(&known);
+            }
+            super::finances::printf(text, &parts)
+        });
+        match line {
+            Some(text) => set(view, dialog, CURRENT, text),
+            None => {
+                for id in [CURRENT, EXTEND] {
+                    if let Some(i) = control(dialog, id) {
+                        view.controls[i].hidden = true;
+                    }
+                }
+            }
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&cx.dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            _ => Outcome::Stay,
         }
     }
 }
