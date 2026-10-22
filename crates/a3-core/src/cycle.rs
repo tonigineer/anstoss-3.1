@@ -80,6 +80,7 @@ pub mod dialogs {
     /// The stadium, the bar's twelfth symbol.
     pub const STADIUM: u16 = 464;
     pub const EXPANSION: u16 = 463;
+    pub const GROUNDS: u16 = 466;
     /// The squad and the transfer market, the bar's eleventh symbol, and
     /// its current squad.
     pub const SQUAD_MENU: u16 = 218;

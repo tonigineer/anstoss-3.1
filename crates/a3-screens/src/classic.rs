@@ -134,7 +134,11 @@ impl Classic {
 
     /// Loads what the bitmaps show that has not been loaded yet.
     pub fn update(&mut self, game: &Game, view: &View) {
-        let pictures = view.controls.iter().filter_map(|c| c.state.as_bitmap()?.picture.as_ref());
+        let pictures: Vec<&Picture> =
+            view.controls.iter().filter_map(|c| c.state.as_bitmap()?.picture.as_ref()).collect();
+        // What no bitmap shows any more goes (the grounds draw a map with
+        // every move).
+        self.bitmaps.retain(|p, _| pictures.contains(&p));
         for picture in pictures {
             if !self.bitmaps.contains_key(picture) {
                 let loaded = picture.load(game).unwrap_or_else(|err| {

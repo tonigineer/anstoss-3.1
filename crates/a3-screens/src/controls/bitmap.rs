@@ -26,6 +26,9 @@ pub struct BitmapState {
     /// Where it leaves the dialog's picture showing: a bitmap button there
     /// paints its own background (the views' OK over a dream stadium).
     pub holes: Vec<bevy_math::Rect>,
+    /// Square cells of this size a click tells (`Target::Cell`): the
+    /// grounds' minimap, a pixel each.
+    pub cells: Option<f32>,
 }
 
 impl BitmapState {
@@ -74,6 +77,8 @@ pub enum PictureSource {
     /// A stadium as the grounds map draws it at half size, by its look
     /// (`a3_core::stadium::look`).
     Stadium([u8; 12]),
+    /// A picture a screen drew itself (the grounds' map).
+    Drawn(Drawn),
     /// A red line through values from 0 to 100, one every few pixels, in a
     /// clear picture of the given size.
     Chart {
@@ -83,7 +88,34 @@ pub enum PictureSource {
     },
 }
 
+/// A picture drawn by a screen, known by the number it gave it.
+#[derive(Clone, Debug)]
+pub struct Drawn {
+    pub id: u64,
+    pub image: std::sync::Arc<RgbaImage>,
+}
+
+impl PartialEq for Drawn {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Drawn {}
+
+impl std::hash::Hash for Drawn {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
 impl Picture {
+    /// A picture a screen drew, as it is.
+    pub fn drawn(id: u64, image: RgbaImage) -> Self {
+        let drawn = Drawn { id, image: std::sync::Arc::new(image) };
+        Self { source: PictureSource::Drawn(drawn), part: None, black_clear: false }
+    }
+
     pub fn graphic(id: u16) -> Self {
         Self { source: PictureSource::Graphic(id), part: None, black_clear: false }
     }
@@ -98,6 +130,7 @@ impl Picture {
             PictureSource::File(path) => image::load_from_memory(&game.file(path)?)?.to_rgba8(),
             PictureSource::Archive(path) => game.picture(path)?,
             PictureSource::Stadium(look) => crate::buildings::stadium_half(game, look)?,
+            PictureSource::Drawn(drawn) => (*drawn.image).clone(),
             PictureSource::Chart { values, size, step } => chart(values, *size, *step),
         };
         let part = match self.part {

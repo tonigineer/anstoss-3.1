@@ -255,7 +255,8 @@ const DEFAULT_DROP: u16 = 100;
 fn parse_dialog(record: &[u8]) -> Option<Dialog> {
     let size = Vec2::new(u32_at(record, 0x10).ok()? as f32, u32_at(record, 0x14).ok()? as f32);
     let title = cstr(record, TITLE).map_or_else(String::new, |(title, _)| title);
-    let name = find(record, b"IDD_")?;
+    // The grounds' five dialogs are named DLG_….
+    let name = find(record, b"IDD_").or_else(|| find(record, b"DLG_"))?;
     let mut pos = name + record[name..].iter().position(|&b| b == 0)? + 1;
     pos = skip_padding(record, pos);
     let background = u16_at(record, pos)?;
@@ -322,8 +323,17 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         // A bitmap button that shows the dialog's picture until it is held
         // is a push button, with its text on it if it has one
         // (`CMyBitmapButton`'s style bits 0x100 and 0x200).
-        2 if u16s(7)? & HELD_STYLE != 0 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
-        2 => Kind::Button { normal: u16s(5)?, hover: u16s(6)? },
+        // Its pictures and style are its data's last three words (the
+        // grounds' dialogs keep two words fewer before them).
+        2 => {
+            let last = (extra.len() / 2).checked_sub(1)?;
+            let (normal, hover) = (u16s(last.checked_sub(2)?)?, u16s(last - 1)?);
+            if u16s(last)? & HELD_STYLE != 0 {
+                Kind::PushButton { normal, hover }
+            } else {
+                Kind::Button { normal, hover }
+            }
+        }
         // The list's font, row height and style (`FUN_007aa393`: the
         // control's +0x1e8, +0x1ea and +0x1eb).
         // A few lists hold the file's padding there (0xcdcd): nothing set.

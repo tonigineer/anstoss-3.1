@@ -63,7 +63,7 @@ const INCOME_LABEL: u16 = 4151;
 const CARRY_OUT: u16 = 5917;
 const TOO_LITTLE: u16 = 4255;
 const SURE: u16 = 4256;
-/// The club grounds (466), not built.
+/// The club grounds (466).
 const GROUNDS: u16 = 5861;
 /// A smaller stadium cannot take the season-ticket holders (club +0x498)
 /// in the season's first 92 days (`FUN_0071c08d`).
@@ -184,6 +184,7 @@ enum Ask {
     CarryOut,
     View,
     Expansion,
+    Grounds,
     /// The builder's offer on a carried plan, at its price; the plan's name.
     Offer(stadium::Carried, i32, String),
 }
@@ -213,7 +214,7 @@ impl Screen for StadiumScreen {
         }
         let works = |target: Target| match target {
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(VIEWS) => true,
-            Target::Button(c) => dialog.controls[c].id != Some(GROUNDS),
+            Target::Button(_) => true,
             _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
         };
         mark_inert(view, dialog, works);
@@ -270,6 +271,14 @@ impl Screen for StadiumScreen {
                 self.choose_current(cx, view, c)
             }
             Target::Button(c) if id(c) == Some(CARRY_OUT) => self.carry_out(cx),
+            // The grounds get the three stadiums' looks from the copies
+            // (`FUN_0057eb54`).
+            Target::Button(c) if id(c) == Some(GROUNDS) => {
+                let look = |k: usize| self.subs.get(k).map_or([0; 12], stadium::look);
+                cx.state.grounds_looks = Some([look(0), look(1), look(2)]);
+                self.asked = Some(Ask::Grounds);
+                Outcome::Popup(Request::new(a3_core::cycle::dialogs::GROUNDS))
+            }
             Target::Button(c) if id(c) == Some(TURF) => {
                 if let (Some(team), Some(copy)) = (own_team_mut(cx), self.copy.as_mut()) {
                     stadium::new_turf(team, copy);
@@ -329,6 +338,11 @@ impl Screen for StadiumScreen {
                 if let Some(c) = control(cx.dialog, VIEWS) {
                     view.set_chosen(c, NONE);
                 }
+            }
+            // The stadiums found on the map take their place from it.
+            Some(Ask::Grounds) => {
+                self.place_stadiums(cx);
+                self.fill(cx, view);
             }
             Some(Ask::Offer(carried, price, name)) => {
                 if reply == Reply::Ok
@@ -521,6 +535,32 @@ impl StadiumScreen {
         }
         self.finish_expansion(cx, view, &carried, &plan.name());
         Outcome::Stay
+    }
+
+    /// The stadiums on the grounds give their subs the place
+    /// (0x57ed0c–).
+    fn place_stadiums(&mut self, cx: &Cx) {
+        let (Some(team), Some(records)) = (own_team(cx), cx.state.records.as_ref()) else { return };
+        let Some(grounds) =
+            a3_core::grounds::Grounds::of(records, team.country(), i16::from(team.number()))
+        else {
+            return;
+        };
+        for e in (0..a3_core::grounds::ENTRIES).map(|k| grounds.entry(k)).filter(|e| e.used) {
+            let Ok(k) = usize::try_from(e.kind - a3_core::grounds::FIRST_STADIUM) else { continue };
+            if k >= a3_core::grounds::STADIUMS {
+                continue;
+            }
+            let large = grounds.look(k)[2] != 0;
+            if let Some(sub) = self.subs.get_mut(k) {
+                stadium::place(sub, e.x, e.y, large);
+            }
+            if k == self.shown
+                && let Some(copy) = self.copy.as_mut()
+            {
+                stadium::place(copy, e.x, e.y, large);
+            }
+        }
     }
 
     /// After the plan (0x57f9b4): a dream stadium's choices from the

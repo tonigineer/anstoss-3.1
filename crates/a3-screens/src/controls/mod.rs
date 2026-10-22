@@ -269,6 +269,21 @@ impl ControlState {
             Self::Button(_) => out.push((Target::Button(index), geometry.rect(control))),
             Self::List(l) => list::targets(l, index, control, geometry, out),
             Self::Anim(a) => a.targets(index, control, geometry, out),
+            Self::Bitmap(b) if b.cells.is_some() => {
+                let size = b.cells.unwrap_or(1.0);
+                let r = control.rect;
+                let (columns, rows) = ((r.width() / size) as usize, (r.height() / size) as usize);
+                for row in 0..rows {
+                    for column in 0..columns {
+                        let min = r.min + bevy_math::Vec2::new(column as f32, row as f32) * size;
+                        let cell = Rect::from_corners(min, min + bevy_math::Vec2::splat(size));
+                        out.push((
+                            Target::Cell { control: index, row, column },
+                            geometry.map(cell),
+                        ));
+                    }
+                }
+            }
             Self::Bitmap(b) if b.clickable => {
                 out.push((Target::Control(index), geometry.rect(control)))
             }

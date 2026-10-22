@@ -1541,6 +1541,34 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_grounds_are_shown_and_their_view_kept() {
+        let game = game();
+        let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&466];
+        let text =
+            |runner: &Runner, id| runner.host.view().text(control(dialog, id).unwrap()).to_owned();
+        assert_eq!(text(&runner, 6291), "Kaufkosten:");
+        assert!(text(&runner, 5966).starts_with("Apfelbaum\n"), "{}", text(&runner, 5966));
+        // The club's objects, sorted, the first chosen, with its weeks.
+        let club = format!("{open}\nnow choose 6471 1");
+        let runner = on_save(&game, "Probe1", &club).unwrap();
+        assert!(text(&runner, 5966).starts_with("Doping-Labor\n"), "{}", text(&runner, 5966));
+        // Zoomed in and left, the grounds keep the zoom.
+        let zoomed = format!("{open}\nnow press 5969\nnow press 1\nuntil dialog 464");
+        let runner = on_save(&game, "Probe1", &zoomed).unwrap();
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = records.humans().next().unwrap();
+        let team = records.team(manager.country(), manager.team()).unwrap();
+        let grounds =
+            a3_core::grounds::Grounds::of(records, team.country(), i16::from(team.number()))
+                .unwrap();
+        assert_eq!(grounds.view().zoom, 2);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_stadium_is_shown_and_its_comfort_bought() {
         let game = game();
         let open = "now click bar 11\nuntil dialog 464";

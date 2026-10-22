@@ -17,9 +17,9 @@ use crate::pointer::{Geometry, Target};
 pub const BULLET_SIZE: f32 = 12.0;
 const BULLET_CENTRE: Vec2 = Vec2::new(4.0, 7.0);
 /// Labels of bulleted options start right of the bullet.
-const LABEL_INSET: f32 = 9.0;
+const LABEL_INSET: f32 = 10.0;
 /// The dot marking a chosen radio option.
-const DOT_COLOR: Rgba<u8> = Rgba([100, 100, 100, 255]);
+const DOT_COLOR: Rgba<u8> = Rgba([0, 0, 0, 255]);
 /// A picture group whose labels are centred in their options.
 const CENTRED_LABELS: u16 = 0x2;
 
@@ -146,7 +146,7 @@ impl OptionsState {
             let color = if pointed { TEXT_HOVER } else { Rgba([ir, ig, ib, 255]) };
             if *image == 0 {
                 // Windows centres a radio button's label on its bullet.
-                let top = (bullet_centre(control, item).y - cell / 2.0).round() as i32;
+                let top = (bullet_centre(control, item).y - cell / 2.0).floor() as i32;
                 let left = x + (it.rect.min.x + LABEL_INSET) as i32;
                 font.draw(frame, left, top, label, color, false);
             } else {

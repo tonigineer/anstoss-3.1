@@ -11,6 +11,7 @@ pub mod discipline;
 pub mod duties;
 pub mod finances;
 pub mod formations;
+pub mod grounds;
 pub mod hub;
 pub mod jobs;
 pub mod kalkulation;
@@ -164,6 +165,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(stadium::StadiumScreen::default()),
         Box::new(stadium::Expansion::default()),
         Box::new(stadium::StadiumView),
+        Box::new(grounds::GroundsScreen::default()),
         Box::new(search::ClubSearch::default()),
         Box::new(search::NoracsaSearch::default()),
         Box::new(search::NoracsaFound::default()),
@@ -221,6 +223,7 @@ pub fn compose(game: &mut Game) {
     squad::compose_values(&mut game.dialogs);
     squad::compose_next(&mut game.dialogs);
     stadium::compose(&mut game.dialogs, &game.data.rules);
+    grounds::compose(&mut game.dialogs);
     market::compose(&mut game.dialogs);
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);

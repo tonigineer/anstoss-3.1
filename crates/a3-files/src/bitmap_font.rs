@@ -255,19 +255,23 @@ impl BitmapFont {
     /// The lines `text` breaks into at spaces to fit `max_width`: a line
     /// fits while it is narrower (the game's `FUN_0079c87f`).
     pub fn wrap(&self, text: &str, max_width: u32, bold: bool) -> Vec<String> {
+        // A line break breaks the line, as Windows' word break does (466's
+        // object: name, price, weeks).
         let mut lines = Vec::new();
-        let mut line = String::new();
-        // A line's spaces stay as written, a leading one too (154's and
-        // 156's check boxes).
-        for (k, word) in text.split(' ').enumerate() {
-            let candidate = if k == 0 { word.to_owned() } else { format!("{line} {word}") };
-            if !line.is_empty() && self.width(&candidate, bold) >= max_width {
-                lines.push(std::mem::replace(&mut line, word.to_owned()));
-            } else {
-                line = candidate;
+        for paragraph in text.split('\n') {
+            let mut line = String::new();
+            // A line's spaces stay as written, a leading one too (154's and
+            // 156's check boxes).
+            for (k, word) in paragraph.split(' ').enumerate() {
+                let candidate = if k == 0 { word.to_owned() } else { format!("{line} {word}") };
+                if !line.is_empty() && self.width(&candidate, bold) >= max_width {
+                    lines.push(std::mem::replace(&mut line, word.to_owned()));
+                } else {
+                    line = candidate;
+                }
             }
+            lines.push(line);
         }
-        lines.push(line);
         lines
     }
 

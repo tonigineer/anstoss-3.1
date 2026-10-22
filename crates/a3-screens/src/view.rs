@@ -229,8 +229,9 @@ impl View {
                 Some(ControlView { state: ControlState::Menu(m), .. }) => m.at.is_some(),
                 _ => false,
             },
+            // A bitmap's cell counts as it is.
             Target::Cell { control, row, .. } => {
-                self.list_mut(control).is_some_and(|l| l.press(row))
+                self.list_mut(control).is_none_or(|l| l.press(row))
             }
             Target::Row { control, row } => match self.combo_mut(control) {
                 // A script chooses a combo box's row without dropping it.

@@ -643,6 +643,17 @@ pub fn check_arena(sub: &mut Sub) {
     }
 }
 
+/// A stadium's place on the grounds map (+0x6c, +0x6e), its site's size
+/// (+0x70) and the two bytes a site sets (+0x6a, +0x6b), as the stadium
+/// screen gives them from the map (STADION.md §5.4).
+pub fn place(sub: &mut Sub, x: u8, y: u8, large: bool) {
+    sub.0[0x6a] = 2;
+    sub.0[0x6b] = 3;
+    sub.put_u16(0x6c, x.into());
+    sub.put_u16(0x6e, y.into());
+    sub.put_u16(VIEW, large.into());
+}
+
 /// A stand's look on the grounds map (`FUN_0057c464`): a dream stadium's
 /// own, else its size class by weighted places (none, up to 3,000, 6,000,
 /// 18,000, 32,000, more), 5 more with a track, 10 more with a roof; 0xff

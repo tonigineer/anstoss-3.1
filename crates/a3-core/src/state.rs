@@ -34,4 +34,7 @@ pub struct GameState {
     pub expansion: Option<(crate::stadium::Sub, bool)>,
     /// The stadium the views (249, 510) show.
     pub viewed: Option<crate::stadium::Sub>,
+    /// The club's three stadiums' looks, as the stadium screen hands them
+    /// to the grounds (466).
+    pub grounds_looks: Option<[[u8; 12]; 3]>,
 }
