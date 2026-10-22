@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 
-use a3_core::cycle::dialogs::BOARD;
+use a3_core::cycle::Request;
+use a3_core::cycle::dialogs::{BOARD, NOTICE};
 use a3_core::records::Manager;
 use a3_core::season::Rules;
 use a3_files::rch::Dialog;
@@ -63,6 +64,30 @@ const OPPOSITION_POPULARITY_AT: usize = 0x198;
 const HISTORY_AT: usize = 0x18a;
 const HISTORY: usize = 10;
 const BLOCKED_AT: usize = 0x1f88;
+/// Talks held with the board this season, and whether one was held today
+/// (rec +0x1f94, +0x1f95); the confidence's own field; how the
+/// opposition likes him and whether he has crawled to it this season.
+const TALKS_AT: usize = 0x1f94;
+const TALKED_AT: usize = 0x1f95;
+const CONFIDENCE_AT: usize = 0x184;
+const CRAWLED_AT: usize = 0x19a;
+/// The items built: a talk with the board, flattering the opposition.
+const TALK: usize = 1;
+/// Talked already, no reason to; the first talk's three outcomes by the
+/// draw, the second's, the later ones'.
+const TALKED: u16 = 3763;
+const NO_REASON: u16 = 3764;
+const TALK_TEXTS: [u16; 3] = [3765, 3766, 3767];
+const TALK_AGAIN: u16 = 3768;
+const TALKED_ENOUGH: [u16; 2] = [3769, 3770];
+/// What each outcome does to the confidence.
+const TALK_GAINS: [i32; 3] = [5, 10, -10];
+const LATER_TALK_LOSS: i32 = 5;
+/// Flattering: it worked, or it was done already; what it costs with the
+/// board and brings with the opposition.
+const FLATTERED: u16 = 4499;
+const FLATTERED_ALREADY: u16 = 4997;
+const FLATTER_COST: i32 = 5;
 /// "Sie wechseln zum 30.6. v6."; the extension's states (§2.4).
 const MOVING: u16 = 3886;
 
@@ -77,6 +102,9 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
 #[derive(Default)]
 pub struct Board {
     whistle: bool,
+    /// Whether the alert now up is the opposition's, whose changes come
+    /// after it closes.
+    flattered: bool,
 }
 
 impl Screen for Board {
@@ -124,7 +152,9 @@ impl Screen for Board {
             view.set_chosen(c, NONE);
         }
         let works = |t: Target| match t {
-            Target::Option { control: c, .. } if dialog.controls[c].id == Some(ACTIONS) => false,
+            Target::Option { control: c, item } if dialog.controls[c].id == Some(ACTIONS) => {
+                item == TALK || (item == FLATTER && opposition != 0)
+            }
             Target::Button(c) if dialog.controls[c].id == Some(TROPHIES) => false,
             _ => hub::on_bar(dialog, t).is_none_or(hub::bar_works),
         };
@@ -138,17 +168,58 @@ impl Screen for Board {
             return outcome;
         }
         self.whistle = false;
-        if let Target::Option { control: c, .. } = target {
-            view.set_chosen(c, NONE);
+        let Target::Option { control: c, item } = target else { return Outcome::Stay };
+        if cx.dialog.controls[c].id != Some(ACTIONS) {
+            return Outcome::Stay;
         }
-        Outcome::Stay
+        // The button stays pressed while its alert is up.
+        match item {
+            TALK => Outcome::Popup(Request::with(NOTICE, Args::Text(self.talk(cx)))),
+            FLATTER => {
+                let crawled = manager_flag(cx, CRAWLED_AT);
+                self.flattered = !crawled;
+                let text = if crawled { FLATTERED_ALREADY } else { FLATTERED };
+                Outcome::Popup(Request::with(NOTICE, Args::Text(text)))
+            }
+            _ => {
+                view.set_chosen(c, NONE);
+                Outcome::Stay
+            }
+        }
     }
 
-    fn answer(&mut self, _: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+    /// An alert taken in: the opposition's changes follow it; then the
+    /// screen is filled anew, as the original fills it.
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
         }
+        if std::mem::take(&mut self.flattered) {
+            self.crawl(cx);
+        }
+        self.refresh(cx, view);
         Outcome::Stay
+    }
+}
+
+/// A flag byte of the manager's record.
+fn manager_flag(cx: &Cx, at: usize) -> bool {
+    super::kalkulation::own_manager(cx).is_some_and(|m| m.get::<u8>(at) & 1 != 0)
+}
+
+/// The manager's record, to change.
+fn manager_mut<'a>(cx: &'a mut Cx) -> Option<&'a mut Manager> {
+    let current = cx.state.season.as_ref()?.current;
+    let records = cx.state.records.as_mut()?;
+    let slot = records.human_slot(current)?;
+    records.managers.get_mut(slot)
+}
+
+/// The board's confidence moved, held between nothing and all of it.
+fn move_confidence(cx: &mut Cx, by: i32) {
+    if let Some(manager) = manager_mut(cx) {
+        let v = (i32::from(manager.get::<i16>(CONFIDENCE_AT)) + by).clamp(0, 100);
+        manager.put(CONFIDENCE_AT, v as i16);
     }
 }
 
@@ -171,6 +242,69 @@ fn last(cx: &Cx) -> String {
 }
 
 impl Board {
+    /// A talk with the board (`FUN_005b647c`): a draw is made first,
+    /// whatever follows. One talk a season is listened to; the later ones
+    /// only cost.
+    fn talk(&self, cx: &mut Cx) -> u16 {
+        let draw = cx.state.season.as_mut().map_or(0, |s| s.random.below(100));
+        let Some(manager) = super::kalkulation::own_manager(cx) else { return TALKED };
+        let (talks, talked) = (manager.get::<u8>(TALKS_AT), manager.get::<u8>(TALKED_AT));
+        let c = manager.shown_confidence();
+        if talked != 0 {
+            return TALKED;
+        }
+        if c > 90 {
+            return NO_REASON;
+        }
+        let (text, by) = match talks {
+            0 => {
+                let k = match draw {
+                    0..70 => 0,
+                    70..90 => 1,
+                    _ => 2,
+                };
+                (TALK_TEXTS[k], TALK_GAINS[k])
+            }
+            1 => (TALK_AGAIN, 0),
+            _ => (TALKED_ENOUGH[usize::from(draw >= 50)], -LATER_TALK_LOSS),
+        };
+        move_confidence(cx, by);
+        if let Some(manager) = manager_mut(cx) {
+            manager.put(TALKS_AT, talks.wrapping_add(1));
+            manager.put(TALKED_AT, 1u8);
+        }
+        text
+    }
+
+    /// Flattering the opposition (`FUN_005b62aa`), once a season: the
+    /// board thinks the less of him, the opposition the more.
+    fn crawl(&self, cx: &mut Cx) {
+        move_confidence(cx, -FLATTER_COST);
+        if let Some(manager) = manager_mut(cx) {
+            manager.put(CRAWLED_AT, 1u8);
+            let v = (i32::from(manager.get::<i16>(OPPOSITION_POPULARITY_AT)) + FLATTER_COST)
+                .clamp(0, 100);
+            manager.put(OPPOSITION_POPULARITY_AT, v as i16);
+        }
+    }
+
+    /// The screen filled anew after an action (`FUN_005b4ff2` and the
+    /// three that follow it).
+    fn refresh(&self, cx: &Cx, view: &mut View) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(manager) = super::kalkulation::own_manager(cx) else { return };
+        let c = manager.shown_confidence();
+        self.show(cx, view, c);
+        if let Some(team) = own_team(cx)
+            && team.get::<u8>(OPPOSITION_AT) >= 1
+        {
+            let likes = format!("{}%", manager.get::<i16>(OPPOSITION_POPULARITY_AT));
+            set(view, dialog, OPPOSITION_LIKES, likes);
+        }
+        set(view, dialog, EXTENSION, extension_text(cx, manager, c));
+        let _ = game;
+    }
+
     /// The confidence, its face, the board's mood, the chart and its
     /// verdict (`FUN_005b4ff2`, `FUN_005b5ad2`).
     fn show(&self, cx: &Cx, view: &mut View, c: i32) {
