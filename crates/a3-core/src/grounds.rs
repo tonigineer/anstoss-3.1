@@ -6,8 +6,10 @@
 use crate::records::Records;
 
 mod actions;
+mod report;
 
 pub use actions::*;
+pub use report::*;
 
 /// The cached grounds' keys (u8 country, a byte, i16 number) and the
 /// grounds themselves, one block each (`0x8ef338`, `0x8ef380[k]`).

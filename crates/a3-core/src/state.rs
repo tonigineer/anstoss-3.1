@@ -34,7 +34,20 @@ pub struct GameState {
     pub expansion: Option<(crate::stadium::Sub, bool)>,
     /// The stadium the views (249, 510) show.
     pub viewed: Option<crate::stadium::Sub>,
-    /// The club's three stadiums' looks, as the stadium screen hands them
-    /// to the grounds (466).
-    pub grounds_looks: Option<[[u8; 12]; 3]>,
+    /// What the stadium screen hands the grounds (466).
+    pub grounds_stadiums: Option<GroundsStadiums>,
+    /// The grounds as 466 has them, for its sub-dialogs.
+    pub grounds_shown: Option<crate::grounds::Grounds>,
+}
+
+/// What the stadium screen hands the grounds (`FUN_0057eb54`): its three
+/// stadiums' looks, names and capacities, the one played in and a copy of
+/// its sub-record.
+#[derive(Clone, Debug, Default)]
+pub struct GroundsStadiums {
+    pub looks: [[u8; 12]; 3],
+    pub names: [String; 3],
+    pub capacities: [i32; 3],
+    pub played: usize,
+    pub sub: Option<crate::stadium::Sub>,
 }

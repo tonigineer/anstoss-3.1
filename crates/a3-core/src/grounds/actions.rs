@@ -165,12 +165,12 @@ fn index(x: i32, y: i32) -> usize {
 }
 
 /// A kind's record, if the game has one.
-fn kind_of(kind: i16) -> Option<&'static super::BuildingType> {
+pub(super) fn kind_of(kind: i16) -> Option<&'static super::BuildingType> {
     TYPES.get(usize::try_from(kind).ok()?)
 }
 
 /// The price a kind is listed at (+0x68: hundreds).
-fn listed(kind: i16) -> i64 {
+pub(super) fn listed(kind: i16) -> i64 {
     kind_of(kind).map_or(0, |t| i64::from(t.price / 100 * 100))
 }
 
@@ -942,6 +942,49 @@ mod tests {
         // What is left sells as land.
         g.set_cursor(Some(Area { x: 0, y: 0, dx: 3, dy: 1 }), Mode::Sell, 0);
         assert_eq!(g.sale_value(), Some(8 * LAND_RESALE));
+    }
+
+    #[test]
+    fn the_info_counts_the_club_s_buildings_and_land() {
+        let mut g = empty();
+        let mut random = Random::new(1);
+        own(&mut g, 0, 0, 10, 10);
+        // A Pizzeria being built, a Konditionsparcours (no building, with
+        // upkeep), a tree not the club's.
+        g.place(0, 0, 35, true, false, true, &mut random);
+        g.place(2, 0, 70, true, false, false, &mut random);
+        g.place(30, 30, 5, false, false, false, &mut random);
+        let info = g.info();
+        assert_eq!((info.finished, info.building, info.upkeep), (0, 1, 0));
+        assert_eq!(info.area, 2 * 2 + 7 * 6);
+        assert_eq!(g.works_in_progress(), [(12, 35, 150_000)]);
+        // A Filialleiter, two Köche, two Verkäufer.
+        assert_eq!(g.wages(), 100_000 + 2 * 60_000 + 2 * 30_000);
+    }
+
+    #[test]
+    fn fans_complain_of_what_is_missing() {
+        let mut g = empty();
+        let mut random = Random::new(1);
+        own(&mut g, 0, 0, 20, 20);
+        let stadium = crate::stadium::Sub(vec![0; 0xd0]);
+        let fans = |month| super::super::Fans {
+            look: [0; 12],
+            stadium: &stadium,
+            country: 0,
+            level: 0,
+            month,
+        };
+        // An empty stadium: too small, no standing, no roof — and nothing
+        // to eat, do or see; in summer no ice cream; no parking needed.
+        let said = g.complaints(&fans(7));
+        assert_eq!(said, [5036, 5054, 5055, 5056, 5059, 5060, 5062, 5066]);
+        // A Fanshop and a Disco, two kinds of food with the ice cream, a
+        // Spielerstatue: those complaints go.
+        for (x, kind) in [(0, 16), (3, 42), (6, 41), (8, 25), (10, 45)] {
+            assert!(g.place(x, 2, kind, true, false, false, &mut random));
+        }
+        assert_eq!(g.complaints(&fans(7)), [5056, 5059, 5060]);
     }
 
     #[test]

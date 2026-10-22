@@ -274,8 +274,17 @@ impl Screen for StadiumScreen {
             // The grounds get the three stadiums' looks from the copies
             // (`FUN_0057eb54`).
             Target::Button(c) if id(c) == Some(GROUNDS) => {
-                let look = |k: usize| self.subs.get(k).map_or([0; 12], stadium::look);
-                cx.state.grounds_looks = Some([look(0), look(1), look(2)]);
+                let sub = |k: usize| self.subs.get(k);
+                let look = |k: usize| sub(k).map_or([0; 12], stadium::look);
+                let name = |k: usize| sub(k).map(Sub::name).unwrap_or_default();
+                let capacity = |k: usize| sub(k).map_or(0, Sub::capacity);
+                cx.state.grounds_stadiums = Some(a3_core::state::GroundsStadiums {
+                    looks: [look(0), look(1), look(2)],
+                    names: [name(0), name(1), name(2)],
+                    capacities: [capacity(0), capacity(1), capacity(2)],
+                    played: self.current,
+                    sub: sub(self.current).cloned(),
+                });
                 self.asked = Some(Ask::Grounds);
                 Outcome::Popup(Request::new(a3_core::cycle::dialogs::GROUNDS))
             }

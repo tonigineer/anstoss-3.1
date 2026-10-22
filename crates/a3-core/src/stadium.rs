@@ -220,6 +220,11 @@ impl Sub {
         [parts[0], parts[1], parts[2], parts[3], parts[4], total]
     }
 
+    /// The stands' average age (`FUN_007180b3(0)`).
+    pub fn average_age(&self) -> i32 {
+        (0..STANDS).map(|s| i32::from(self.0[AGE + s])).sum::<i32>() / STANDS as i32
+    }
+
     /// The longest building time of a stand.
     pub fn building_weeks(&self) -> u8 {
         (0..STANDS).map(|s| self.weeks(s)).max().unwrap_or(0)

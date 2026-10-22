@@ -81,6 +81,9 @@ pub struct ListState {
     pub marked: Vec<bool>,
     /// The box a row's player shows while he is dragged from the list.
     pub row_boxes: Vec<Option<PlayerBox>>,
+    /// Rows the screen gives one column of their own across the row
+    /// (`FUN_007a94db`).
+    pub spans: Vec<bool>,
     /// What each row stands for, for the screen to look up: a player's
     /// place in the squad, say.
     pub keys: Vec<usize>,
@@ -122,6 +125,7 @@ impl Default for ListState {
             keyed: Vec::new(),
             marked: Vec::new(),
             row_boxes: Vec::new(),
+            spans: Vec::new(),
             keys: Vec::new(),
             by_column: false,
             bars: Vec::new(),
@@ -283,7 +287,13 @@ impl ListState {
             let cells = line.split('\t');
             // The text sits at the list's left edge, a pixel above the row.
             let at = (x, top - 1);
-            columns(font, frame, at, cells, &self.tabs, &self.aligns, color, right);
+            if self.spans.get(self.scroll + row).copied().unwrap_or(false) {
+                // A row of one column of its own, from the left edge across
+                // the row, another pixel up (`FUN_007a7d9c`'s other branch).
+                font.draw_clipped(frame, x, top - 2, line, color, false, right);
+            } else {
+                columns(font, frame, at, cells, &self.tabs, &self.aligns, color, right);
+            }
             // So do the icons, the keyed ones without their pure black.
             for &(left, id) in self.row_icons.get(self.scroll + row).into_iter().flatten() {
                 if let Some(icon) = paint.image(id) {

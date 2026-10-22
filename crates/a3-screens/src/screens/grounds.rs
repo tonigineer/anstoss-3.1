@@ -21,9 +21,9 @@ use image::RgbaImage;
 use super::finances::money64;
 use super::playerinfo::money;
 use super::squad::own_team;
-use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
+use super::{Args, Cx, Outcome, Reply, Screen, control, set};
 use crate::buildings::MapArt;
-use crate::controls::bitmap::{Picture, Tiles};
+use crate::controls::bitmap::{Picture, Tiles, Tip};
 use crate::pointer::{Grip, Target};
 use crate::view::View;
 
@@ -41,8 +41,13 @@ const MINIMAP_AT: Rect = Rect { min: Vec2::new(535.0, 71.0), max: Vec2::new(636.
 const MINIMAP_CLICK: (i32, i32) = (536 - 535, 67 - 71);
 const ZOOM_IN: u16 = 5969;
 const ZOOM_OUT: u16 = 5970;
-/// The sub-dialogs: info, staff, fans, what is being built — not built.
-const SUBDIALOGS: [u16; 4] = [5971, 5774, 5972, 5979];
+/// The sub-dialogs' buttons and dialogs: info, staff, fans, what is being
+/// built (§8).
+const SUBDIALOGS: [(u16, u16); 4] = [(5971, INFO), (5774, STAFF), (5972, FANS), (5979, WORKS)];
+const INFO: u16 = 467;
+const STAFF: u16 = 465;
+const FANS: u16 = 468;
+const WORKS: u16 = 469;
 const INVESTABLE: u16 = 6258;
 const COST_LABEL: u16 = 6291;
 const COST: u16 = 6290;
@@ -60,6 +65,13 @@ const WITH_WEEKS: u16 = 5041;
 const CATEGORY: [Category; 3] = [Category::Landscape, Category::Club, Category::Entertainment];
 /// The zoom the screen opens at.
 const OPENING_ZOOM: i32 = 1;
+/// The tooltip's second line: a stadium's places (5074 "Kapazität %s"),
+/// or the weeks of building left ("Bauzeit %s", a literal at `0x8b0ea8`,
+/// with `FUN_00578e2f`'s 4141 "0 Wochen", 4142 "eine Woche", 4143 "%d
+/// Wochen").
+const CAPACITY: u16 = 5074;
+const BUILDING_TIME: &str = "Bauzeit %s";
+const WEEKS_TEXTS: [u16; 3] = [4141, 4142, 4143];
 /// The modes, as the tabs of 5963 stand.
 const MODE: [Mode; 4] = [Mode::Buy, Mode::Build, Mode::Sell, Mode::Demolish];
 /// "Dieses Gebiet würde sie %s kosten, also zweifellos zuviel.", and the
@@ -97,6 +109,11 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     }
     let title = dialog.title.clone();
     dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
+    for id in [INFO, STAFF, FANS, WORKS] {
+        let Some(dialog) = dialogs.get_mut(&id) else { continue };
+        let title = dialog.title.clone();
+        dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
+    }
 }
 
 #[derive(Default)]
@@ -127,6 +144,11 @@ pub struct GroundsScreen {
     pointer: Option<(i32, i32)>,
     /// The cost shown, none for "-" (+0x1978).
     cost: Option<i64>,
+    /// The tooltip shown, the tile it was last made for (+0x604, +0x608),
+    /// and where the pointer was at the last move seen.
+    tip: Option<Tip>,
+    tip_tile: (i32, i32),
+    last_pointer: Option<Vec2>,
     asked: Option<Ask>,
 }
 
@@ -152,8 +174,8 @@ impl Screen for GroundsScreen {
             a3_core::finances::Balance::of(team, records.globals.fund_prices(), &records.agreed())
                 .investable();
         if let Some(g) = grounds.as_mut() {
-            if let Some(looks) = cx.state.grounds_looks {
-                g.set_looks(&looks);
+            if let Some(stadiums) = &cx.state.grounds_stadiums {
+                g.set_looks(&stadiums.looks);
             }
             g.set_investable(investable);
             self.view = g.view().zoomed(OPENING_ZOOM);
@@ -178,10 +200,8 @@ impl Screen for GroundsScreen {
         }
         (self.mode, self.over, self.held, self.pointer, self.cost, self.asked) =
             (Mode::Buy, false, false, None, None, None);
+        (self.tip, self.tip_tile, self.last_pointer) = (None, (-1, -1), None);
         self.draw(cx, view);
-        // The sub-dialogs are not built.
-        let works = |t: Target| !matches!(t, Target::Button(c) if dialog.controls[c].id.is_some_and(|id| SUBDIALOGS.contains(&id)));
-        mark_inert(view, dialog, works);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -191,9 +211,13 @@ impl Screen for GroundsScreen {
         // the mode acts if the pointer is still over the map — which the
         // dialog follows wherever it goes while the button holds.
         match target {
+            // The move there first, then the button down hides the
+            // tooltip (0x7c1f82).
             Target::Tile { control: c, x, y } if id(c) == MAP => {
-                self.over = true;
                 self.held = false;
+                self.moved(cx, view);
+                self.over = true;
+                self.tip = None;
                 self.follow(view);
                 self.pointer = self.pointer.or(Some((x as i32, y as i32)));
                 self.frame();
@@ -228,6 +252,12 @@ impl Screen for GroundsScreen {
             Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
                 self.close(cx);
                 return Outcome::Close(Reply::Ok);
+            }
+            // A sub-dialog sees the grounds as they are (`0x7c2a2e` …).
+            Target::Button(c) if SUBDIALOGS.iter().any(|&(button, _)| button == id(c)) => {
+                let (_, sub) = SUBDIALOGS.iter().find(|&&(button, _)| button == id(c)).unwrap();
+                cx.state.grounds_shown = self.grounds.clone();
+                Outcome::Popup(Request::new(*sub))
             }
             Target::Button(c) if matches!(id(c), ZOOM_IN | ZOOM_OUT) => {
                 let zoom = self.view.zoom + if id(c) == ZOOM_IN { 1 } else { -1 };
@@ -275,6 +305,8 @@ impl Screen for GroundsScreen {
     /// A question or notice answered: the frames go on with the pointer
     /// where the popup left it.
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        // Where the popup left the pointer is no move the dialog saw.
+        self.last_pointer = view.pointer;
         if let Some(ask) = self.asked.take()
             && reply == Reply::Ok
         {
@@ -290,21 +322,34 @@ impl Screen for GroundsScreen {
     /// once the dialog takes it to be over the map.
     fn tick(&mut self, cx: &mut Cx, view: &mut View, _: f32) -> Outcome {
         let map = control(cx.dialog, MAP);
-        match view.hovered {
-            _ if self.held => self.over = view.pointer.is_some_and(in_map),
-            Some(Target::Tile { control, .. }) if Some(control) == map => self.over = true,
-            // Over the dialog itself, or a static it shows through.
-            None => self.over = false,
-            Some(_) => {}
+        let was = (self.pointer, self.tip.clone());
+        // The dialog sees the moves over the map and over itself — all of
+        // them while the button holds —, not those over its controls.
+        let seen = self.held
+            || match view.hovered {
+                Some(Target::Tile { control, .. }) => Some(control) == map,
+                Some(_) => false,
+                None => true,
+            };
+        if seen && view.pointer != self.last_pointer {
+            self.moved(cx, view);
+        } else if seen && view.hovered.is_none() {
+            self.over = false;
+            self.tip = None;
         }
-        let was = self.pointer;
         self.follow(view);
-        if self.pointer != was {
+        if (self.pointer, self.tip.clone()) != was {
             self.frame();
             self.show(cx, view);
         }
         Outcome::Stay
     }
+}
+
+/// Weeks as the game words them (`FUN_00578e2f`).
+fn weeks_text(cx: &Cx, weeks: i32) -> String {
+    let text = cx.game.text(WEEKS_TEXTS[weeks.clamp(0, 2) as usize]);
+    text.replacen("%d", &weeks.to_string(), 1)
 }
 
 /// Whether a point lies on the map, as `PtInRect` takes it.
@@ -421,21 +466,72 @@ impl GroundsScreen {
         self.drawn += 1;
         if let Some(bitmap) = control(dialog, MAP).and_then(|c| view.bitmap_mut(c)) {
             bitmap.picture = Some(Picture::drawn(self.drawn, map));
+            bitmap.tip = self.tip.clone();
         }
         let cost = self.cost.map_or(NO_COST.to_owned(), |c| money64(game, c));
         set(view, dialog, COST, cost);
     }
 
+    /// A move the dialog sees (`OnMouseMove 0x7c1a78`): whether the pointer
+    /// is over the map; the tooltip of what stands on the tile, made anew
+    /// only for another tile, hidden off the map, over nothing and while
+    /// the button holds.
+    fn moved(&mut self, cx: &Cx, view: &View) {
+        let Some(at) = view.pointer else { return };
+        self.last_pointer = Some(at);
+        self.over = in_map(at);
+        if self.held || !self.over {
+            self.tip = None;
+            return;
+        }
+        let tile = self.tile_at(at);
+        if tile == self.tip_tile {
+            return;
+        }
+        let Some(g) = &self.grounds else { return };
+        let i = usize::try_from(tile.1 * grounds::SIZE as i32 + tile.0).unwrap_or(usize::MAX);
+        let Some(k) = g.at_index(i) else {
+            self.tip = None;
+            return;
+        };
+        let game = cx.game;
+        let e = g.entry(k);
+        let stadiums = cx.state.grounds_stadiums.as_ref();
+        let stadium = usize::try_from(e.kind - grounds::FIRST_STADIUM)
+            .ok()
+            .filter(|&s| s < grounds::STADIUMS);
+        let lines = match stadium {
+            Some(s) => {
+                let name = stadiums.map(|st| st.names[s].clone()).unwrap_or_default();
+                let capacity = stadiums.map_or(0, |st| st.capacities[s]);
+                let places = super::finances::count(capacity);
+                vec![name, game.text(CAPACITY).replacen("%s", &places, 1)]
+            }
+            None => {
+                let name = grounds::TYPES.get(e.kind as usize).map_or("", |t| game.text(t.text));
+                let mut lines = vec![name.to_owned()];
+                if e.weeks > 0 {
+                    lines.push(BUILDING_TIME.replacen("%s", &weeks_text(cx, e.weeks.into()), 1));
+                }
+                lines
+            }
+        };
+        self.tip = Some(Tip { at, lines });
+        self.tip_tile = tile;
+    }
+
+    /// The tile under a point of the dialog, by the view's tiles.
+    fn tile_at(&self, at: Vec2) -> (i32, i32) {
+        let ((ox, oy), (offx, offy)) = self.view.origin();
+        let t = self.view.tile.max(1);
+        let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
+        ((x - 2 + offx) / t + ox, (y - 25 + offy) / t + oy)
+    }
+
     /// The tile the frames take the pointer to be on (0x7ba74e): from the
     /// pointer's place in the dialog, in whole pixels, by the view's tiles.
     fn follow(&mut self, view: &View) {
-        let ((ox, oy), (offx, offy)) = self.view.origin();
-        let t = self.view.tile.max(1);
-        let tile = |at: Vec2| {
-            let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
-            ((x - 2 + offx) / t + ox, (y - 25 + offy) / t + oy)
-        };
-        self.pointer = if self.over { view.pointer.map(tile) } else { None };
+        self.pointer = if self.over { view.pointer.map(|at| self.tile_at(at)) } else { None };
     }
 
     /// The cursor as a frame sets it (`FUN_007ba408`, 0x7ba7cb): none off
@@ -606,5 +702,205 @@ impl GroundsScreen {
         grounds.set_view(&self.view);
         let Some(records) = cx.state.records.as_mut() else { return };
         grounds.store(records);
+    }
+}
+
+/// The info (467, `CMapInfoDialog`, §8.1): the land, the buildings
+/// finished and being built, their upkeep, the investments, the staff's
+/// wages.
+pub struct GroundsInfo;
+
+const INFO_TITLE: u16 = 6250;
+const INFO_TITLE_TEXT: u16 = 4433;
+const HECTARES: u16 = 6251;
+const HECTARES_TEXT: u16 = 5051;
+const FINISHED: u16 = 6252;
+const BEING_BUILT: u16 = 6253;
+const UPKEEP: u16 = 6254;
+const INVESTED_FOOTBALL: u16 = 6255;
+const INVESTED_OTHER: u16 = 6256;
+const INVESTED_ALL: u16 = 6257;
+const WAGES: u16 = 6289;
+/// The quarter hectares a tile is.
+const TILES_A_HECTARE: i32 = 4;
+
+impl Screen for GroundsInfo {
+    fn ids(&self) -> &[u16] {
+        &[INFO]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let club = own_team(cx).map(a3_core::records::Team::name).unwrap_or_default();
+        set(view, dialog, INFO_TITLE, game.text(INFO_TITLE_TEXT).replacen("%s", &club, 1));
+        let Some(grounds) = &cx.state.grounds_shown else { return };
+        let info = grounds.info();
+        let hectares = info.area / TILES_A_HECTARE;
+        set(
+            view,
+            dialog,
+            HECTARES,
+            game.text(HECTARES_TEXT).replacen("%d", &hectares.to_string(), 1),
+        );
+        set(view, dialog, FINISHED, info.finished.to_string());
+        set(view, dialog, BEING_BUILT, info.building.to_string());
+        set(view, dialog, UPKEEP, money(game, info.upkeep.into()));
+        let (football, other) = grounds.invested();
+        set(view, dialog, INVESTED_FOOTBALL, money64(game, football));
+        set(view, dialog, INVESTED_OTHER, money64(game, other));
+        set(view, dialog, INVESTED_ALL, money64(game, football.wrapping_add(other)));
+        set(view, dialog, WAGES, money64(game, grounds.wages()));
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        closed(cx, target)
+    }
+}
+
+/// Only the OK does anything in the sub-dialogs.
+fn closed(cx: &Cx, target: Target) -> Outcome {
+    match target {
+        Target::Button(c) if crate::controls::button::is_ok(&cx.dialog.controls[c]) => {
+            Outcome::Close(Reply::Ok)
+        }
+        _ => Outcome::Stay,
+    }
+}
+
+/// The staff (465, `CMapAngestellteDialog`, §8.2): a row a job with
+/// anyone in it, its count and their wages, sorted.
+pub struct GroundsStaff;
+
+const STAFF_LIST: u16 = 5261;
+/// The most jobs the list takes (`FUN_007b877a`).
+const MOST_JOBS: usize = 60;
+
+impl Screen for GroundsStaff {
+    fn ids(&self) -> &[u16] {
+        &[STAFF]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(grounds) = &cx.state.grounds_shown else { return };
+        let mut rows: Vec<String> = (0..grounds::JOBS.len())
+            .filter(|&job| grounds.staff(job) > 0)
+            .take(MOST_JOBS)
+            .map(|job| {
+                let (text, wage) = grounds::JOBS[job];
+                let n = grounds.staff(job);
+                let wages = money(game, i64::from(n.wrapping_mul(wage)));
+                format!("{}\t{n}\t{wages}", game.text(text))
+            })
+            .collect();
+        rows.sort_by_key(|row| order_key(row));
+        if let Some(list) = control(dialog, STAFF_LIST).and_then(|c| view.list_mut(c)) {
+            list.rows = rows;
+        }
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        closed(cx, target)
+    }
+}
+
+/// The fans' opinion (468, `CMapFanDialog`, §8.3): their complaints, or
+/// that they have none.
+pub struct GroundsFans;
+
+const FAN_LIST: u16 = 5996;
+/// "Die Fans sind wunschlos glücklich!", a literal of the program
+/// (`0x8b0f4c`).
+const NO_COMPLAINTS: &str = "Die Fans sind wunschlos glücklich!";
+/// The most rows the list takes (`FUN_007c6c7b`).
+const MOST_COMPLAINTS: usize = 40;
+
+impl Screen for GroundsFans {
+    fn ids(&self) -> &[u16] {
+        &[FANS]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        use chrono::Datelike;
+        let (game, dialog) = (cx.game, cx.dialog);
+        let (Some(grounds), Some(stadiums)) = (&cx.state.grounds_shown, &cx.state.grounds_stadiums)
+        else {
+            return;
+        };
+        let Some(sub) = &stadiums.sub else { return };
+        let team = own_team(cx);
+        let month = cx
+            .state
+            .season
+            .as_ref()
+            .map_or(0, |s| a3_core::calendar::date(s.year, s.day).month() as i32);
+        let fans = grounds::Fans {
+            look: grounds.look(stadiums.played.min(grounds::STADIUMS - 1)),
+            stadium: sub,
+            country: team.map_or(0, a3_core::records::Team::country),
+            level: team.map_or(0, a3_core::records::Team::level),
+            month,
+        };
+        let mut rows: Vec<String> = grounds
+            .complaints(&fans)
+            .into_iter()
+            .take(MOST_COMPLAINTS)
+            .map(|text| game.text(text).to_owned())
+            .collect();
+        if rows.is_empty() {
+            rows.push(NO_COMPLAINTS.to_owned());
+        }
+        if let Some(list) = control(dialog, FAN_LIST).and_then(|c| view.list_mut(c)) {
+            list.rows = rows;
+        }
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        closed(cx, target)
+    }
+}
+
+/// What is being built (469, `CMapImBau`, §8.4): weeks left, the
+/// building, what it costs; or that nothing is.
+pub struct GroundsWorks;
+
+const WORKS_LIST: u16 = 5261;
+/// "%d Wo.\t%s\t%s" and "Derzeit wird nicht gebaut!".
+const WORKS_ROW: u16 = 4363;
+const NOTHING_BUILT: u16 = 4362;
+
+impl Screen for GroundsWorks {
+    fn ids(&self) -> &[u16] {
+        &[WORKS]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(grounds) = &cx.state.grounds_shown else { return };
+        let mut rows: Vec<String> = grounds
+            .works_in_progress()
+            .into_iter()
+            .map(|(weeks, kind, price)| {
+                let name = grounds::TYPES.get(kind as usize).map_or("", |t| game.text(t.text));
+                super::finances::printf(
+                    &game.text(WORKS_ROW).replace("\\t", "\t"),
+                    &[&weeks, &name, &money(game, price)],
+                )
+            })
+            .collect();
+        // The line that nothing is has one column across the row
+        // (`FUN_007a94db(row, 1, 0x1cb87a8)`).
+        let nothing = rows.is_empty();
+        if nothing {
+            rows.push(game.text(NOTHING_BUILT).to_owned());
+        }
+        if let Some(list) = control(dialog, WORKS_LIST).and_then(|c| view.list_mut(c)) {
+            list.spans = vec![nothing];
+            list.rows = rows;
+        }
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        closed(cx, target)
     }
 }

@@ -1611,6 +1611,37 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_grounds_sub_dialogs_report_on_them() {
+        let game = game();
+        let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";
+        let Some(runner) = on_save(&game, "Probe1", &format!("{open}\nnow press 5971")) else {
+            return;
+        };
+        // The info: the club's name, its land in hectares.
+        let text = |runner: &Runner, dialog: u16, id: u16| {
+            let control = control(&game.dialogs[&dialog], id).unwrap();
+            runner.host.view().text(control).to_owned()
+        };
+        assert!(text(&runner, 467, 6250).starts_with("Vereinsgelände "));
+        assert!(text(&runner, 467, 6251).ends_with(" ha"), "{}", text(&runner, 467, 6251));
+        // The staff, sorted; the fans' complaints or their content; what
+        // is being built or that nothing is — each closed by its OK.
+        let rows = |runner: &Runner, dialog: u16, id: u16| {
+            let control = control(&game.dialogs[&dialog], id).unwrap();
+            runner.host.view().list(control).unwrap().rows.clone()
+        };
+        let then = |button: u16| format!("{open}\nnow press 5971\nnow press 1\nnow press {button}");
+        let runner = on_save(&game, "Probe1", &then(5774)).unwrap();
+        let staff = rows(&runner, 465, 5261);
+        assert!(!staff.is_empty() && staff.is_sorted_by_key(|r| r.to_lowercase()), "{staff:?}");
+        let runner = on_save(&game, "Probe1", &then(5972)).unwrap();
+        assert!(!rows(&runner, 468, 5996).is_empty());
+        let runner = on_save(&game, "Probe1", &format!("{}\nnow press 1", then(5979))).unwrap();
+        assert_eq!(runner.host.view().id, 466);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn land_is_bought_built_on_cleared_and_sold() {
         let game = game();
         let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";

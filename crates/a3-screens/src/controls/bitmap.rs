@@ -5,7 +5,7 @@ use std::error::Error;
 
 use image::{Rgba, RgbaImage};
 
-use crate::classic::{Paint, paste};
+use crate::classic::{Paint, centred, fill, paste};
 use crate::game::{Game, transparent_black};
 
 /// The red the game draws its charts in.
@@ -29,6 +29,59 @@ pub struct BitmapState {
     /// The tiles a click tells (`Target::Tile`): the grounds' map and its
     /// minimap.
     pub tiles: Option<Tiles>,
+    /// The tooltip over the grounds' map.
+    pub tip: Option<Tip>,
+}
+
+/// The grounds map's tooltip (STADION-ANSICHT.md §6.4): lines of text in
+/// a white box edged black, set by where the pointer is in the dialog.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Tip {
+    pub at: bevy_math::Vec2,
+    pub lines: Vec<String>,
+}
+
+/// Its font, the lines' spacing; it keeps left of x 450 and below y 25,
+/// and the map's corner (2, 25) is added when it is drawn.
+const TIP_FONT: u8 = 0;
+const TIP_LINE: i32 = 14;
+const TIP_RIGHT: i32 = 450;
+const TIP_TOP: i32 = 25;
+const TIP_SHIFT: (i32, i32) = (2, 25);
+
+impl Tip {
+    /// Drawn as the map draws it, cut to the map.
+    fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
+        let Some(font) = paint.font_of(TIP_FONT) else { return };
+        let width = |line: &String| font.width(line, false) as i32;
+        let w = self.lines.iter().map(width).max().unwrap_or(0);
+        let (mx, my) = (self.at.x.floor() as i32, self.at.y.floor() as i32);
+        let h = TIP_LINE * self.lines.len() as i32;
+        let (mut l, mut r) = (mx, mx + 4 + w);
+        if r > TIP_RIGHT {
+            (l, r) = (TIP_RIGHT - w - 5, TIP_RIGHT - 1);
+        }
+        let mut t = my - 18 - h;
+        if t < TIP_TOP {
+            t = my + 10;
+        }
+        let (l, r, t) = (l + TIP_SHIFT.0, r + TIP_SHIFT.0, t + TIP_SHIFT.1);
+        // Cut to the map: drawn on a copy of its part of the frame.
+        let area = paint.control.rect;
+        let (ax, ay) = (area.min.x as i32, area.min.y as i32);
+        let (aw, ah) = (area.width() as u32, area.height() as u32);
+        let mut part = image::imageops::crop_imm(frame, ax as u32, ay as u32, aw, ah).to_image();
+        let black = Rgba([0, 0, 0, 255]);
+        fill(&mut part, l - ax, t - ay, r - l, h, black);
+        fill(&mut part, l + 1 - ax, t + 1 - ay, r - l - 2, h - 2, Rgba([255, 255, 255, 255]));
+        // The text a pixel below the box's top, as the original shows it
+        // (shots g21, g22).
+        for (i, line) in self.lines.iter().enumerate() {
+            let (x, y) = (centred(l, r - l, width(line)), t + 1 + TIP_LINE * i as i32);
+            font.draw(&mut part, x - ax, y - ay, line, black, false);
+        }
+        image::imageops::replace(frame, &part, ax.into(), ay.into());
+    }
 }
 
 /// Square tiles over a part of a bitmap: their size, how far the first
@@ -83,6 +136,9 @@ impl BitmapState {
                 }
                 paste(frame, &cut, at);
             }
+        }
+        if let Some(tip) = &self.tip {
+            tip.draw(frame, paint);
         }
     }
 }
