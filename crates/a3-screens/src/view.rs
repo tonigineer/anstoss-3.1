@@ -30,6 +30,12 @@ pub struct View {
     /// Where the pointer is in the dialog, in classic pixels, as far as it
     /// is known.
     pub pointer: Option<Vec2>,
+    /// The arrow keys held, left, right, up, down; whether they scroll the
+    /// screen rather than step through its options.
+    pub arrows: [bool; 4],
+    pub arrows_scroll: bool,
+    /// Sounds the screen loops, by file, and their volume from 0 to 100.
+    pub ambience: Vec<(&'static str, u8)>,
     /// The button the pointer is holding down.
     pub pressed: Option<Target>,
     /// The item whose tooltip shows: control and item.
@@ -114,6 +120,9 @@ impl View {
             focus: None,
             hovered: None,
             pointer: None,
+            arrows: [false; 4],
+            arrows_scroll: false,
+            ambience: Vec::new(),
             pressed: None,
             tip: None,
             inert: Vec::new(),

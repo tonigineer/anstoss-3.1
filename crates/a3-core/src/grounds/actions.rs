@@ -988,6 +988,49 @@ mod tests {
     }
 
     #[test]
+    fn the_view_glides_and_slows() {
+        let mut g = empty();
+        let mut view = super::super::View::default().zoomed(1);
+        let right = [false, true, false, false];
+        let scrolls: Vec<i32> = [right, right, [false; 4], [false; 4], [false; 4], [false; 4]]
+            .into_iter()
+            .map(|pushed| {
+                g.glide(&mut view, pushed);
+                view.scroll.0
+            })
+            .collect();
+        // 2.4, 5.28, then 3.17, 1.9, 1.14 and below 1 nothing.
+        assert_eq!(scrolls, [2, 7, 10, 11, 12, 12]);
+        // Back left, each step cut towards nought: 12 − 2.4, 9 − 5.28; then
+        // held at the edge.
+        let left = [true, false, false, false];
+        let back: Vec<i32> = (0..3)
+            .map(|_| {
+                g.glide(&mut view, left);
+                view.scroll.0
+            })
+            .collect();
+        assert_eq!(back, [9, 3, 0]);
+    }
+
+    #[test]
+    fn a_lake_ripples() {
+        let mut g = empty();
+        let mut random = Random::new(1);
+        g.place(0, 0, 0, false, false, false, &mut random);
+        // See (groß): five frames, moving always.
+        g.animate(&mut random);
+        assert_eq!(g.entry(0).frame, 1);
+        let frames: Vec<u8> = (0..40)
+            .map(|_| {
+                g.animate(&mut random);
+                g.entry(0).frame
+            })
+            .collect();
+        assert!(frames.iter().all(|&f| f <= 5) && frames.contains(&5));
+    }
+
+    #[test]
     fn a_hotel_s_staff_cost_what_the_table_says() {
         // Hotelleiter, Empfangsdame, three Zimmermädchen, two Pagen, two
         // Köche, a Tellerwäscher.

@@ -72,6 +72,10 @@ const OPENING_ZOOM: i32 = 1;
 const CAPACITY: u16 = 5074;
 const BUILDING_TIME: &str = "Bauzeit %s";
 const WEEKS_TEXTS: [u16; 3] = [4141, 4142, 4143];
+/// How often the frames come once the renderer has caught up (the
+/// thread's sleep, at least 30 ms), and the animation's step.
+const FRAME_SECS: f32 = 0.03;
+const ANIMATION_SECS: f32 = 0.16;
 /// The modes, as the tabs of 5963 stand.
 const MODE: [Mode; 4] = [Mode::Buy, Mode::Build, Mode::Sell, Mode::Demolish];
 /// "Dieses Gebiet würde sie %s kosten, also zweifellos zuviel.", and the
@@ -149,6 +153,9 @@ pub struct GroundsScreen {
     tip: Option<Tip>,
     tip_tile: (i32, i32),
     last_pointer: Option<Vec2>,
+    /// Time not yet taken by frames, and since the last animation step.
+    clock: f32,
+    animated: f32,
     asked: Option<Ask>,
 }
 
@@ -201,6 +208,10 @@ impl Screen for GroundsScreen {
         (self.mode, self.over, self.held, self.pointer, self.cost, self.asked) =
             (Mode::Buy, false, false, None, None, None);
         (self.tip, self.tip_tile, self.last_pointer) = (None, (-1, -1), None);
+        (self.clock, self.animated) = (0.0, 0.0);
+        view.arrows_scroll = true;
+        // The first frame animates at once.
+        self.animate(cx);
         self.draw(cx, view);
     }
 
@@ -320,7 +331,7 @@ impl Screen for GroundsScreen {
 
     /// The pointer moving moves the cursor: over the map, or anywhere
     /// once the dialog takes it to be over the map.
-    fn tick(&mut self, cx: &mut Cx, view: &mut View, _: f32) -> Outcome {
+    fn tick(&mut self, cx: &mut Cx, view: &mut View, seconds: f32) -> Outcome {
         let map = control(cx.dialog, MAP);
         let was = (self.pointer, self.tip.clone());
         // The dialog sees the moves over the map and over itself — all of
@@ -337,10 +348,39 @@ impl Screen for GroundsScreen {
             self.over = false;
             self.tip = None;
         }
+        // The frames' own work: scrolling at the screen's edges and by the
+        // arrows, the animation.
+        self.clock = (self.clock + seconds).min(FRAME_SECS * 4.0);
+        if self.clock >= FRAME_SECS {
+            self.clock -= FRAME_SECS;
+            self.animated += FRAME_SECS;
+            if let Some(g) = self.grounds.as_mut() {
+                let at = view.pointer.unwrap_or(Vec2::new(320.0, 240.0));
+                let [l, r, u, d] = view.arrows;
+                let pushed =
+                    [at.x <= 0.0 || l, at.x >= 639.0 || r, at.y <= 0.0 || u, at.y >= 479.0 || d];
+                let before = self.view.scroll;
+                if g.glide(&mut self.view, pushed) {
+                    self.tip = None;
+                }
+                self.stale |= self.view.scroll != before;
+            }
+            if self.animated >= ANIMATION_SECS {
+                self.animated = 0.0;
+                self.animate(cx);
+            }
+        }
         self.follow(view);
-        if (self.pointer, self.tip.clone()) != was {
+        if (self.pointer, self.tip.clone()) != was || self.stale {
             self.frame();
             self.show(cx, view);
+        }
+        if let Some(g) = &self.grounds {
+            let volumes = g.ambience(&self.view);
+            let ambience: Vec<_> = grounds::SOUNDS.iter().copied().zip(volumes).collect();
+            if view.ambience != ambience {
+                view.ambience = ambience;
+            }
         }
         Outcome::Stay
     }
@@ -518,6 +558,16 @@ impl GroundsScreen {
         };
         self.tip = Some(Tip { at, lines });
         self.tip_tile = tile;
+    }
+
+    /// A step of the animation, from the game's random numbers; the map
+    /// drawn anew.
+    fn animate(&mut self, cx: &mut Cx) {
+        let (Some(g), Some(season)) = (self.grounds.as_mut(), cx.state.season.as_mut()) else {
+            return;
+        };
+        g.animate(&mut season.random);
+        self.stale = true;
     }
 
     /// The tile under a point of the dialog, by the view's tiles.

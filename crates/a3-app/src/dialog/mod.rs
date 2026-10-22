@@ -7,6 +7,7 @@
 //! looks, and the classic and remastered renderers both draw from that one
 //! state — which is what lets F9 switch looks mid-dialog.
 
+mod ambience;
 mod backdrop;
 mod classic;
 mod decor;
@@ -67,10 +68,12 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 keyboard,
+                follow_pointer,
                 wheel,
                 release,
                 repeat,
                 tick,
+                ambience::play,
                 act,
                 rest,
                 blink,
@@ -487,6 +490,26 @@ fn point_move(moved: On<PointerMove>, hotspots: Query<&Hotspot>, mut view: ResMu
     }
 }
 
+/// In the classic look the pointer's place in the dialog follows it
+/// anywhere in the window, beyond the screen's edges too.
+fn follow_pointer(
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    scale: Res<UiScale>,
+    look: Res<Look>,
+    mut view: ResMut<OpenDialog>,
+) {
+    if look.showing_remastered() {
+        return;
+    }
+    let Some(cursor) = window.cursor_position() else { return };
+    let size = Vec2::new(window.width(), window.height());
+    let pixel = scale.0 * crate::look::CLASSIC_SCALE;
+    let at = (cursor - size / 2.0) / pixel + crate::look::CLASSIC / 2.0;
+    if view.pointer != Some(at) {
+        view.pointer = Some(at);
+    }
+}
+
 fn point_away(out: On<PointerOut>, hotspots: Query<&Hotspot>, mut view: ResMut<OpenDialog>) {
     // Moving between two hotspots may report the new one first.
     if let Ok(hotspot) = hotspots.get(out.entity)
@@ -746,9 +769,15 @@ fn keyboard(
         }
     }
 
+    // Held arrows scroll a screen that scrolls by them; else they step.
+    let arrows = [KeyCode::ArrowLeft, KeyCode::ArrowRight, KeyCode::ArrowUp, KeyCode::ArrowDown]
+        .map(|key| keys.pressed(key));
+    if view.arrows != arrows {
+        view.arrows = arrows;
+    }
     let step = i32::from(keys.just_pressed(KeyCode::ArrowDown))
         - i32::from(keys.just_pressed(KeyCode::ArrowUp));
-    if step != 0 {
+    if step != 0 && !view.arrows_scroll {
         view.step(dialog, step);
     }
     if keys.just_pressed(KeyCode::Enter)

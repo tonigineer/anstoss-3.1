@@ -29,6 +29,8 @@ const CLASS: usize = 0x1adb4;
 const LOOKS: usize = 0x1d5e0;
 const SCROLL: usize = 0x1d608;
 const TILE: usize = 0x1fd44;
+/// The scroll's speed left, right, up and down (f32 `0x1cb8700` …).
+const VELOCITY: usize = 0x1fd50;
 const INVESTABLE: usize = 0x1fd60;
 /// The block's size.
 #[cfg(test)]
@@ -243,7 +245,124 @@ impl Grounds {
     pub fn set_investable(&mut self, amount: i64) {
         self.data[INVESTABLE..INVESTABLE + 8].copy_from_slice(&amount.to_le_bytes());
     }
+
+    /// One frame's scrolling (0x7ba47a): a push left (else right) and up
+    /// (else down) speeds that way up — (v + 2)·2 —, every speed then
+    /// slows to 0.6 of it, below 1 stops, above 64 is held at 64; the view
+    /// moves by right less left and down less up, held to the map, which
+    /// stops the speed against its far edges. Whether anything was pushed.
+    pub fn glide(&mut self, view: &mut View, [left, right, up, down]: [bool; 4]) -> bool {
+        let at = |i: usize| VELOCITY + 4 * i;
+        let mut v: [f32; 4] = std::array::from_fn(|i| {
+            f32::from_le_bytes(self.data[at(i)..at(i) + 4].try_into().unwrap())
+        });
+        let push = |v: &mut f32| *v = (*v + PUSH) * PUSH;
+        if left {
+            push(&mut v[0]);
+        } else if right {
+            push(&mut v[1]);
+        }
+        if up {
+            push(&mut v[2]);
+        } else if down {
+            push(&mut v[3]);
+        }
+        for v in &mut v {
+            *v *= SLOWING;
+            if *v < 1.0 {
+                *v = 0.0;
+            } else if *v > FASTEST {
+                *v = FASTEST;
+            }
+        }
+        let (sx, sy) = view.scroll;
+        view.scroll = ((v[1] - v[0] + sx as f32) as i32, (v[3] - v[2] + sy as f32) as i32);
+        let most = (SIZE as i32 - view.tiles) * 32;
+        if view.scroll.0 > most {
+            v[1] = 0.0;
+        }
+        if view.scroll.1 > most {
+            v[3] = 0.0;
+        }
+        view.clamp();
+        for (i, v) in v.iter().enumerate() {
+            self.data[at(i)..at(i) + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        left || right || up || down
+    }
+
+    /// One step of the buildings' animation (0x7bac97, every 160 ms): each
+    /// animated entry in use draws a number below 100 from the game's
+    /// generator; at rest it starts with the kind's chance, moving it
+    /// stops one time in twenty, else goes on to its next frame, after the
+    /// last to the first moving one.
+    pub fn animate(&mut self, random: &mut crate::random::Random) {
+        if self.count() == 0 {
+            return;
+        }
+        for k in 0..ENTRIES {
+            let e = self.entry(k);
+            let Some(t) = TYPES.get(usize::try_from(e.kind).unwrap_or(usize::MAX)) else {
+                continue;
+            };
+            if !e.used || t.frames == 0 || t.animation == 0 {
+                continue;
+            }
+            let r = random.below(100);
+            let frame = match e.frame {
+                0 if r <= u32::from(t.animation) => 1,
+                0 => 0,
+                _ if r < 5 => 0,
+                f if f < t.frames => f + 1,
+                _ => 1,
+            };
+            self.data[k * ENTRY + 4] = frame;
+        }
+    }
+
+    /// The eight ambient sounds' volumes, 0 to 50 (§6.5): by the tiles in
+    /// view covered by kinds of each sound, against a threshold by zoom.
+    pub fn ambience(&self, view: &View) -> [u8; SOUNDS.len()] {
+        let ((ox, oy), _) = view.origin();
+        let mut count = [0i32; SOUNDS.len()];
+        for r in 0..=view.tiles {
+            for c in 0..=view.tiles {
+                let i = usize::try_from((oy + r) * SIZE as i32 + ox + c).unwrap_or(usize::MAX);
+                let Some(k) = self.at_index(i) else { continue };
+                let kind = self.entry(k).kind;
+                let Some(t) = TYPES.get(usize::try_from(kind).unwrap_or(usize::MAX)) else {
+                    continue;
+                };
+                if let Some(n) = count.get_mut(usize::from(t.sound)) {
+                    *n += 1;
+                }
+            }
+        }
+        let zoom = view.zoom.clamp(0, 2) as usize;
+        std::array::from_fn(|k| {
+            let threshold = if k < 3 { [100, 400, 1600] } else { [20, 30, 40] }[zoom];
+            (count[k] * LOUDEST / threshold).min(LOUDEST) as u8
+        })
+    }
 }
+
+/// The scroll's push, its slowing and its top speed (0x837360 …).
+const PUSH: f32 = 2.0;
+const SLOWING: f32 = 0.6;
+const FASTEST: f32 = 64.0;
+/// The ambient sounds by their number in the kinds' table, and their
+/// loudest (`CGelaende`'s constructor).
+pub const SOUNDS: [&str; 8] = [
+    "waves/leute.wav",
+    "waves/strasse.wav",
+    "waves/natur.wav",
+    "waves/kirche.wav",
+    "waves/water.wav",
+    "waves/landstrasse.wav",
+    "waves/spass.wav",
+    "waves/china2.wav",
+];
+const LOUDEST: i32 = 50;
 
 /// The tile's size and the tiles in view by zoom (§6.1).
 pub const TILES: [(i32, i32); 3] = [(8, 56), (16, 28), (32, 14)];

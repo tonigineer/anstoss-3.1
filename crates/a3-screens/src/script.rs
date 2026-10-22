@@ -1611,6 +1611,34 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_grounds_scroll_by_the_arrows_and_keep_their_view() {
+        let game = game();
+        let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";
+        let Some(mut runner) = on_save(&game, "Probe1", open) else { return };
+        // Right and down held for a second, then let go.
+        runner.host.view_mut().arrows = [false, true, false, true];
+        (0..33).for_each(|_| _ = runner.host.tick(&game, 0.03));
+        runner.host.view_mut().arrows = [false; 4];
+        (0..10).for_each(|_| _ = runner.host.tick(&game, 0.03));
+        // The ambience plays, every sound at most at 50.
+        let ambience = runner.host.view().ambience.clone();
+        assert_eq!(ambience.len(), 8);
+        assert!(ambience.iter().all(|&(_, v)| v <= 50));
+        let ok = control(&game.dialogs[&466], 1).unwrap();
+        runner.host.input(&game, crate::pointer::Target::Button(ok), false);
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = records.humans().next().unwrap();
+        let team = records.team(manager.country(), manager.team()).unwrap();
+        let grounds =
+            a3_core::grounds::Grounds::of(records, team.country(), i16::from(team.number()))
+                .unwrap();
+        let (x, y) = grounds.view().scroll;
+        assert!(x > 0 && y > 0 && x == y, "{x} {y}");
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_grounds_sub_dialogs_report_on_them() {
         let game = game();
         let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";
