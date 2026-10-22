@@ -15,7 +15,6 @@ use a3_core::finances::Balance as Figures;
 use a3_core::records::Records;
 use a3_core::transfers::{self, FREE_TRANSFER, LOAN, LOAN_WITH_OPTION, Listing, SALE, Watch};
 use a3_files::rch::Dialog;
-use tracing::info;
 
 use super::finances::money64;
 use super::hub::{self, Command};
@@ -108,6 +107,8 @@ pub struct TransferList {
     menu_player: Option<u16>,
     asking: Option<u16>,
     dealing: bool,
+    /// The player whose loan's terms are shown.
+    loan: Option<u16>,
 }
 
 impl Screen for TransferList {
@@ -242,6 +243,13 @@ impl Screen for TransferList {
                 transfers::take_off(records, id);
             }
             self.fill(cx, view);
+        }
+        // The loan's terms OKed: its credit, then its appointment.
+        if let Some(id) = self.loan.take()
+            && reply == Reply::Ok
+            && let Some(outcome) = loan_accepted(cx, id)
+        {
+            return outcome;
         }
         if std::mem::take(&mut self.dealing) {
             self.fill(cx, view);
@@ -439,7 +447,9 @@ impl TransferList {
             if let Some(text) = refusal(cx, id, Checks::None) {
                 return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
             }
-            return purchase(cx, id, &listing).unwrap_or(Outcome::Stay);
+            let outcome = purchase(cx, id, &listing).unwrap_or(Outcome::Stay);
+            self.loan = to_terms(outcome).then_some(id);
+            return outcome;
         }
         let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
         if transfers::talk_day(records, id).is_some() {
@@ -725,6 +735,8 @@ const INFO_ONLY: [Command; 1] = [Command::Info];
 #[derive(Default)]
 pub struct Appointments {
     menu_player: Option<u16>,
+    /// The player whose loan's terms are shown.
+    loan: Option<u16>,
 }
 
 const TALKS_LIST: u16 = 1313;
@@ -863,10 +875,24 @@ impl Screen for Appointments {
                 if let Some(text) = refusal(cx, id, Checks::Credit) {
                     return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
                 }
-                purchase(cx, id, &listing).unwrap_or(Outcome::Stay)
+                let outcome = purchase(cx, id, &listing).unwrap_or(Outcome::Stay);
+                self.loan = to_terms(outcome).then_some(id);
+                outcome
             }
             _ => Outcome::Stay,
         }
+    }
+
+    /// A loan's terms OKed: its credit, then its appointment; the list
+    /// stays as it is.
+    fn answer(&mut self, cx: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+        if let Some(id) = self.loan.take()
+            && reply == Reply::Ok
+            && let Some(outcome) = loan_accepted(cx, id)
+        {
+            return outcome;
+        }
+        Outcome::Stay
     }
 }
 
@@ -1122,6 +1148,7 @@ const NO_CREDIT: u16 = 3071;
 const CREDIT_REFUSED: u16 = 4073;
 const DAY_TAKEN: u16 = 2503;
 const SELLER_FULL: u16 = 4963;
+const NO_TIME: u16 = 4181;
 /// A release fee's unit.
 const FEE_UNIT: i64 = 10_000;
 /// The week planner, and what it books for a poaching talk and for the
@@ -1278,32 +1305,48 @@ pub(crate) fn negotiate(cx: &Cx, id: u16, terms: bool, chosen: bool) -> Outcome 
 fn purchase(cx: &Cx, id: u16, listing: &Listing) -> Option<Outcome> {
     let notice = |text: u16| Some(Outcome::Popup(Request::with(NOTICE, Args::Text(text))));
     if listing.kind != SALE {
-        info!("Leihe ({id}): not built yet");
-        return None;
+        return loan_terms(cx, id, listing).map(|(terms, _)| terms);
     }
-    let records = cx.state.records.as_ref()?;
     let fee = if listing.terms == FREE_TRANSFER { 0 } else { transfer_fee(cx, id) };
     if fee > investable(cx) {
         return notice(CREDIT_REFUSED);
     }
+    talk(cx, id, transfers::PURCHASE)
+}
+
+/// The appointment of a purchase or a loan (`FUN_005a5673`,
+/// `FUN_005a58cb`): with no appointment for the player the planner to book
+/// one in, unless his club sits at three talks this week; with one this
+/// fortnight, the planner to join it, unless the day is taken. A purchase
+/// asks for the wished day and needs a seller to join; a loan neither.
+fn talk(cx: &Cx, id: u16, kind: i16) -> Option<Outcome> {
+    let notice = |text: u16| Some(Outcome::Popup(Request::with(NOTICE, Args::Text(text))));
+    let records = cx.state.records.as_ref()?;
+    let purchase = kind == transfers::PURCHASE;
     let seller = records.player(id).map(|r| r.club()).filter(|&[country, _]| country != 0);
     let seller = seller.map(|[country, number]| (country, i16::from(number)));
     let mut n = Negotiation {
         player: id,
-        kind: transfers::PURCHASE,
+        kind,
         planner: PURCHASE_DAY,
         terms: false,
-        chosen: true,
+        chosen: purchase,
         join: None,
     };
     match transfers::talk_day(records, id) {
         None => {
-            if seller.is_some_and(|s| transfers::talks_in_week(records, s) >= TALKS_A_WEEK) {
+            let full = |s| transfers::talks_in_week(records, s) >= TALKS_A_WEEK;
+            if purchase && seller.is_some_and(full) {
                 return notice(SELLER_FULL);
+            }
+            if !purchase && full(seller.unwrap_or((0, 0))) {
+                return notice(if seller.is_some() { SELLER_FULL } else { NO_TIME });
             }
         }
         Some(day) => {
-            seller?;
+            if purchase {
+                seller?;
+            }
             let start = records.globals.week_start();
             if !(start..start + FORTNIGHT).contains(&day) {
                 return None;
@@ -1318,6 +1361,129 @@ fn purchase(cx: &Cx, id: u16, listing: &Listing) -> Option<Outcome> {
         }
     }
     Some(Outcome::Popup(Request::with(PLANNER, Args::Negotiation(n))))
+}
+
+/// A listed loan's terms (`FUN_00622f7d`, then 290 or 289): the fees asked
+/// beside the fair ones; and what its credit is tested against, the fair
+/// fee.
+fn loan_terms(cx: &Cx, id: u16, listing: &Listing) -> Option<(Outcome, i32)> {
+    let game = cx.game;
+    let records = cx.state.records.as_ref()?;
+    let today = cx.state.season.as_ref()?.date();
+    let (player, _, status) = a3_core::load::any_player(records, &game.data, id)?;
+    let r = records.player(id)?;
+    let worth = super::playerinfo::worth(&player, r, records.globals.stars(), today);
+    let years = status.contract.unwrap_or(0);
+    use chrono::Datelike;
+    let prices = game.rules.value.loan_prices(&worth, years, today.month());
+    let (screen, args, cost) = if listing.kind == LOAN {
+        let args = Args::LoanTerms {
+            player: id,
+            fee: listing.fee,
+            fair_fee: prices.fee,
+            option: 0,
+            fair_option: 0,
+        };
+        (LOAN_TERMS, args, prices.fee)
+    } else {
+        let args = Args::LoanTerms {
+            player: id,
+            fee: listing.fee,
+            fair_fee: prices.with_option,
+            option: listing.option,
+            fair_option: prices.option,
+        };
+        (OPTION_TERMS, args, prices.with_option)
+    };
+    Some((Outcome::Popup(Request::with(screen, args)), cost))
+}
+
+/// The terms OKed (`FUN_00622eb9`): the fair fee within what can be
+/// invested, then the appointment, a loan's.
+fn loan_accepted(cx: &Cx, id: u16) -> Option<Outcome> {
+    let records = cx.state.records.as_ref()?;
+    let listing = transfers::listings(records).into_iter().find(|e| e.id == id)?;
+    let (_, cost) = loan_terms(cx, id, &listing)?;
+    if cost > 0 && investable(cx) <= i64::from(cost) {
+        return Some(Outcome::Popup(Request::with(NOTICE, Args::Text(CREDIT_REFUSED))));
+    }
+    talk(cx, id, transfers::LOAN_TALK)
+}
+
+/// Whether an outcome opens a loan's terms.
+fn to_terms(outcome: Outcome) -> bool {
+    matches!(outcome, Outcome::Popup(Request { screen: LOAN_TERMS | OPTION_TERMS, .. }))
+}
+
+/// A loan's terms (dialogs 290 `CTransferlisteLeiheOhneKaufoption` and 289
+/// `…MitKaufoption`; LEIHE-TEILNAHME.md §1.3–1.4): the player's name, the
+/// fee asked beside the fair one, the option's likewise; OK accepts.
+#[derive(Default)]
+pub struct LoanTerms;
+
+const LOAN_TERMS: u16 = 290;
+const OPTION_TERMS: u16 = 289;
+/// Each dialog's name line, fee label, fee, option label and option.
+const TERMS_LINES: [(u16, [u16; 5]); 2] =
+    [(LOAN_TERMS, [3957, 3955, 3956, 0, 0]), (OPTION_TERMS, [3951, 3948, 3949, 3950, 3952])];
+
+pub(crate) fn compose_loans(dialogs: &mut HashMap<u16, Dialog>) {
+    for id in [LOAN_TERMS, OPTION_TERMS] {
+        if let Some(dialog) = dialogs.get_mut(&id) {
+            let caption = super::caption(dialog.frame, TALKS_CAPTION, dialog.title.clone());
+            dialog.controls.insert(0, caption);
+        }
+    }
+}
+
+impl Screen for LoanTerms {
+    fn ids(&self) -> &[u16] {
+        &[LOAN_TERMS, OPTION_TERMS]
+    }
+
+    /// `0x5a9f70`, `0x5a9a9d`.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Args::LoanTerms { player, fee, fair_fee, option, fair_option } = args else { return };
+        let Some(&(_, [name, fee_label, fee_figure, option_label, option_figure])) =
+            TERMS_LINES.iter().find(|(id, _)| *id == view.id)
+        else {
+            return;
+        };
+        let name_of =
+            cx.state.records.as_ref().and_then(|r| r.known_as(player)).unwrap_or_default();
+        let m = |v: i32| money(game, v.into());
+        let own = |id: u16| control(dialog, id).map(|c| dialog.controls[c].text.clone());
+        let lines = [
+            (name, own(name).map(|t| super::finances::printf(&t, &[&name_of]))),
+            (fee_label, own(fee_label).map(|t| super::finances::printf(&t, &[&m(fair_fee)]))),
+            (fee_figure, Some(m(fee))),
+            (
+                option_label,
+                own(option_label).map(|t| super::finances::printf(&t, &[&m(fair_option)])),
+            ),
+            (option_figure, Some(m(option))),
+        ];
+        for (id, text) in lines {
+            if let (true, Some(text)) = (id != 0, text) {
+                set(view, dialog, id, text);
+            }
+        }
+        question_ball(view, dialog);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        let Target::Button(c) = target else { return Outcome::Stay };
+        let button = &cx.dialog.controls[c];
+        if crate::controls::button::is_ok(button) {
+            Outcome::Close(Reply::Ok)
+        } else if crate::controls::button::is_cancel(button) {
+            Outcome::Close(Reply::Cancel)
+        } else {
+            Outcome::Stay
+        }
+    }
 }
 
 /// What a listed player costs (`FUN_0070a393`): nothing with no contract

@@ -9,7 +9,7 @@
 //! player of a new game.
 
 mod current;
-pub(crate) use current::market_value;
+pub(crate) use current::{market_value, worth};
 mod history;
 mod private;
 mod season;

@@ -214,6 +214,15 @@ pub enum Args {
     TextForMoney(u16, i64),
     /// A text with a number for its "%d".
     TextForNumber(u16, i32),
+    /// A loan's terms (dialogs 290, 289): the player, the fee asked and
+    /// its fair value, the option's price asked and its fair value.
+    LoanTerms {
+        player: u16,
+        fee: i32,
+        fair_fee: i32,
+        option: i32,
+        fair_option: i32,
+    },
     /// The builder's offer (text 4812): its price, the weeks and the weeks
     /// it comes to, and the cost in all.
     BuilderOffer {

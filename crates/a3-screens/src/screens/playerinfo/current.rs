@@ -308,7 +308,12 @@ pub(crate) fn market_value(
     years: i32,
     today: NaiveDate,
 ) -> i64 {
-    let worth = Worth {
+    game.rules.value.market_value(&worth(player, r, stars, today), years, today.month())
+}
+
+/// What the value counts of a player.
+pub(crate) fn worth(player: &Player, r: &Record, stars: [u16; 11], today: NaiveDate) -> Worth {
+    Worth {
         strength: player.strength,
         position: player.positions[0],
         talent: r.talent(),
@@ -318,6 +323,5 @@ pub(crate) fn market_value(
         qualities: r.qualities(),
         star: stars.get(usize::from(player.positions[0])).is_some_and(|&s| s == r.id()),
         kind_12_matches: r.kind_12_matches(),
-    };
-    game.rules.value.market_value(&worth, years, today.month())
+    }
 }

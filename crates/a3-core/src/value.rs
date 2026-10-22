@@ -85,6 +85,36 @@ pub struct Worth {
     pub kind_12_matches: u8,
 }
 
+/// A loan's fair prices: the fee without an option, the fee with one, the
+/// option's price.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LoanPrices {
+    pub fee: i32,
+    pub with_option: i32,
+    pub option: i32,
+}
+
+/// The loan prices of a monthly worth with `months` of the season left.
+fn loan_prices(monthly: i64, months: u8, years: i32) -> LoanPrices {
+    let f = f64::from(monthly as f32);
+    let fee = round_price((f64::from(months) * f / 3.5) as i64 as i32);
+    let with_option = round_price(((fee as u32).wrapping_mul(3) >> 1) as i32);
+    let option = round_price((f64::from(years - 1) * f * 12.0) as i64 as i32);
+    LoanPrices { fee, with_option, option }
+}
+
+/// A price rounded down as the loans round it (`FUN_00622f0d`): to
+/// thousands below 100,000, to ten thousands below a million, else to
+/// 50,000 — compared unsigned, divided toward zero.
+fn round_price(x: i32) -> i32 {
+    let unit = match x as u32 {
+        0..100_000 => 1000,
+        100_000..1_000_000 => 10_000,
+        _ => 50_000,
+    };
+    x / unit * unit
+}
+
 impl ValueTables {
     /// What he is worth a month (`FUN_007083fd`).
     pub fn monthly(&self, w: &Worth) -> i64 {
@@ -148,6 +178,15 @@ impl ValueTables {
         (monthly / round * round).max(ROUND)
     }
 
+    /// The fair prices of a loan (`FUN_00622f7d`), by the months left in
+    /// the season and the contract's years left: the fee without an option,
+    /// two months' worth for every seven months left; with an option, half
+    /// as much again; the option, a year's worth for every year after this.
+    pub fn loan_prices(&self, w: &Worth, years: i32, month: u32) -> LoanPrices {
+        let months = self.months.get(month as usize).copied().unwrap_or(0);
+        loan_prices(self.monthly(w), months, years)
+    }
+
     /// His market value with `years` of his contract left in the month
     /// `month` (1 to 12): every month still to run, the later years
     /// counting less, a fifth off (`FUN_00708836`).
@@ -163,5 +202,24 @@ impl ValueTables {
         let mut total: i64 = (0..full).map(|y| weight(y) * m).sum();
         total += months % 12 * m * weight(full) / 12;
         (total / 5 * 4).clamp(0, MOST)
+    }
+}
+
+#[cfg(test)]
+mod loan_tests {
+    use super::*;
+
+    #[test]
+    fn a_loan_costs_what_the_original_asked_fairly() {
+        // LEIHE-TEILNAHME.md §1.2 on A.an3 in September (10 months left).
+        assert_eq!(loan_prices(15_000, 10, 2).fee, 42_000);
+        let tramontana = loan_prices(9000, 10, 4);
+        assert_eq!(
+            (tramontana.fee, tramontana.with_option, tramontana.option),
+            (25_000, 37_000, 320_000)
+        );
+        // A negative option compares as a large one: to 50,000 toward zero.
+        assert_eq!(round_price(-120_000), -100_000);
+        assert_eq!(round_price(1_234_567), 1_200_000);
     }
 }

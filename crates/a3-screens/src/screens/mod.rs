@@ -176,6 +176,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(market::TransferList::default()),
         Box::new(market::WorldsBest),
         Box::new(market::Appointments::default()),
+        Box::new(market::LoanTerms),
         Box::new(market::WatchList::default()),
         Box::new(market::WatchedPlayer::default()),
         Box::new(talk::TalkScreen::default()),
@@ -223,6 +224,7 @@ pub fn compose(game: &mut Game) {
     market::compose(&mut game.dialogs);
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);
+    market::compose_loans(&mut game.dialogs);
     youth::compose(&mut game.dialogs);
     search::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
