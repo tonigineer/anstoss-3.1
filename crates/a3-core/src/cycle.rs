@@ -84,6 +84,8 @@ pub mod dialogs {
     /// The squad and the transfer market, the bar's eleventh symbol, and
     /// its current squad.
     pub const SQUAD_MENU: u16 = 218;
+    /// The telephone ("Kontakte", bar symbol 12).
+    pub const CONTACTS: u16 = 404;
     pub const CURRENT_SQUAD: u16 = 216;
     pub const MARKET_VALUES: u16 = 217;
     pub const NEXT_SQUAD: u16 = 219;
@@ -226,6 +228,12 @@ pub enum Args {
     TextForMoney(u16, i64),
     /// A text with a number for its "%d".
     TextForNumber(u16, i32),
+    /// A cooperation contract still running (text 4456): the partner's
+    /// number in the main country, the year it ends.
+    Cooperation {
+        partner: u16,
+        year: i32,
+    },
     /// A text by its id with what its `%d`s and `%s`s stand for, in order.
     Printf(u16, [Fill; 2]),
     /// A loan's terms (dialogs 290, 289): the player, the fee asked and

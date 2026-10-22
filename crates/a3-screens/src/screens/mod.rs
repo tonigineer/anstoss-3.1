@@ -7,6 +7,7 @@
 pub mod bank;
 pub mod calendar;
 pub mod comparison;
+pub mod contacts;
 pub mod discipline;
 pub mod duties;
 pub mod finances;
@@ -166,6 +167,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(stadium::Expansion::default()),
         Box::new(stadium::StadiumView),
         Box::new(grounds::GroundsScreen::default()),
+        Box::new(contacts::Contacts::default()),
         Box::new(grounds::GroundsInfo),
         Box::new(grounds::GroundsStaff),
         Box::new(grounds::GroundsFans),
@@ -228,6 +230,7 @@ pub fn compose(game: &mut Game) {
     squad::compose_next(&mut game.dialogs);
     stadium::compose(&mut game.dialogs, &game.data.rules);
     grounds::compose(&mut game.dialogs);
+    contacts::compose(&mut game.dialogs, &game.data.rules);
     market::compose(&mut game.dialogs);
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);

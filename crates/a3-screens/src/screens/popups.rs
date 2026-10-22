@@ -111,6 +111,7 @@ impl Screen for Notice {
             }
             Args::TextForNumber(text, n) => super::finances::printf(cx.game.text(text), &[&n]),
             Args::Printf(text, fills) => printed(cx, text, fills),
+            Args::Cooperation { partner, year } => super::contacts::running_text(cx, partner, year),
             _ => return,
         };
         set(view, cx.dialog, NOTICE_TEXT, text);
