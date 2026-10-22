@@ -6,6 +6,7 @@
 //! [`screens`]) fill the dialogs and answer the game cycle's requests; the
 //! [`host`] keeps them open, and [`script`]s play them without a window.
 
+pub mod buildings;
 pub mod classic;
 pub mod controls;
 pub mod fonts;

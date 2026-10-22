@@ -643,6 +643,61 @@ pub fn check_arena(sub: &mut Sub) {
     }
 }
 
+/// A stand's look on the grounds map (`FUN_0057c464`): a dream stadium's
+/// own, else its size class by weighted places (none, up to 3,000, 6,000,
+/// 18,000, 32,000, more), 5 more with a track, 10 more with a roof; 0xff
+/// for no stand.
+pub const NO_STAND: u8 = 0xff;
+const SIZE_CLASSES: [i32; 4] = [3000, 6000, 18_000, 32_000];
+const DREAM_LOOK: u8 = 0x12;
+
+pub fn stand_look(sub: &Sub, stand: usize) -> u8 {
+    if sub.kind() >= 2 {
+        return (sub.kind() as u8).wrapping_add(DREAM_LOOK);
+    }
+    let n = sub.weighted(stand);
+    if n == 0 {
+        return NO_STAND;
+    }
+    let class = SIZE_CLASSES.iter().position(|&most| n <= most).unwrap_or(SIZE_CLASSES.len()) as u8;
+    class + 5 * u8::from(sub.track(stand)) + 10 * u8::from(sub.roof(stand))
+}
+
+/// What the views and the grounds draw of a stadium (`FUN_0057e9d7`):
+/// whether it stands (a dream stadium only when built), a dream stadium's
+/// look, its size, floodlights (always), the cinder tracks of the side
+/// stands, and the four stands' looks — left, right, opposite, main.
+pub fn look(sub: &Sub) -> [u8; 12] {
+    let mut d = [0u8; 12];
+    match sub.kind() {
+        0 => {}
+        1 => {
+            d[0] = 1;
+            d[2] = u8::from(sub.big_site());
+            d[3] = 1;
+            for (k, stand) in [2, 3, 1, 0].into_iter().enumerate() {
+                d[4 + k] = u8::from(sub.track(stand));
+                d[8 + k] = stand_look(sub, stand);
+            }
+        }
+        kind => {
+            let built = (0..STANDS).all(|s| sub.weeks(s) == 0);
+            d[0] = u8::from(built);
+            if built {
+                d[1] = (kind as u8).wrapping_add(DREAM_LOOK);
+            }
+            d[2] = 1;
+            for b in &mut d[3..8] {
+                *b = 1;
+            }
+            for (k, stand) in [2, 3, 1, 0].into_iter().enumerate() {
+                d[8 + k] = stand_look(sub, stand);
+            }
+        }
+    }
+    d
+}
+
 /// The dream stadiums one can build instead (0x889bf0).
 const DREAMS_AT: u32 = 0x889bf0;
 pub const DREAMS: usize = 3;
@@ -780,6 +835,23 @@ mod tests {
         fewer.set_standing(1, 6123);
         assert_eq!(stand_cost(&fewer, &old, 1).work, Work::New);
         assert_eq!(stand_cost(&old, &old, 1).work, Work::Nothing);
+    }
+
+    #[test]
+    fn a_stadium_looks_as_the_map_draws_it() {
+        // A.an3: StKickers with a roof for the main stand, Manchester for
+        // the others, on a big site (STADION-ANSICHT.md §3.1).
+        let mut sub = alte_foersterei();
+        sub.0[KIND] = 1;
+        sub.0[VIEW] = 1;
+        assert_eq!(look(&sub), [1, 0, 1, 1, 0, 0, 0, 0, 12, 12, 12, 11]);
+        sub.set_track(2, true);
+        sub.set_roof(3, false);
+        assert_eq!(&look(&sub)[4..], &[1, 0, 0, 0, 17, 2, 12, 11]);
+        sub.0[KIND] = 4;
+        assert_eq!(look(&sub)[..3], [1, 0x16, 1]);
+        sub.0[WEEKS] = 1;
+        assert_eq!(look(&sub)[..3], [0, 0, 1]);
     }
 
     #[test]

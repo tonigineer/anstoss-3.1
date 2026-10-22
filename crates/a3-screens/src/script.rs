@@ -1530,6 +1530,13 @@ mod tests {
         let (after, carried) = club(&on_save(&game, "Probe1", &renovate).unwrap());
         assert_eq!(after - costs, i64::from(renovation));
         assert_eq!(carried.condition(3), sub.condition(3) - 1);
+        // The stadium seen from the screen and from the plan.
+        let views = format!(
+            "{crane}\nnow choose 5916 0\nuntil dialog 249\nnow press 1\nuntil dialog 463\n\
+             now press 2\nuntil dialog 464\nnow choose 5852 0\nuntil dialog 249\nnow press 1\n\
+             until dialog 464"
+        );
+        on_save(&game, "Probe1", &views).unwrap();
     }
 
     #[test]

@@ -32,4 +32,6 @@ pub struct GameState {
     /// The stadium the expansion plans, and whether it is played in; the
     /// plan comes back in its place when it is OKed.
     pub expansion: Option<(crate::stadium::Sub, bool)>,
+    /// The stadium the views (249, 510) show.
+    pub viewed: Option<crate::stadium::Sub>,
 }

@@ -51,14 +51,16 @@ pub fn art(game: &Game, dialog: &Dialog) -> RgbaImage {
 }
 
 /// A dialog's picture as the classic look shows it: a popup's cut to its
-/// window, which may be smaller, with a black edge over its rim.
+/// window, which may be smaller, with a black edge over its rim — the
+/// window's rim where the picture is smaller (249's is two rows short).
 pub fn picture(game: &Game, dialog: &Dialog) -> RgbaImage {
     let mut picture = art(game, dialog);
     if let Some(frame) = dialog.frame {
         let (w, h) = (frame.width() as u32, frame.height() as u32);
-        if picture.width() > w || picture.height() > h {
-            let (w, h) = (w.min(picture.width()), h.min(picture.height()));
-            picture = imageops::crop_imm(&picture, 0, 0, w, h).to_image();
+        if picture.width() != w || picture.height() != h {
+            let part = imageops::crop_imm(&picture, 0, 0, w, h).to_image();
+            picture = RgbaImage::from_pixel(w, h, TEXT);
+            imageops::replace(&mut picture, &part, 0, 0);
         }
         let (w, h) = (picture.width() as i32, picture.height() as i32);
         fill(&mut picture, 0, 0, w, POPUP_EDGE, TEXT);

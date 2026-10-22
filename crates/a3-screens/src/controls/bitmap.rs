@@ -23,6 +23,9 @@ pub struct BitmapState {
     pub left: Option<f32>,
     /// Whether a click on it reaches the screen (447's groundsman).
     pub clickable: bool,
+    /// Where it leaves the dialog's picture showing: a bitmap button there
+    /// paints its own background (the views' OK over a dream stadium).
+    pub holes: Vec<bevy_math::Rect>,
 }
 
 impl BitmapState {
@@ -35,7 +38,19 @@ impl BitmapState {
             } else {
                 bevy_math::Vec2::new(left, r.min.y)
             };
-            paste(frame, picture, at);
+            if self.holes.is_empty() {
+                paste(frame, picture, at);
+            } else {
+                let mut cut = picture.clone();
+                for (x, y, p) in cut.enumerate_pixels_mut() {
+                    let on = bevy_math::Vec2::new(at.x + x as f32, at.y + y as f32);
+                    if self.holes.iter().any(|h| h.contains(on) && on.x < h.max.x && on.y < h.max.y)
+                    {
+                        p.0[3] = 0;
+                    }
+                }
+                paste(frame, &cut, at);
+            }
         }
     }
 }
@@ -56,6 +71,9 @@ pub enum PictureSource {
     File(String),
     /// A file of the graphics archive, by its path there.
     Archive(String),
+    /// A stadium as the grounds map draws it at half size, by its look
+    /// (`a3_core::stadium::look`).
+    Stadium([u8; 12]),
     /// A red line through values from 0 to 100, one every few pixels, in a
     /// clear picture of the given size.
     Chart {
@@ -79,6 +97,7 @@ impl Picture {
             PictureSource::Graphic(id) => game.graphic(*id)?,
             PictureSource::File(path) => image::load_from_memory(&game.file(path)?)?.to_rgba8(),
             PictureSource::Archive(path) => game.picture(path)?,
+            PictureSource::Stadium(look) => crate::buildings::stadium_half(game, look)?,
             PictureSource::Chart { values, size, step } => chart(values, *size, *step),
         };
         let part = match self.part {

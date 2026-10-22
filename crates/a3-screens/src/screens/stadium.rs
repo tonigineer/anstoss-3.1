@@ -46,10 +46,10 @@ const PITCH: u16 = 5923;
 const PITCH_TEXTS: [(u8, u16); 5] = [(2, 2203), (5, 2205), (10, 2204), (20, 2206), (30, 2207)];
 const RUINED_PITCH: u16 = 2208;
 const TURF: u16 = 5918;
-/// The 2D view, the 3D flight, a dead item, the expansion.
+/// The 2D view, the 3D flight, the expansion (item 2 is dead).
 const VIEWS: u16 = 5852;
+const TWO_D: usize = 0;
 const THREE_D: usize = 1;
-const DEAD_ITEM: usize = 2;
 const CRANE: usize = 3;
 const NO_3D: u16 = 5040;
 /// The scoreboard and the six comfort boxes, in `COMFORTS`' order.
@@ -78,11 +78,89 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
         let title = dialog.title.clone();
         dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
     }
+    // The views' picture lies under their controls, cut to the dialog.
+    for id in VIEW_DIALOGS {
+        let Some(dialog) = dialogs.get_mut(&id) else { continue };
+        let frame = dialog.frame.unwrap_or(bevy_math::Rect::new(0.0, 0.0, 640.0, 480.0));
+        let picture = a3_files::rch::Control {
+            kind: a3_files::rch::Kind::Bitmap,
+            rect: bevy_math::Rect::from_corners(frame.min + PICTURE_AT, frame.max),
+            align: a3_files::rch::Align::Left,
+            text: String::new(),
+            id: Some(VIEW_PICTURE),
+            font: 0,
+            ink: [0; 3],
+        };
+        dialog.controls.insert(0, picture);
+        let title = dialog.title.clone();
+        dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
+    }
     let Some(dialog) = dialogs.get_mut(&STADIUM) else { return };
     dialog.controls.retain(|c| c.id != Some(OK));
     let title = dialog.title.clone();
     dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
     hub::add_bar(dialog, rules);
+}
+
+/// The views of a stadium (dialogs 249 and 510, `CStadionAnsicht`,
+/// `CStadionAnsichtKlein`; STADION-ANSICHT.md in the RE repo): its name
+/// and its picture as the grounds map draws it at half size; OK closes.
+#[derive(Default)]
+pub struct StadiumView;
+
+const LARGE_VIEW: u16 = 249;
+const SMALL_VIEW: u16 = 510;
+const VIEW_DIALOGS: [u16; 2] = [LARGE_VIEW, SMALL_VIEW];
+const VIEW_NAME: u16 = 6450;
+const VIEW_PICTURE: u16 = 9939;
+/// Where the picture goes in the dialog (the paint hook's 24, 71); it may
+/// run over the popup's black edge.
+const PICTURE_AT: bevy_math::Vec2 = bevy_math::Vec2::new(24.0, 71.0);
+
+impl Screen for StadiumView {
+    fn ids(&self) -> &[u16] {
+        &VIEW_DIALOGS
+    }
+
+    /// `0x57712d`.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let dialog = cx.dialog;
+        let Some(sub) = cx.state.viewed.clone() else { return };
+        set(view, dialog, VIEW_NAME, sub.name());
+        let ok = dialog.controls.iter().find(|c| crate::controls::button::is_ok(c)).map(|c| c.rect);
+        if let Some(c) = control(dialog, VIEW_PICTURE) {
+            let r = dialog.controls[c].rect;
+            if let Some(bitmap) = view.bitmap_mut(c) {
+                bitmap.picture = Some(crate::controls::bitmap::Picture {
+                    source: crate::controls::bitmap::PictureSource::Stadium(stadium::look(&sub)),
+                    part: Some([0, 0, r.width() as u32, r.height() as u32]),
+                    black_clear: false,
+                });
+                bitmap.holes = ok.into_iter().collect();
+            }
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&cx.dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// A stadium's view (`FUN_0057f670` item 0, `FUN_0057b39a` item 0): a
+/// dream stadium still being built on every stand cannot be looked at; a
+/// big site's in the large view, else the small one.
+fn view_of(cx: &mut Cx, sub: &Sub) -> Outcome {
+    if sub.kind() >= 2 && sub.all_building() {
+        return Outcome::Popup(Request::with(NOTICE, Args::Text(NOT_FINISHED)));
+    }
+    cx.state.viewed = Some(sub.clone());
+    Outcome::Popup(Request::new(if sub.big_site() { LARGE_VIEW } else { SMALL_VIEW }))
 }
 
 /// The screen and its copies.
@@ -134,9 +212,7 @@ impl Screen for StadiumScreen {
             view.set_chosen(c, NONE);
         }
         let works = |target: Target| match target {
-            Target::Option { control: c, item } if dialog.controls[c].id == Some(VIEWS) => {
-                matches!(item, THREE_D | DEAD_ITEM | CRANE)
-            }
+            Target::Option { control: c, .. } if dialog.controls[c].id == Some(VIEWS) => true,
             Target::Button(c) => dialog.controls[c].id != Some(GROUNDS),
             _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
         };
@@ -202,6 +278,12 @@ impl Screen for StadiumScreen {
                 Outcome::Stay
             }
             Target::Option { control: c, item } if id(c) == Some(VIEWS) => {
+                if item == TWO_D
+                    && let Some(copy) = self.copy.clone()
+                {
+                    self.asked = Some(Ask::View);
+                    return view_of(cx, &copy);
+                }
                 if item == THREE_D {
                     self.asked = Some(Ask::View);
                     return Outcome::Popup(Request::with(NOTICE, Args::Text(NO_3D)));
@@ -565,8 +647,7 @@ const BELOW_LEAGUE: u16 = 4810;
 const BELOW_PRESALE: u16 = 4811;
 const LEAST_CAPACITY: [i32; 3] = [10_000, 5_000, 3_000];
 const NOT_FINISHED: u16 = 4996;
-/// The two views: the 2D one (249/510, not built), the 3D flight.
-const VIEW_2D: usize = 0;
+/// The views: the 2D one (249/510), the 3D flight.
 const VIEW_3D: usize = 1;
 
 impl Screen for Expansion {
@@ -610,12 +691,7 @@ impl Screen for Expansion {
         if let Some(c) = control(dialog, EXPANSION_VIEWS) {
             view.set_chosen(c, NONE);
         }
-        // The 2D views (249, 510) are not built.
-        let works = |t: Target| {
-            !matches!(t, Target::Option { control: c, item: VIEW_2D }
-                if dialog.controls[c].id == Some(EXPANSION_VIEWS))
-        };
-        mark_inert(view, dialog, works);
+        mark_inert(view, dialog, |_| true);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -692,6 +768,12 @@ impl Screen for Expansion {
                 }
                 if item == VIEW_3D {
                     return Outcome::Popup(Request::with(NOTICE, Args::Text(NO_3D)));
+                }
+                // The plan as it is edited, not a dream template.
+                if let Some(plan) = self.plan.clone() {
+                    cx.state.viewed = Some(plan.clone());
+                    let view_id = if plan.big_site() { LARGE_VIEW } else { SMALL_VIEW };
+                    return Outcome::Popup(Request::new(view_id));
                 }
                 view.set_chosen(c, NONE);
                 Outcome::Stay
