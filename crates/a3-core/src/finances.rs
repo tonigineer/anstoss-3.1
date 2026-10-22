@@ -7,7 +7,7 @@
 use crate::records::{Agreed, Extra, Manager, Records, Team};
 
 /// The club object's fields sit this far before the team record's.
-pub(crate) const CLUB_TO_TEAM: usize = 0x278;
+pub const CLUB_TO_TEAM: usize = 0x278;
 /// Where the team's and the extra data's records start counting.
 const TEAM_BASE: usize = 0x20;
 const EXTRA_BASE: usize = 0x20;

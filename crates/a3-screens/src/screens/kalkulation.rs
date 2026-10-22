@@ -771,7 +771,7 @@ pub struct OtherCosts {
     hearings: (u16, u16),
 }
 
-const LAWYERS: [u16; 5] = [2314, 2315, 2316, 2317, 2318];
+pub(crate) const LAWYERS: [u16; 5] = [2314, 2315, 2316, 2317, 2318];
 const STATISTICS: [u16; 4] = [2319, 2320, 2321, 6217];
 const COMPUTER_OPTIONS: [u16; 2] = [2322, 2323];
 const HEARINGS_FIGURES: (u16, u16) = (2297, 2299);
@@ -786,13 +786,13 @@ const OTHER_SPINS: [u16; 4] = [2310, 2311, 2312, 2313];
 /// The lawyers' tariffs a hearing, in thousands: for a red card, for
 /// anything else (0x89e45c); the departments' yearly prices (0x89e450,
 /// 0x89e458).
-const TARIFFS: [(i32, i32); 5] = [(10, 30), (15, 50), (20, 80), (30, 120), (50, 200)];
+pub(crate) const TARIFFS: [(i32, i32); 5] = [(10, 30), (15, 50), (20, 80), (30, 120), (50, 200)];
 const STATISTICS_PRICES: [i32; 4] = [0, 20_000, 200_000, 1_000_000];
 const COMPUTER_PRICES: [i32; 2] = [0, 200_000];
 /// The levels (club +0x5e0…), the plan's departments (P+0x94), its
 /// administration and special expenses, the booked departments
 /// (B+0x94), interest and taxes.
-const LAWYER_AT: usize = 0x5e0;
+pub(crate) const LAWYER_AT: usize = 0x5e0;
 const STATISTICS_AT: usize = 0x5e1;
 const COMPUTERS_AT: usize = 0x5e2;
 const PLAN_DEPARTMENTS: usize = 0x94;
@@ -803,7 +803,7 @@ const BOOKED_DEPARTMENTS: usize = 0x94;
 const BOOKED_INTEREST: usize = 0xa0;
 const BOOKED_TAXES: usize = 0xe8;
 /// The manager record's estimated hearings: red cards, others.
-const HEARINGS_AT: (usize, usize) = (0x1f68, 0x1f6a);
+pub(crate) const HEARINGS_AT: (usize, usize) = (0x1f68, 0x1f6a);
 const LOWER: &str = "---";
 
 impl Screen for OtherCosts {
@@ -948,7 +948,7 @@ impl OtherCosts {
 }
 
 /// The manager's record.
-fn own_manager<'a>(cx: &'a Cx) -> Option<&'a a3_core::records::Manager> {
+pub(crate) fn own_manager<'a>(cx: &'a Cx) -> Option<&'a a3_core::records::Manager> {
     let current = cx.state.season.as_ref()?.current;
     let records = cx.state.records.as_ref()?;
     records.managers.get(records.human_slot(current)?)

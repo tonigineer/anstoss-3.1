@@ -1379,6 +1379,20 @@ impl Records {
         Some((self.name(name), *bytes.get(5)?, *bytes.get(6)?))
     }
 
+    /// A referee's full name (`FUN_00637cbb`): first and last name, one
+    /// alone where the other is none.
+    pub fn referee_name(&self, id: i16) -> Option<String> {
+        let id = usize::try_from(id).ok().filter(|id| (1..=REFEREES).contains(id))?;
+        let bytes = self.block(&format!("{REFEREE_AT:#x}[{id}]"))?;
+        let part = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+        let (first, last) = (part(0), part(2));
+        Some(match (first, last) {
+            (0, l) => self.name(l).to_owned(),
+            (f, 0) => self.name(f).to_owned(),
+            (f, l) => format!("{} {}", self.name(f), self.name(l)),
+        })
+    }
+
     /// A name from the pool.
     pub fn name(&self, index: u16) -> &str {
         self.names.get(usize::from(index)).map_or("", String::as_str)

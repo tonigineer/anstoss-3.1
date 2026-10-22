@@ -15,6 +15,8 @@ use crate::pointer::{Geometry, Target};
 /// The tick; `CheckEckig.tga` and `CheckRund.tga` go with styles no
 /// dialog seen uses.
 pub const TICK: &str = "CheckHacken.tga";
+/// Where a round box's dot is centred (494, shot k08).
+const ROUND_DOT: Vec2 = Vec2::new(5.0, 7.0);
 const TICK_DOWN: f32 = 2.0;
 const LABEL_LEFT: i32 = 13;
 
@@ -30,7 +32,10 @@ pub struct CheckState {
 impl CheckState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let r = paint.control.rect;
-        if self.checked
+        let round = matches!(paint.control.kind, a3_files::rch::Kind::Check { round: true });
+        if self.checked && round {
+            super::options::dot(frame, r.min + ROUND_DOT);
+        } else if self.checked
             && let Some(tick) = paint.widget(TICK)
         {
             paste(frame, tick, r.min + Vec2::new(0.0, TICK_DOWN));

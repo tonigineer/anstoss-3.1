@@ -113,7 +113,11 @@ pub enum Kind {
         disabled_ink: [u8; 3],
     },
     /// A box to tick, with its label beside it.
-    Check,
+    /// A check box; a round one marks itself with a dot, as a radio
+    /// option does (style word 0x200 without 0x100).
+    Check {
+        round: bool,
+    },
     /// A field that shows one of a list of texts, the list dropping down
     /// under it to choose another: the game's `CMyComboBox`. How far the
     /// list drops below the field's window (`+0xfc`), and its style: bits 4
@@ -377,7 +381,7 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
             style: extra.get(COMBO_STYLE).copied().unwrap_or(0),
             columns: columns(extra, COMBO_COLUMNS),
         },
-        13 => Kind::Check,
+        13 => Kind::Check { round: u16s(CHECK_STYLE).unwrap_or(0) & 0x300 == 0x200 },
         14 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
         15 => Kind::Paint,
         12 if u16s(1) == Some(0) => Kind::Fader { handle: u16s(0)? },
@@ -433,6 +437,8 @@ const CLEAR_STYLE: u16 = 0x8;
 /// The most states a stepping button has.
 const MOST_STATES: u16 = 8;
 const MOST_COLUMNS: u16 = 50;
+/// Where a check box's style is in its data, in words.
+const CHECK_STYLE: usize = 4;
 
 fn columns(extra: &[u8], (count, first): (usize, usize)) -> Vec<Column> {
     let word = |i: usize| u16_at(extra, 2 * i);

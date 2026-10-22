@@ -520,7 +520,7 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::Click(id) => {
             let control = find(id)?;
             match controls.controls[control].kind {
-                Kind::Check => Target::Check(control),
+                Kind::Check { .. } => Target::Check(control),
                 Kind::Combo { .. } => Target::Combo(control),
                 _ => Target::Control(control),
             }
@@ -1607,6 +1607,36 @@ mod tests {
             a3_core::grounds::Grounds::of(records, team.country(), i16::from(team.number()))
                 .unwrap();
         assert_eq!(grounds.view().zoom, 2);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_telephone_hires_a_lawyer_and_refuses_a_referee() {
+        let game = game();
+        let open = "now click bar 12\nuntil dialog 404";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        assert_eq!(runner.host.view().id, 404);
+        let team = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            (team.get::<i8>(0x5e0 + 0x278), team.get::<i16>(0x928))
+        };
+        assert_eq!(team(&runner), (0, 0));
+        // The lawyer "Dr. Rentz", OK; the first referee of the country, OK.
+        let then = format!(
+            "{open}\nnow click at 442 210\nnow choose 2317 0\nnow ok\n\
+             now click at 442 240\nnow row 6211 1\nnow ok"
+        );
+        let runner = on_save(&game, "Probe1", &then).unwrap();
+        let (lawyer, referee) = team(&runner);
+        assert_eq!(lawyer, 3);
+        assert!(referee > 0, "{referee}");
+        // The aliens' office lists the foreigners.
+        let runner = on_save(&game, "Probe1", &format!("{open}\nnow click at 442 302")).unwrap();
+        let list = control(&game.dialogs[&492], 6212).unwrap();
+        assert!(!runner.host.view().list(list).unwrap().rows.is_empty());
     }
 
     #[test]

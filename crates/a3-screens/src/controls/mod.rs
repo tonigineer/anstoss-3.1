@@ -129,7 +129,7 @@ impl ControlView {
             }
             Kind::Player => ControlState::Player(None),
             Kind::Marker => ControlState::Marker(None),
-            Kind::Check => {
+            Kind::Check { .. } => {
                 ControlState::Check(CheckState { text: text(), ..CheckState::default() })
             }
             Kind::Combo { .. } => ControlState::Combo(ComboState::default()),

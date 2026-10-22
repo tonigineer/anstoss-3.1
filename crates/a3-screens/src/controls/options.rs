@@ -223,7 +223,7 @@ pub fn bullet_centre(control: &Control, item: usize) -> Vec2 {
 
 /// The dot of a chosen radio option, drawn as Windows drew it: four pixels
 /// square with its corners cut, in the middle of the 12 px bullet.
-fn dot(frame: &mut RgbaImage, centre: Vec2) {
+pub(crate) fn dot(frame: &mut RgbaImage, centre: Vec2) {
     const DOT: [[bool; 4]; 4] = [
         [false, true, true, false],
         [true, true, true, true],

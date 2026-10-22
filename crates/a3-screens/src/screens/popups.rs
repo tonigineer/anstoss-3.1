@@ -44,6 +44,9 @@ impl Screen for Question {
                 Some(cx.game.text(text).replacen("%s", cx.game.text(other), 1))
             }
             Args::Printf(text, fills) => Some(printed(cx, text, fills)),
+            Args::ForClub { text, country, number, value } => {
+                Some(super::contacts::club_text(cx, text, country, number, value))
+            }
             Args::BuilderOffer { price, weeks, total } => {
                 let money = |v: i32| super::playerinfo::money(cx.game, v.into());
                 Some(super::finances::printf(

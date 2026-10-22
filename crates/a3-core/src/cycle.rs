@@ -228,6 +228,14 @@ pub enum Args {
     TextForMoney(u16, i64),
     /// A text with a number for its "%d".
     TextForNumber(u16, i32),
+    /// A text by its id with a club's phrases (`v1` … `V20`) and a number
+    /// for its "%d": the club by its country and number.
+    ForClub {
+        text: u16,
+        country: u16,
+        number: u16,
+        value: i32,
+    },
     /// A cooperation contract still running (text 4456): the partner's
     /// number in the main country, the year it ends.
     Cooperation {
