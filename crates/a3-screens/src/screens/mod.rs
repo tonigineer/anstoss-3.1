@@ -234,6 +234,7 @@ pub fn compose(game: &mut Game) {
     market::compose_loans(&mut game.dialogs);
     youth::compose(&mut game.dialogs);
     search::compose(&mut game.dialogs);
+    start::compose(&mut game.dialogs);
     corner_buttons(&mut game.dialogs);
 }
 

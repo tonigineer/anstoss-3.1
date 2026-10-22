@@ -16,6 +16,17 @@ use crate::pointer::Target;
 use crate::view::View;
 
 /// Controls by their ids in the dialog file.
+/// The start menu's title, written into its frame as every window's.
+const CAPTION_ID: u16 = 9935;
+
+/// The start menu's caption (shot of the original: "ANSTOSS 3 -
+/// Spielvorbereitung").
+pub(crate) fn compose(dialogs: &mut std::collections::HashMap<u16, Dialog>) {
+    let Some(dialog) = dialogs.get_mut(&a3_core::cycle::dialogs::START) else { return };
+    let title = dialog.title.clone();
+    dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
+}
+
 const SAVE_LIST: u16 = 5144;
 const SAVE_INFO: u16 = 5146;
 const SCORES_CAREER: u16 = 2010;
