@@ -14,6 +14,7 @@ pub mod duties;
 pub mod finances;
 pub mod formations;
 pub mod grounds;
+pub mod honours;
 pub mod hub;
 pub mod jobs;
 pub mod kalkulation;
@@ -170,6 +171,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(grounds::GroundsScreen::default()),
         Box::new(contacts::Contacts::default()),
         Box::new(board::Board::default()),
+        Box::new(honours::Honours::default()),
         Box::new(contacts::Lawyers::default()),
         Box::new(contacts::AliensOffice::default()),
         Box::new(contacts::Referees::default()),
@@ -241,6 +243,7 @@ pub fn compose(game: &mut Game) {
     grounds::compose(&mut game.dialogs);
     contacts::compose(&mut game.dialogs, &game.data.rules);
     board::compose(&mut game.dialogs, &game.data.rules);
+    honours::compose(&mut game.dialogs, &game.data.rules);
     market::compose(&mut game.dialogs);
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);

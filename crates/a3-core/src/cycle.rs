@@ -88,6 +88,8 @@ pub mod dialogs {
     pub const CONTACTS: u16 = 404;
     /// The board ("Vereinsführung", bar symbol 13).
     pub const BOARD: u16 = 439;
+    /// The manager's own page ("Persönliche Erfolge", bar symbol 16).
+    pub const HONOURS: u16 = 175;
     pub const CURRENT_SQUAD: u16 = 216;
     pub const MARKET_VALUES: u16 = 217;
     pub const NEXT_SQUAD: u16 = 219;
