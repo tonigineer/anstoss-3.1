@@ -42,8 +42,13 @@ const NO_PARTNER: u16 = 0xffff;
 /// Every sub-dialog, which shows its file's title as its caption.
 const SUB_DIALOGS: [u16; 8] = [35, 58, 166, 398, 494, 492, 493, 15];
 /// The buttons whose sub-dialogs are built, and those.
-const BUILT: [(usize, u16); 4] =
-    [(2, FAN_DIALOG), (3, LAWYERS_DIALOG), (4, REFEREES_DIALOG), (6, ALIENS_DIALOG)];
+const BUILT: [(usize, u16); 5] = [
+    (2, FAN_DIALOG),
+    (3, LAWYERS_DIALOG),
+    (4, REFEREES_DIALOG),
+    (6, ALIENS_DIALOG),
+    (7, REPORTER_DIALOG),
+];
 
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     let Some(dialog) = dialogs.get_mut(&CONTACTS) else { return };
@@ -1031,4 +1036,93 @@ impl Cooperation {
             }
         }
     }
+}
+
+/// The reporter (dialog 493 `CReporterAnfrage`, KONTAKTE.md §7.3): a
+/// friend at the paper writes for the manager once a season, if the media
+/// like him enough. Making his release clause public (item 0) is not
+/// built.
+#[derive(Default)]
+pub struct Reporter;
+
+const REPORTER_DIALOG: u16 = 493;
+const REPORTER_ITEMS: u16 = 6214;
+/// Making the clause public; the three articles.
+const CLAUSE: usize = 0;
+/// The press was used this season; the media do not like him enough; the
+/// article was written.
+const PRESS_USED: u16 = 4288;
+const NOT_LIKED: u16 = 4952;
+const WRITTEN: u16 = 4953;
+/// The least the media must like him.
+const LIKED_ENOUGH: i32 = 80;
+/// The manager's record: his level, the season's flags with the press's
+/// bit. How the media like him is the third of his popularity.
+const LEVEL_AT: usize = 0x23;
+const SEASON_FLAGS_AT: usize = 0x1f3c;
+const PRESS_BIT: u32 = 0x800;
+
+impl Screen for Reporter {
+    fn ids(&self) -> &[u16] {
+        &[REPORTER_DIALOG]
+    }
+
+    /// `0x537870`: the clause's item is off while the manager has none or
+    /// it is public already.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let dialog = cx.dialog;
+        if let Some(c) = control(dialog, REPORTER_ITEMS) {
+            if let Some(options) = view.options_mut(c) {
+                options.actions = true;
+                options.dimmed = (0..4).map(|i| i == CLAUSE).collect();
+            }
+            view.set_chosen(c, NONE);
+        }
+        let works = |t: Target| !matches!(t, Target::Option { item: CLAUSE, .. });
+        mark_inert(view, dialog, works);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Option { control: c, item }
+                if dialog.controls[c].id == Some(REPORTER_ITEMS) =>
+            {
+                view.set_chosen(c, NONE);
+                if item == CLAUSE {
+                    return Outcome::Stay;
+                }
+                Outcome::Popup(Request::with(NOTICE, Args::Text(write_article(cx))))
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// An article asked for (`0x5378d6`, items 1 to 3): once a season, and
+/// only for a manager the media like. The headline itself needs the
+/// newspaper, which is not built.
+fn write_article(cx: &mut Cx) -> u16 {
+    let Some(manager) = super::kalkulation::own_manager(cx) else { return PRESS_USED };
+    if manager.get::<u32>(SEASON_FLAGS_AT) & PRESS_BIT != 0 {
+        return PRESS_USED;
+    }
+    let level = usize::from(manager.get::<u8>(LEVEL_AT)).min(15);
+    let ability = i32::from(manager.abilities()[level][0]);
+    let media = i32::from(manager.popularity()[2]);
+    if (media * (ability * 4 + 80) / 100).clamp(0, 100) < LIKED_ENOUGH {
+        return NOT_LIKED;
+    }
+    let current = cx.state.season.as_ref().map(|s| s.current);
+    if let Some(records) = cx.state.records.as_mut()
+        && let Some(slot) = current.and_then(|c| records.human_slot(c))
+        && let Some(manager) = records.managers.get_mut(slot)
+    {
+        let flags = manager.get::<u32>(SEASON_FLAGS_AT) | PRESS_BIT;
+        manager.put(SEASON_FLAGS_AT, flags);
+    }
+    WRITTEN
 }
