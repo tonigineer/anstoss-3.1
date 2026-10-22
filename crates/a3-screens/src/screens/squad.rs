@@ -194,6 +194,12 @@ pub(crate) fn own_team<'a>(cx: &'a Cx) -> Option<&'a Team> {
     cx.state.records.as_ref()?.team(nation, u16::try_from(number).ok()?)
 }
 
+/// The manager's club's team record, to change.
+pub(crate) fn own_team_mut<'a>(cx: &'a mut Cx) -> Option<&'a mut a3_core::records::Team> {
+    let (country, number) = own_team(cx).map(|t| (t.country(), u16::from(t.number())))?;
+    cx.state.records.as_mut()?.team_mut(country.into(), number)
+}
+
 /// The current squad (dialog 216, `CSpielerkaderAktuell`; KADER-AKTUELL.md):
 /// every player in a row, by main position, the squad's count, strength
 /// and wages below; a mode chosen, a click on a row acts on the player.

@@ -216,6 +216,8 @@ struct Hotspot {
     target: Target,
     zoom: f32,
     dialog: u16,
+    /// Where it lies in the classic look's pixels.
+    classic: Rect,
 }
 
 /// Which look a hotspot belongs to: the remastered one, or the classic.
@@ -408,12 +410,13 @@ fn spawn_hotspots(
 ) {
     let display =
         if look.showing_remastered() == remastered { Display::Flex } else { Display::None };
-    for (target, at) in targets(dialog, view, geometry) {
+    let classic = targets(dialog, view, &a3_screens::pointer::Pixels);
+    for ((target, at), (_, classic)) in targets(dialog, view, geometry).into_iter().zip(classic) {
         // Scrollbar arrows lie on top of the rows they scroll.
         let z = if matches!(target, Target::Scroll { .. }) { 3 } else { 2 };
         commands
             .spawn((
-                Hotspot { target, zoom: geometry.zoom(), dialog: view.id },
+                Hotspot { target, zoom: geometry.zoom(), dialog: view.id, classic },
                 ForLook { remastered },
                 Node { display, ..canvas_rect(at.min.x, at.min.y, at.width(), at.height()) },
                 ZIndex(z),
@@ -421,6 +424,7 @@ fn spawn_hotspots(
             ))
             .observe(point_at)
             .observe(point_away)
+            .observe(point_move)
             .observe(press)
             .observe(click)
             .observe(drag)
@@ -471,6 +475,18 @@ fn point_at(over: On<PointerOver>, hotspots: Query<&Hotspot>, mut view: ResMut<O
     }
 }
 
+/// Where the pointer is in the dialog, as the hotspot it moves over places
+/// it.
+fn point_move(moved: On<PointerMove>, hotspots: Query<&Hotspot>, mut view: ResMut<OpenDialog>) {
+    if let Ok(hotspot) = hotspots.get(moved.entity)
+        && hotspot.dialog == view.id
+        && let Some(p) = moved.hit.position
+    {
+        let r = hotspot.classic;
+        view.pointer = Some(r.min + (Vec2::new(p.x, p.y) + 0.5) * r.size());
+    }
+}
+
 fn point_away(out: On<PointerOut>, hotspots: Query<&Hotspot>, mut view: ResMut<OpenDialog>) {
     // Moving between two hotspots may report the new one first.
     if let Ok(hotspot) = hotspots.get(out.entity)
@@ -495,7 +511,9 @@ fn press(
     mut held: ResMut<Held>,
     mut pending: ResMut<Pending>,
 ) {
-    let Ok(&Hotspot { target, zoom, dialog }) = hotspots.get(press.entity) else { return };
+    let Ok(&Hotspot { target, zoom, dialog, classic }) = hotspots.get(press.entity) else {
+        return;
+    };
     // The right button opens the menu of what it is on; it steps a
     // stepping button back.
     if press.button == PointerButton::Secondary && dialog == view.id {
@@ -551,15 +569,9 @@ fn press(
             }
             held.grip = Grip::of(target);
             if held.grip.is_some() {
-                let dialog = game.dialogs.get(&view.id);
-                let rect = dialog.and_then(|d| {
-                    targets(d, &view, &a3_screens::pointer::Pixels)
-                        .into_iter()
-                        .find_map(|(t, r)| (t == target).then_some(r))
-                });
                 let hit =
                     press.hit.position.map_or(Vec2::splat(0.5), |p| Vec2::new(p.x, p.y) + 0.5);
-                held.grab = rect.map(|r| (r.min + hit * r.size(), zoom));
+                held.grab = Some((classic.min + hit * classic.size(), zoom));
             }
         }
     }
@@ -655,7 +667,7 @@ fn drag(
 
 /// Letting go of the pointer ends repeating, dragging and holding a button
 /// down; what it held of a box or a row it lets go of on what it points at,
-/// if that is something else.
+/// if that is something else — a map's tile on any.
 fn release(
     mut inputs: MessageReader<PointerInput>,
     mut held: ResMut<Held>,
@@ -675,7 +687,8 @@ fn release(
             (Some(dragging), Some((grab, _))) => whole(dragging.at - grab),
             _ => (0, 0),
         };
-        if to != Some(from) {
+        // A map's tile counts let go of where it was pressed too.
+        if to != Some(from) || matches!(from, Grip::Tile { .. }) {
             pending.0.push((Target::Drop { from, to, at, moved }, 1));
         }
     }

@@ -26,9 +26,38 @@ pub struct BitmapState {
     /// Where it leaves the dialog's picture showing: a bitmap button there
     /// paints its own background (the views' OK over a dream stadium).
     pub holes: Vec<bevy_math::Rect>,
-    /// Square cells of this size a click tells (`Target::Cell`): the
-    /// grounds' minimap, a pixel each.
-    pub cells: Option<f32>,
+    /// The tiles a click tells (`Target::Tile`): the grounds' map and its
+    /// minimap.
+    pub tiles: Option<Tiles>,
+}
+
+/// Square tiles over a part of a bitmap: their size, how far the first
+/// starts left of and above the part, its column and row, and the part.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Tiles {
+    pub size: f32,
+    pub offset: bevy_math::Vec2,
+    pub first: (usize, usize),
+    pub area: bevy_math::Rect,
+}
+
+impl Tiles {
+    /// Every tile with its rectangle, cut to the part.
+    pub(crate) fn each(&self) -> impl Iterator<Item = ((usize, usize), bevy_math::Rect)> + '_ {
+        let count = |room: f32, off: f32| ((room + off) / self.size).ceil().max(0.0) as usize;
+        let (columns, rows) =
+            (count(self.area.width(), self.offset.x), count(self.area.height(), self.offset.y));
+        (0..rows).flat_map(move |r| {
+            (0..columns).map(move |c| {
+                let min = self.area.min - self.offset
+                    + bevy_math::Vec2::new(c as f32, r as f32) * self.size;
+                let tile =
+                    bevy_math::Rect::from_corners(min, min + bevy_math::Vec2::splat(self.size))
+                        .intersect(self.area);
+                ((self.first.0 + c, self.first.1 + r), tile)
+            })
+        })
+    }
 }
 
 impl BitmapState {

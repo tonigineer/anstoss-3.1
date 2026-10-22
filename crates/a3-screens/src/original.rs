@@ -315,10 +315,7 @@ impl<'a> Original<'a> {
                 })
                 .ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))
         };
-        let grip = |grip: Grip| match grip {
-            Grip::Control(i) => Target::Control(i),
-            Grip::Row { control, row } => Target::Row { control, row },
-        };
+        let grip = Grip::target;
         if let Target::Menu(at) = target {
             let at = rect(grip(at))?.center();
             self.probe.ask(format!("rclick {} {}", at.x as i32, at.y as i32).as_bytes())?;

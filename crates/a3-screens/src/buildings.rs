@@ -177,6 +177,9 @@ pub struct MapArt {
 
 const PATTERNS: &str = "buildingmaps/patterns.txt";
 const GRASS: &str = "rasengruen";
+/// The cursor's marks, grey and red, half see-through (§6.2).
+const CURSOR: [&str; 2] = ["cursorgrau", "cursorrot"];
+const CURSOR_ALPHA: u32 = 0x80;
 /// The tint of what is not the club's, and the see-through of what is
 /// being built (§6.2).
 const NOT_OWNED: u32 = 196;
@@ -234,6 +237,35 @@ impl MapArt {
         )
     }
 
+    /// The cursor's marks over a frame of the map (§6.2, 6.): every tile
+    /// in view, from the last row and column back.
+    pub fn cursor(
+        &mut self,
+        game: &Game,
+        grounds: &Grounds,
+        view: &MapView,
+        frame: &mut RgbaImage,
+    ) {
+        let level = (2 - view.zoom).clamp(0, 2) as usize;
+        let (t, n) = (view.tile, view.tiles);
+        let ((ox, oy), (offx, offy)) = view.origin();
+        let marks = CURSOR.map(|name| self.pattern(game, name));
+        for r in (0..=n).rev() {
+            for c in (0..=n).rev() {
+                let i = ((oy + r) * grounds::SIZE as i32 + ox + c) as usize;
+                let mark = usize::from(grounds.mark_at(i));
+                let Some(&Some((sheet, sx, sy))) = mark.checked_sub(1).and_then(|m| marks.get(m))
+                else {
+                    continue;
+                };
+                if let Some(sheet) = self.sheet(game, level, sheet) {
+                    let (from, at) = ((sx >> level, sy >> level), (c * t - offx, r * t - offy));
+                    copy(frame, sheet, from, at, (t, t), None, Some(CURSOR_ALPHA));
+                }
+            }
+        }
+    }
+
     /// A frame of the map (`FUN_007ba408`): the grass of every tile in
     /// view, then the buildings in the order the scan meets them.
     pub fn map(&mut self, game: &Game, grounds: &Grounds, view: &MapView, size: u32) -> RgbaImage {
@@ -274,7 +306,7 @@ impl MapArt {
                 if seen[k] {
                     continue;
                 }
-                let (_, h, d) = self.size_of(grounds, k);
+                let (_, h, d) = grounds.size(grounds.entry(k).kind);
                 if i32::from(grounds.entry(k).y) - (h - d) < lim {
                     seen[k] = true;
                     list.push(k);
@@ -283,7 +315,7 @@ impl MapArt {
         }
         for k in list {
             let e = grounds.entry(k);
-            let (w, h, d) = self.size_of(grounds, k);
+            let (w, h, d) = grounds.size(grounds.entry(k).kind);
             let at = ((i32::from(e.x) - ox) * t - offx, (i32::from(e.y) - oy - (h - d)) * t - offy);
             let tint = if e.owned { None } else { Some(NOT_OWNED) };
             let alpha = (e.weeks != 0).then_some(BUILDING);
@@ -318,21 +350,6 @@ impl MapArt {
             }
         }
         frame
-    }
-
-    /// A building's width, height and depth in tiles; a stadium's by its
-    /// size.
-    fn size_of(&self, grounds: &Grounds, k: usize) -> (i32, i32, i32) {
-        let kind = grounds.entry(k).kind;
-        let (w, h, d) = if (grounds::FIRST_STADIUM..grounds::FIRST_STADIUM + 3).contains(&kind) {
-            let look = grounds.look(usize::try_from(kind - grounds::FIRST_STADIUM).unwrap_or(0));
-            if look[2] != 0 { grounds::LARGE_STADIUM } else { grounds::SMALL_STADIUM }
-        } else {
-            grounds::TYPES
-                .get(usize::try_from(kind).unwrap_or(usize::MAX))
-                .map_or((0, 0, 0), |t| t.size)
-        };
-        (w.into(), h.into(), d.into())
     }
 }
 

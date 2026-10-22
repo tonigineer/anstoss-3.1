@@ -27,6 +27,9 @@ pub struct View {
     /// The text field being typed into.
     pub focus: Option<usize>,
     pub hovered: Option<Target>,
+    /// Where the pointer is in the dialog, in classic pixels, as far as it
+    /// is known.
+    pub pointer: Option<Vec2>,
     /// The button the pointer is holding down.
     pub pressed: Option<Target>,
     /// The item whose tooltip shows: control and item.
@@ -92,6 +95,7 @@ impl View {
                 let list = self.list(control)?;
                 list.row_boxes.get(list.scroll + row)?.clone()?
             }
+            Grip::Tile { .. } => return None,
         };
         if !shown.filled {
             return None;
@@ -109,6 +113,7 @@ impl View {
             controls,
             focus: None,
             hovered: None,
+            pointer: None,
             pressed: None,
             tip: None,
             inert: Vec::new(),
@@ -229,9 +234,8 @@ impl View {
                 Some(ControlView { state: ControlState::Menu(m), .. }) => m.at.is_some(),
                 _ => false,
             },
-            // A bitmap's cell counts as it is.
             Target::Cell { control, row, .. } => {
-                self.list_mut(control).is_none_or(|l| l.press(row))
+                self.list_mut(control).is_some_and(|l| l.press(row))
             }
             Target::Row { control, row } => match self.combo_mut(control) {
                 // A script chooses a combo box's row without dropping it.
@@ -278,7 +282,9 @@ impl View {
                 true
             }
             Target::SliderTrack(_) => false,
-            Target::Control(_) | Target::Drop { .. } | Target::Menu(_) => true,
+            Target::Control(_) | Target::Drop { .. } | Target::Menu(_) | Target::Tile { .. } => {
+                true
+            }
             Target::Check(control) => match self.controls.get_mut(control) {
                 Some(ControlView { state: ControlState::Check(check), .. }) if !check.disabled => {
                     check.checked = !check.checked;

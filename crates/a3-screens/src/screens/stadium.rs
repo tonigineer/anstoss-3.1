@@ -14,7 +14,7 @@ use a3_files::rch::Dialog;
 
 use super::hub::{self, STADIUM_SYMBOL};
 use super::playerinfo::money;
-use super::squad::own_team;
+use super::squad::{own_team, own_team_mut};
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
 use crate::controls::options::NONE;
 use crate::pointer::Target;
@@ -616,12 +616,6 @@ impl StadiumScreen {
             stadium::store(records, country, number, &self.subs);
         }
     }
-}
-
-/// The manager's club's team record, to change.
-fn own_team_mut<'a>(cx: &'a mut Cx) -> Option<&'a mut a3_core::records::Team> {
-    let (country, number) = own_team(cx).map(|t| (t.country(), u16::from(t.number())))?;
-    cx.state.records.as_mut()?.team_mut(country.into(), number)
 }
 
 /// The stadium's expansion (dialog 463, `CStadionAusbau`;

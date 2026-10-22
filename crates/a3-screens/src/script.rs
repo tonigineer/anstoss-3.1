@@ -90,6 +90,8 @@ pub(crate) enum Action {
     DragAt((i16, i16), (i16, i16)),
     /// Clicks whatever is at a point of the dialog.
     ClickAt((i16, i16)),
+    /// The pointer moved to a point of the dialog, over whatever is there.
+    PointAt((i16, i16)),
     /// A right click on a control or a list's row.
     RightClick(Spot),
     Wait,
@@ -249,6 +251,7 @@ fn parse_action(action: &str) -> Option<Action> {
             _ => return None,
         },
         ["click", "at", x, y] => Action::ClickAt((x.parse().ok()?, y.parse().ok()?)),
+        ["point", "at", x, y] => Action::PointAt((x.parse().ok()?, y.parse().ok()?)),
         ["drag", "at", x0, y0, "to", x1, y1] => {
             let at = |x: &str, y: &str| Some((x.parse().ok()?, y.parse().ok()?));
             Action::DragAt(at(x0, y0)?, at(x1, y1)?)
@@ -392,12 +395,43 @@ impl<'a> Runner<'a> {
                 return Ok(());
             }
             Action::Wait => return self.wait(shown),
+            Action::PointAt(at) => {
+                self.host.view_mut().hovered = self.click_at(shown, at).ok();
+                self.host.view_mut().pointer = Some(Vec2::new(at.0.into(), at.1.into()));
+                let change = self.host.tick(game, 0.0);
+                self.change(change);
+                return Ok(());
+            }
             // A drag from where nothing can be taken hold of does nothing.
             Action::DragAt(from, to) => match self.drag_at(shown, from, to) {
+                // A map's tile is pressed, then let go of where the pointer
+                // stays.
+                Some(drop @ Target::Drop { from: grip @ Grip::Tile { .. }, to: end, .. }) => {
+                    self.host.view_mut().pointer = Some(Vec2::new(from.0.into(), from.1.into()));
+                    self.host.view_mut().hovered = Some(grip.target());
+                    self.change_by(game, grip.target());
+                    self.host.view_mut().pointer = Some(Vec2::new(to.0.into(), to.1.into()));
+                    self.host.view_mut().hovered = end.map(Grip::target);
+                    drop
+                }
                 Some(target) => target,
                 None => return Ok(()),
             },
-            Action::ClickAt(at) => self.click_at(shown, at)?,
+            // The pointer goes where it clicks.
+            Action::ClickAt(at) => {
+                let target = self.click_at(shown, at)?;
+                self.host.view_mut().pointer = Some(Vec2::new(at.0.into(), at.1.into()));
+                // A map's tile is pressed and let go of again, the pointer
+                // staying on it.
+                match Grip::of(target) {
+                    Some(grip @ Grip::Tile { .. }) => {
+                        self.host.view_mut().hovered = Some(target);
+                        self.change_by(game, target);
+                        Target::Drop { from: grip, to: Some(grip), at, moved: (0, 0) }
+                    }
+                    _ => target,
+                }
+            }
             _ => match target_of(controls, named(shown), action)? {
                 // The pointer goes from the middle of one to the other's.
                 Target::Drop { from, to, .. } => {
@@ -432,7 +466,9 @@ impl<'a> Runner<'a> {
         };
         let grip = under(from)?;
         let moved = (to.0 - from.0, to.1 - from.1);
-        Some(Target::Drop { from: grip, to: under(to).filter(|&g| g != grip), at: from, moved })
+        // A map's tile counts let go of where it was taken too.
+        let to = under(to).filter(|&g| g != grip || matches!(g, Grip::Tile { .. }));
+        Some(Target::Drop { from: grip, to, at: from, moved })
     }
 
     /// What a click at a point of the dialog `shown` acts on: the topmost
@@ -457,6 +493,12 @@ impl<'a> Runner<'a> {
             waited += STEP_SECS;
         }
         Ok(())
+    }
+
+    /// The screen given a target.
+    fn change_by(&mut self, game: &Game, target: Target) {
+        let change = self.host.input(game, target, false);
+        self.change(change);
     }
 
     fn change(&mut self, change: Change) {
@@ -510,7 +552,7 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::RightClick(spot) => Target::Menu(grip(controls, dialog, spot)?),
         Action::Type(id, _) => Target::Edit(find(id)?),
         Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
-        Action::DragAt(..) | Action::ClickAt(_) => {
+        Action::DragAt(..) | Action::ClickAt(_) | Action::PointAt(_) => {
             return Err(Error::Unsupported(dialog, "an action by pixels".into()));
         }
     })
@@ -1565,6 +1607,54 @@ mod tests {
             a3_core::grounds::Grounds::of(records, team.country(), i16::from(team.number()))
                 .unwrap();
         assert_eq!(grounds.view().zoom, 2);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn land_is_bought_built_on_cleared_and_sold() {
+        let game = game();
+        let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let grounds = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            let team = records.team(manager.country(), manager.team()).unwrap();
+            let money = (team.get::<i64>(0x2e8 + 0x278), team.get::<u32>(0x2e0 + 0x278));
+            let grounds =
+                a3_core::grounds::Grounds::of(records, team.country(), team.number().into());
+            (grounds.unwrap(), money)
+        };
+        // A tile in the first view that is not the club's, with nothing on it.
+        let (before, money) = grounds(&runner);
+        let view = before.view().zoomed(1);
+        let ((ox, oy), (offx, offy)) = view.origin();
+        let (c, r) = (0..27)
+            .flat_map(|r| (0..27).map(move |c| (c, r)))
+            .find(|&(c, r)| {
+                let (x, y) = ((ox + c) as usize, (oy + r) as usize);
+                !before.owns(x, y) && before.at(x, y).is_none()
+            })
+            .expect("land to buy");
+        let (x, y) = ((ox + c) as usize, (oy + r) as usize);
+        let at = format!("now click at {} {}", 2 + c * 16 - offx + 8, 25 + r * 16 - offy + 8);
+        // Kaufen asks, at 5.000 € a tile.
+        let runner = on_save(&game, "Probe1", &format!("{open}\n{at}")).unwrap();
+        let question = runner.host.view().text(control(&game.dialogs[&384], 4738).unwrap());
+        assert!(question.contains("5.000"), "{question}");
+        // Bought, an Apfelbaum planted, pulled down, the land sold: the
+        // extensions take 5.000 + 1.000 + 50 €, the stadium's income 3.000 €.
+        let then = format!(
+            "{open}\n{at}\nnow press 4741\nnow click at 521 187\n{at}\nnow click at 611 187\n\
+             {at}\nnow press 4741\nnow click at 566 187\n{at}\nnow press 4741\n\
+             now press 1\nuntil dialog 464"
+        );
+        let runner = on_save(&game, "Probe1", &then).unwrap();
+        let (after, (extensions, income)) = grounds(&runner);
+        assert_eq!(extensions - money.0, 6050);
+        assert_eq!(income.wrapping_sub(money.1), 3000);
+        assert!(!after.owns(x, y) && after.at(x, y).is_none());
+        assert_eq!(after.count(), before.count());
     }
 
     #[test]

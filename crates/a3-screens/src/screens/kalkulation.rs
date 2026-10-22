@@ -10,7 +10,7 @@ use a3_core::finances::Accounts;
 use a3_files::rch::Dialog;
 
 use super::playerinfo::money;
-use super::squad::own_team;
+use super::squad::{own_team, own_team_mut};
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
 use crate::controls::bitmap::Picture;
 use crate::pointer::Target;
@@ -271,12 +271,6 @@ impl Screen for Figures {
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
         carousel_input(cx, view, target).unwrap_or(Outcome::Stay)
     }
-}
-
-/// The club's team record, to change.
-fn own_team_mut<'a>(cx: &'a mut Cx) -> Option<&'a mut a3_core::records::Team> {
-    let (country, number) = own_team(cx).map(|t| (t.country(), u16::from(t.number())))?;
-    cx.state.records.as_mut()?.team_mut(country.into(), number)
 }
 
 /// The booked accounts (club +0x228) and the plan (club +0x120), by their

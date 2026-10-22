@@ -9,11 +9,13 @@ use crate::controls::{bar, list};
 use crate::view::View;
 
 /// What a drag takes hold of, or is let go of on: a control — a player's
-/// box — or a list's row, counted from the first one shown.
+/// box —, a list's row, counted from the first one shown, or a tile of a
+/// map.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Grip {
     Control(usize),
     Row { control: usize, row: usize },
+    Tile { control: usize, x: usize, y: usize },
 }
 
 impl Grip {
@@ -24,7 +26,17 @@ impl Grip {
             Target::Row { control, row } | Target::Cell { control, row, .. } => {
                 Some(Self::Row { control, row })
             }
+            Target::Tile { control, x, y } => Some(Self::Tile { control, x, y }),
             _ => None,
+        }
+    }
+
+    /// What the pointer pressed on to take hold of it.
+    pub fn target(self) -> Target {
+        match self {
+            Self::Control(c) => Target::Control(c),
+            Self::Row { control, row } => Target::Row { control, row },
+            Self::Tile { control, x, y } => Target::Tile { control, x, y },
         }
     }
 }
@@ -59,6 +71,12 @@ pub enum Target {
         control: usize,
         row: usize,
         column: usize,
+    },
+    /// A tile of a map drawn into a bitmap, by its column and row.
+    Tile {
+        control: usize,
+        x: usize,
+        y: usize,
     },
     Edit(usize),
     Spin {

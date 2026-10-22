@@ -979,10 +979,7 @@ fn open_menu(cx: &mut Cx, view: &mut View, grip: Grip, commands: &[Command]) -> 
 /// Shows a player's menu of `commands` where a right click fell, in the
 /// dialog's menu control.
 pub(crate) fn show_menu(cx: &Cx, view: &mut View, grip: Grip, commands: &[Command]) -> Option<()> {
-    let target = match grip {
-        Grip::Control(c) => Target::Control(c),
-        Grip::Row { control, row } => Target::Row { control, row },
-    };
+    let target = grip.target();
     let (_, rect) = crate::pointer::targets(cx.dialog, view, &crate::pointer::Pixels)
         .into_iter()
         .find(|(t, _)| *t == target)?;
@@ -1041,6 +1038,7 @@ fn place_of(dialog: &Dialog, view: &View, grip: Grip) -> Option<Place> {
             let list = view.list(control)?;
             list.keys.get(list.scroll + row).map(|&p| Place::Player(p))
         }
+        Grip::Tile { .. } => None,
     }
 }
 

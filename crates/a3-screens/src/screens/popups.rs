@@ -1,6 +1,7 @@
 //! The small popups the game asks and tells things in: a question to answer
 //! yes or no, and a notice to take in.
 
+use a3_core::cycle::Fill;
 pub use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 use crate::pointer::Target;
@@ -42,6 +43,7 @@ impl Screen for Question {
             Args::TextForText(text, other) => {
                 Some(cx.game.text(text).replacen("%s", cx.game.text(other), 1))
             }
+            Args::Printf(text, fills) => Some(printed(cx, text, fills)),
             Args::BuilderOffer { price, weeks, total } => {
                 let money = |v: i32| super::playerinfo::money(cx.game, v.into());
                 Some(super::finances::printf(
@@ -108,6 +110,7 @@ impl Screen for Notice {
                 cx.game.text(text).replacen("%s", &amount, 1)
             }
             Args::TextForNumber(text, n) => super::finances::printf(cx.game.text(text), &[&n]),
+            Args::Printf(text, fills) => printed(cx, text, fills),
             _ => return,
         };
         set(view, cx.dialog, NOTICE_TEXT, text);
@@ -119,6 +122,21 @@ impl Screen for Notice {
             _ => Outcome::Stay,
         }
     }
+}
+
+/// A text with what its `%`s stand for.
+fn printed(cx: &Cx, text: u16, fills: [Fill; 2]) -> String {
+    let parts: Vec<String> = fills
+        .iter()
+        .filter_map(|&fill| match fill {
+            Fill::None => None,
+            Fill::Number(n) => Some(n.to_string()),
+            Fill::Money64(v) => Some(super::finances::money64(cx.game, v)),
+            Fill::Money(v) => Some(super::playerinfo::money(cx.game, v)),
+        })
+        .collect();
+    let args: Vec<&dyn std::fmt::Display> = parts.iter().map(|p| p as _).collect();
+    super::finances::printf(cx.game.text(text), &args)
 }
 
 /// The looping ball of a small popup, if it has one.

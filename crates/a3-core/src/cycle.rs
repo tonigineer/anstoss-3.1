@@ -192,6 +192,17 @@ pub struct Negotiation {
     pub join: Option<i16>,
 }
 
+/// What a `%` of a text stands for: nothing, a number, an amount of
+/// money as the game writes a 64-bit one (`FUN_004db27e`) or a 32-bit one
+/// (`FUN_004daf8f`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Fill {
+    None,
+    Number(i32),
+    Money64(i64),
+    Money(i64),
+}
+
 /// What a screen is asked to show.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Args {
@@ -215,6 +226,8 @@ pub enum Args {
     TextForMoney(u16, i64),
     /// A text with a number for its "%d".
     TextForNumber(u16, i32),
+    /// A text by its id with what its `%d`s and `%s`s stand for, in order.
+    Printf(u16, [Fill; 2]),
     /// A loan's terms (dialogs 290, 289): the player, the fee asked and
     /// its fair value, the option's price asked and its fair value.
     LoanTerms {

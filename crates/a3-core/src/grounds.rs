@@ -5,6 +5,10 @@
 
 use crate::records::Records;
 
+mod actions;
+
+pub use actions::*;
+
 /// The cached grounds' keys (u8 country, a byte, i16 number) and the
 /// grounds themselves, one block each (`0x8ef338`, `0x8ef380[k]`).
 const KEYS: &str = "0x8ef338";
@@ -24,6 +28,9 @@ const LOOKS: usize = 0x1d5e0;
 const SCROLL: usize = 0x1d608;
 const TILE: usize = 0x1fd44;
 const INVESTABLE: usize = 0x1fd60;
+/// The block's size.
+#[cfg(test)]
+const BLOCK: usize = 0x1fd88;
 /// The stadiums' kinds of building (90, 91, 92).
 pub const FIRST_STADIUM: i16 = 90;
 pub const STADIUMS: usize = 3;

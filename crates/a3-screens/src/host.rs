@@ -184,8 +184,15 @@ impl Host {
                 None => Change::Same,
             },
             Outcome::Close(reply) if self.open.len() > 1 => {
-                // A popup replies to the screen below it.
-                self.open.pop();
+                // A popup replies to the screen below it, the pointer
+                // where the popup left it — though the screen is not told
+                // it moved.
+                let pointer = self.open.pop().and_then(|(_, popup)| popup.pointer);
+                if let Some((_, below)) = self.open.last_mut()
+                    && pointer.is_some()
+                {
+                    below.pointer = pointer;
+                }
                 let outcome =
                     self.with_top(game, |screen, cx, view| screen.answer(cx, view, reply));
                 match self.apply(game, outcome) {
