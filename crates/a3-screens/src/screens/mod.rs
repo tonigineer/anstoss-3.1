@@ -172,6 +172,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(contacts::Contacts::default()),
         Box::new(board::Board::default()),
         Box::new(honours::Honours::default()),
+        Box::new(honours::abilities::Abilities),
         Box::new(contacts::Lawyers::default()),
         Box::new(contacts::AliensOffice::default()),
         Box::new(contacts::Referees::default()),

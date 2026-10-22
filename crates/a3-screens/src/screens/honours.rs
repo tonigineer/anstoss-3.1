@@ -19,6 +19,8 @@ use crate::controls::options::NONE;
 use crate::pointer::Target;
 use crate::view::View;
 
+pub mod abilities;
+
 const CAPTION_ID: u16 = 9935;
 /// "ANSTOSS 3 - Persönliche Erfolge", with the manager, his club and the
 /// date.
@@ -58,6 +60,8 @@ const CONFIDENCE_PAGE: u16 = 5571;
 const MARKETS: u16 = 5572;
 /// Item 3 of the pages, whose label changes for a player-manager.
 const PLAYER_MANAGER: usize = 3;
+/// Item 2, the abilities' page.
+const ABILITIES_ITEM: usize = 2;
 const STEP_DOWN: u16 = 4246;
 /// "Ja" / "Nein"; "(bis 30.06.%4d)"; the season's goals 1069 to 1080.
 const YES_NO: [u16; 2] = [1028, 1029];
@@ -253,10 +257,13 @@ impl Screen for Honours {
                 view.set_chosen(c, NONE);
             }
         }
-        // Only the two transfers are built.
+        // The two transfers and the abilities' page are built.
         let works = |t: Target| match t {
+            Target::Option { control: c, item } if dialog.controls[c].id == Some(PAGES) => {
+                item == ABILITIES_ITEM
+            }
             Target::Option { control: c, .. }
-                if matches!(dialog.controls[c].id, Some(PAGES | CONFIDENCE_PAGE | MARKETS)) =>
+                if matches!(dialog.controls[c].id, Some(CONFIDENCE_PAGE | MARKETS)) =>
             {
                 false
             }
@@ -285,6 +292,12 @@ impl Screen for Honours {
                 }
                 Outcome::Stay
             }
+            // The page's button stays pressed while it is open.
+            Target::Option { control: c, item }
+                if dialog.controls[c].id == Some(PAGES) && item == ABILITIES_ITEM =>
+            {
+                Outcome::Popup(a3_core::cycle::Request::new(abilities::ABILITIES_DIALOG))
+            }
             Target::Option { control: c, .. } => {
                 view.set_chosen(c, NONE);
                 Outcome::Stay
@@ -293,9 +306,13 @@ impl Screen for Honours {
         }
     }
 
-    fn answer(&mut self, _: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+    /// A page taken in: its button comes up again.
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
+        }
+        if let Some(c) = control(cx.dialog, PAGES) {
+            view.set_chosen(c, NONE);
         }
         Outcome::Stay
     }
