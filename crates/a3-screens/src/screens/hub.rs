@@ -25,9 +25,9 @@ use a3_files::bitmap_font::to_cp1252;
 use a3_files::rch::{Align, Control, Dialog, Item, Kind};
 
 pub use a3_core::cycle::dialogs::{
-    ABILITY_CHOICE, BALANCE, COMPARISON, CONTACTS, DRESSING_ROOM, FINANCES, INDIVIDUAL_TRAINING,
-    LINEUP, LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, SQUAD_MENU, STADIUM, TACTICS,
-    TRAINING_PICTURES, UNIT_CHOICE, WEEK_PLANNER, YEAR_CALENDAR,
+    ABILITY_CHOICE, BALANCE, BOARD, COMPARISON, CONTACTS, DRESSING_ROOM, FINANCES,
+    INDIVIDUAL_TRAINING, LINEUP, LINEUP_LIST, LONG_TRAINING, SHORT_TRAINING, SQUAD_MENU, STADIUM,
+    TACTICS, TRAINING_PICTURES, UNIT_CHOICE, WEEK_PLANNER, YEAR_CALENDAR,
 };
 use a3_core::cycle::dialogs::{AMATEUR_PLAYERS, NOTICE, QUESTION, YOUTH_TEAM};
 
@@ -62,6 +62,7 @@ pub(crate) const FINANCES_SYMBOL: usize = 9;
 pub(crate) const SQUAD_SYMBOL: usize = 10;
 pub(crate) const STADIUM_SYMBOL: usize = 11;
 pub(crate) const CONTACTS_SYMBOL: usize = 12;
+pub(crate) const BOARD_SYMBOL: usize = 13;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 /// What the turn before a match closes: the money, the club, the national
 /// team (the table at 0x8a35b0).
@@ -70,7 +71,7 @@ const NATIONAL_SYMBOL: usize = 15;
 const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 14] = [
+const BAR_SCREENS: [(usize, u16); 15] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
@@ -84,6 +85,7 @@ const BAR_SCREENS: [(usize, u16); 14] = [
     (SQUAD_SYMBOL, SQUAD_MENU),
     (STADIUM_SYMBOL, STADIUM),
     (CONTACTS_SYMBOL, CONTACTS),
+    (BOARD_SYMBOL, BOARD),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
 /// What the game takes for Saturday.
@@ -1615,7 +1617,7 @@ mod tests {
     use crate::screens::compose;
 
     /// A symbol not built yet.
-    const UNBUILT_SYMBOL: usize = 13;
+    const UNBUILT_SYMBOL: usize = 14;
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]

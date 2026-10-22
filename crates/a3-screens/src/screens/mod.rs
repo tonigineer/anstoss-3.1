@@ -5,6 +5,7 @@
 //! screen below it. The [`crate::host`] keeps them open.
 
 pub mod bank;
+pub mod board;
 pub mod calendar;
 pub mod comparison;
 pub mod contacts;
@@ -168,6 +169,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(stadium::StadiumView),
         Box::new(grounds::GroundsScreen::default()),
         Box::new(contacts::Contacts::default()),
+        Box::new(board::Board::default()),
         Box::new(contacts::Lawyers::default()),
         Box::new(contacts::AliensOffice::default()),
         Box::new(contacts::Referees::default()),
@@ -236,6 +238,7 @@ pub fn compose(game: &mut Game) {
     stadium::compose(&mut game.dialogs, &game.data.rules);
     grounds::compose(&mut game.dialogs);
     contacts::compose(&mut game.dialogs, &game.data.rules);
+    board::compose(&mut game.dialogs, &game.data.rules);
     market::compose(&mut game.dialogs);
     market::compose_best(&mut game.dialogs);
     market::compose_talks(&mut game.dialogs);

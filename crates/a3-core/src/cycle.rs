@@ -86,6 +86,8 @@ pub mod dialogs {
     pub const SQUAD_MENU: u16 = 218;
     /// The telephone ("Kontakte", bar symbol 12).
     pub const CONTACTS: u16 = 404;
+    /// The board ("Vereinsführung", bar symbol 13).
+    pub const BOARD: u16 = 439;
     pub const CURRENT_SQUAD: u16 = 216;
     pub const MARKET_VALUES: u16 = 217;
     pub const NEXT_SQUAD: u16 = 219;

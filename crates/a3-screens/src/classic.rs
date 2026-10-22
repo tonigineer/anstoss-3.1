@@ -332,7 +332,9 @@ pub(crate) fn line(frame: &mut RgbaImage, from: (i32, i32), to: (i32, i32), colo
     // across, the one the line passes through there.
     let (major, minor, d_major, d_minor) =
         if flat { ((x0, x1), y0, dx, dy) } else { ((y0, y1), x0, dy, dx) };
+    // A line of no length is the one pixel it starts on.
     if d_major == 0 {
+        put(i64::from(from.0), i64::from(from.1));
         return;
     }
     let (lo, hi) = (major.0.min(major.1), major.0.max(major.1));
