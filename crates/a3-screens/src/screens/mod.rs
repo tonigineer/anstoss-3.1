@@ -176,6 +176,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(contacts::FanService::default()),
         Box::new(contacts::Cooperation::default()),
         Box::new(contacts::Reporter),
+        Box::new(contacts::Enquiry::default()),
         Box::new(grounds::GroundsInfo),
         Box::new(grounds::GroundsStaff),
         Box::new(grounds::GroundsFans),

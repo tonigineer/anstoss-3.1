@@ -39,15 +39,21 @@ const RUNNING: u16 = 4456;
 const PARTNER: usize = 0x92a;
 const UNTIL: usize = 0x92c;
 const NO_PARTNER: u16 = 0xffff;
+/// The enquiry's button, the alert for a manager who has signed with
+/// another club, and where that club stands in his record (+0x130).
+const ENQUIRY: usize = 8;
+const NEW_JOB: u16 = 2422;
+const MOVING_AT: usize = 0x130;
 /// Every sub-dialog, which shows its file's title as its caption.
 const SUB_DIALOGS: [u16; 8] = [35, 58, 166, 398, 494, 492, 493, 15];
 /// The buttons whose sub-dialogs are built, and those.
-const BUILT: [(usize, u16); 5] = [
+const BUILT: [(usize, u16); 6] = [
     (2, FAN_DIALOG),
     (3, LAWYERS_DIALOG),
     (4, REFEREES_DIALOG),
     (6, ALIENS_DIALOG),
     (7, REPORTER_DIALOG),
+    (8, ENQUIRY_DIALOG),
 ];
 
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
@@ -107,6 +113,19 @@ impl Screen for Contacts {
         let Target::Option { control: c, item } = target else { return Outcome::Stay };
         if cx.dialog.controls[c].id != Some(BUTTONS) {
             return Outcome::Stay;
+        }
+        // A manager who has signed elsewhere enquires nowhere.
+        if item == ENQUIRY
+            && let Some(manager) = super::kalkulation::own_manager(cx)
+            && manager.get::<u8>(MOVING_AT) != 0
+        {
+            let args = Args::ForClub {
+                text: NEW_JOB,
+                country: manager.get::<u8>(MOVING_AT).into(),
+                number: manager.get::<u16>(MOVING_AT + 2),
+                value: 0,
+            };
+            return Outcome::Popup(Request::with(NOTICE, args));
         }
         if let Some(&(_, screen)) = BUILT.iter().find(|&&(i, _)| i == item) {
             return Outcome::Popup(Request::new(screen));
@@ -1125,4 +1144,139 @@ fn write_article(cx: &mut Cx) -> u16 {
         manager.put(SEASON_FLAGS_AT, flags);
     }
     WRITTEN
+}
+
+/// The enquiry at another club (dialog 15 `CAnfrageVereinsauswahl`,
+/// KONTAKTE.md §8.2): the leagues with clubs looking for a manager, the
+/// candidates for next season and the clubs that would take one at once.
+/// What a click on a club does is not built.
+#[derive(Default)]
+pub struct Enquiry {
+    /// The combo's leagues, by country and league there.
+    leagues: Vec<(u16, usize)>,
+}
+
+const ENQUIRY_DIALOG: u16 = 15;
+const AT_ONCE_LIST: u16 = 1260;
+const NEXT_SEASON_LIST: u16 = 1261;
+const LEAGUE_COMBO: u16 = 1262;
+/// "derzeit kein Verein interessiert".
+const NOBODY: u16 = 4965;
+/// The vacancies (save block `0x1c46f48`): ten leagues' counts for an
+/// immediate move, then for next season, then their clubs' numbers.
+const VACANCIES: &str = "0x1c46f48";
+const LEAGUES: usize = 10;
+const CLUBS_A_LEAGUE: usize = 24;
+const AT_ONCE_COUNTS: usize = 0x000;
+const NEXT_COUNTS: usize = 0x014;
+const AT_ONCE_CLUBS: usize = 0x028;
+const NEXT_CLUBS: usize = 0x208;
+
+/// A league's clubs looking for a manager: at once, and for next season.
+fn vacancies(records: &a3_core::records::Records, g: usize) -> ([Vec<u16>; 2], [i16; 2]) {
+    let Some(block) = records.block(VACANCIES) else { return ([Vec::new(), Vec::new()], [0; 2]) };
+    let word = |at: usize| block.get(at..at + 2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]));
+    let list = |counts: usize, clubs: usize| {
+        let n = word(counts + 2 * g).max(0) as usize;
+        (0..n.min(CLUBS_A_LEAGUE))
+            .map(|i| word(clubs + 2 * (g * CLUBS_A_LEAGUE + i)) as u16)
+            .collect::<Vec<_>>()
+    };
+    let counts = [word(AT_ONCE_COUNTS + 2 * g), word(NEXT_COUNTS + 2 * g)];
+    ([list(AT_ONCE_COUNTS, AT_ONCE_CLUBS), list(NEXT_COUNTS, NEXT_CLUBS)], counts)
+}
+
+impl Screen for Enquiry {
+    fn ids(&self) -> &[u16] {
+        &[ENQUIRY_DIALOG]
+    }
+
+    /// `0x4428b8`: the main country's leagues with vacancies, then the
+    /// first league of each further country.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        self.leagues.clear();
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let main = records.globals.main_country().max(0) as u16;
+        let has = |country: u16, league: usize| {
+            let g = records.countries.first_league(country.into()).max(0) as usize + league;
+            let (_, counts) = vacancies(records, g);
+            counts[0] > 0 || counts[1] > 0
+        };
+        let main_leagues = records.countries.leagues(main.into()).max(0) as usize;
+        for league in (0..main_leagues.min(LEAGUES)).filter(|&l| has(main, l)) {
+            self.leagues.push((main, league));
+        }
+        let more = records.globals.more_count().max(0) as usize;
+        for &country in records.globals.more_countries().iter().take(more.min(4)) {
+            let country = country.max(0) as u16;
+            if country != 0 && has(country, 0) {
+                self.leagues.push((country, 0));
+            }
+        }
+        let items: Vec<String> = self
+            .leagues
+            .iter()
+            .map(|&(country, league)| records.countries.league_name(country.into(), league))
+            .collect();
+        if let Some(c) = control(dialog, LEAGUE_COMBO).and_then(|c| view.combo_mut(c)) {
+            c.disabled = items.is_empty();
+            c.items = items;
+            c.selected = (!self.leagues.is_empty()).then_some(0);
+            c.scroll = 0;
+        }
+        if self.leagues.is_empty() {
+            for id in [AT_ONCE_LIST, NEXT_SEASON_LIST] {
+                if let Some(list) = control(dialog, id).and_then(|c| view.list_mut(c)) {
+                    list.rows = vec![game.text(NOBODY).to_owned()];
+                }
+            }
+        } else {
+            self.fill(cx, view, 0);
+        }
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            Target::Row { control: c, row } if dialog.controls[c].id == Some(LEAGUE_COMBO) => {
+                self.fill(cx, view, row);
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+impl Enquiry {
+    /// The two lists of a league (`FUN_00442c7f`), without the own club,
+    /// its professionals and its amateurs.
+    fn fill(&self, cx: &Cx, view: &mut View, chosen: usize) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(&(country, league)) = self.leagues.get(chosen) else { return };
+        let (Some(records), Some(team)) = (cx.state.records.as_ref(), own_team(cx)) else { return };
+        let g = records.countries.first_league(country.into()).max(0) as usize + league;
+        let ([at_once, next], _) = vacancies(records, g);
+        let own = i16::from(team.number());
+        let linked = team.linked();
+        let mine = |n: u16| {
+            country == u16::from(team.country()) && (n as i16 == own || linked.contains(&(n as i8)))
+        };
+        for (id, clubs) in [(AT_ONCE_LIST, at_once), (NEXT_SEASON_LIST, next)] {
+            let rows: Vec<String> = clubs
+                .into_iter()
+                .filter(|&n| !mine(n))
+                .map(|n| game.club_name(Some(records), country as u8, n as i16))
+                .collect();
+            if let Some(list) = control(dialog, id).and_then(|c| view.list_mut(c)) {
+                list.rows = rows;
+                list.selected = None;
+                list.scroll = 0;
+            }
+        }
+    }
 }
