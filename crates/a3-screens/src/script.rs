@@ -1641,6 +1641,74 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_books_a_talk_about_the_manager_s_own_contract() {
+        use a3_core::records::Records;
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        // Probe1's manager has two years of contract left, enough for the
+        // board to see no need; with none it is ready to talk and the
+        // planner opens. The patched save sits in a copy of the game.
+        let bytes = std::fs::read(dir.join("saves/Probe1.an3")).unwrap();
+        let mut records = Records::from_save(a3_files::an3::Save::parse(&bytes).unwrap()).unwrap();
+        let slot = records.human_slot(0).unwrap();
+        records.managers[slot].put(0x172, 0i16);
+        let (today, start) =
+            (i32::from(records.globals.day()), i32::from(records.globals.week_start()));
+        let row = (0..7)
+            .find(|&i| {
+                let day = (start + i) as usize;
+                records.planners[slot].day(day).kind == 0 && start + i >= today
+            })
+            .unwrap();
+        let booked = start + row;
+        let root = std::env::temp_dir().join("a3-script-board-talk");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("saves")).unwrap();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() != "saves" {
+                std::os::unix::fs::symlink(entry.path(), root.join(entry.file_name())).unwrap();
+            }
+        }
+        std::fs::write(
+            root.join("saves/Probe2.an3"),
+            records.to_save().to_bytes_stored().unwrap(),
+        )
+        .unwrap();
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+
+        let then = format!(
+            "now click bar 13\nuntil dialog 439\nnow choose 5387 0\nuntil dialog 412\n\
+             now choose 5034 {row}"
+        );
+        let Some(runner) = on_save(&game, "Probe2", &then) else { return };
+        assert_eq!(seen(&runner, 412), 1);
+        assert_eq!(runner.host.view().id, 439);
+        // The line now says the talk is booked.
+        let view = runner.host.view();
+        let text = view.text(control(&game.dialogs[&439], 5360).unwrap()).to_owned();
+        assert_eq!(text, game.text(3823));
+        // The talk stands in the shared list and the planner's day names
+        // the club.
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = records.humans().next().unwrap();
+        let team = records.team(manager.country(), manager.team()).unwrap();
+        let b = records.block("0x1ba0438").unwrap();
+        assert_eq!(i16::from_le_bytes([b[0], b[1]]), 1);
+        let e = 2;
+        assert_eq!(i16::from_le_bytes([b[e], b[e + 1]]), i16::try_from(slot + 1).unwrap());
+        assert_eq!(i16::from_le_bytes([b[e + 2], b[e + 3]]), booked as i16);
+        assert_eq!(b[e + 4], team.country());
+        assert_eq!(i16::from_le_bytes([b[e + 5], b[e + 6]]), i16::from(team.number()));
+        let day = records.planners[slot].day(booked as usize);
+        assert_eq!([day.kind, day.flag], [0x14, 1]);
+        assert_eq!(day.player, u16::from(team.country()));
+        assert_eq!(day.club, i16::from(team.number()));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_grounds_scroll_by_the_arrows_and_keep_their_view() {
         let game = game();
         let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";

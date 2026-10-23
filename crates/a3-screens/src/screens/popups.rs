@@ -113,6 +113,10 @@ impl Screen for Notice {
                 cx.game.text(text).replacen("%s", &amount, 1)
             }
             Args::TextForNumber(text, n) => super::finances::printf(cx.game.text(text), &[&n]),
+            Args::TextForClub(text, country, number) => {
+                let name = cx.game.club_name(cx.state.records.as_ref(), country, number);
+                cx.game.text(text).replacen("%s", &name, 1)
+            }
             Args::Printf(text, fills) => printed(cx, text, fills),
             Args::Cooperation { partner, year } => super::contacts::running_text(cx, partner, year),
             _ => return,

@@ -852,6 +852,10 @@ const PLANNER_AT: u32 = 0x1c39620;
 pub const PLANNER_DAYS: usize = 378;
 pub const PLANNER_ENTRY: usize = 0x1c;
 const PLANNER_ENTRIES_AT: usize = 0x24;
+/// The kind of appointment which names a club instead of a player: a
+/// contract talk with one's own board or a negotiation with another
+/// human's club.
+pub const PLANNER_CLUB_KIND: u8 = 0x14;
 
 record! {
     /// A manager's week planner: an appointment for every day of the season
@@ -861,8 +865,8 @@ record! {
 
 /// An appointment of a planner: what kind of appointment (0 none), and the
 /// player it is about, for the kinds about a player; for a negotiation with
-/// another human's club its country (the player field's low byte) and its
-/// number, which booking leaves as it was.
+/// another human's club or a contract talk with one's own board its country
+/// (the player field's low byte) and its number.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Appointment {
     pub kind: u8,
@@ -909,14 +913,20 @@ impl Planner {
         Some([(self.get(at + 8), self.get(at + 0xa)), (self.get(at + 0xc), self.get(at + 0xe))])
     }
 
-    /// Books an appointment for a day; what else the day's entry held stays
-    /// (`FUN_0072e973`).
+    /// Books an appointment for a day (`FUN_0072e973`): the kind, flag 1
+    /// and what it is about — a club kind's country in the player field's
+    /// low byte and its number after. What else the day's entry held stays.
     pub fn book(&mut self, day: usize, appointment: Appointment) {
         if day < PLANNER_DAYS {
             let at = PLANNER_ENTRIES_AT + day * PLANNER_ENTRY;
             self.put(at, appointment.kind);
             self.put(at + 1, appointment.flag);
-            self.put(at + 4, appointment.player);
+            if appointment.kind == PLANNER_CLUB_KIND {
+                self.put(at + 4, appointment.player as u8);
+                self.put(at + 6, appointment.club);
+            } else {
+                self.put(at + 4, appointment.player);
+            }
         }
     }
 }

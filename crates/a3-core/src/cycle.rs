@@ -232,6 +232,9 @@ pub enum Args {
     TextForMoney(u16, i64),
     /// A text with a number for its "%d".
     TextForNumber(u16, i32),
+    /// A text by its id, with a club's name for its `%s`: the club by its
+    /// country and number.
+    TextForClub(u16, u8, i16),
     /// A text by its id with a club's phrases (`v1` … `V20`) and a number
     /// for its "%d": the club by its country and number.
     ForClub {
@@ -282,6 +285,9 @@ pub enum Args {
     Book(u8, u16),
     /// A negotiation to book in the week planner, or to join.
     Negotiation(Negotiation),
+    /// A contract talk with one's own board to book in the week planner
+    /// (the board screen's first item): the club by country and number.
+    WithClub(u8, i16),
     /// A club, by its country's slot and its place there.
     Club(usize, usize),
     /// A youth or an amateur to try with the professionals, by his record's

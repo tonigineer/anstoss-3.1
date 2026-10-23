@@ -2,12 +2,15 @@
 //! RE repo): the salary he would ask (`FUN_00708012`), how well his
 //! contract suits him (`FUN_00708ca5`, about 100 when it is what he
 //! asks), how well new terms would (`FUN_00709299`, `FUN_00709b5f`), and
-//! whether he takes a year more on his terms (`FUN_004b784c`).
+//! whether he takes a year more on his terms (`FUN_004b784c`). Also the
+//! talks the human managers have booked with their boards about their own
+//! contracts (VEREINSFUEHRUNG.md §4).
 
 use std::io;
 
 use a3_files::exe::Exe;
 
+use crate::records::{Appointment, Records};
 use crate::value::{ValueTables, Worth};
 use crate::world::GOALKEEPER;
 
@@ -484,3 +487,110 @@ pub enum Extension {
     /// Yes if a draw below 100 falls under this.
     ByLuck(u32),
 }
+
+/// The talks about their contracts the human managers book with their
+/// boards (VEREINSFUEHRUNG.md §4): all share the save block `0x1ba0438`,
+/// whose data begins at the object's +0x20 — an i16 count up to 28, then
+/// ten bytes a talk: the manager's slot from one, the day, the club's
+/// country and number, and nought.
+const TALKS_AT: u32 = 0x1ba0438;
+const TALKS_COUNT: usize = 0;
+const TALKS_FIRST: usize = 2;
+const TALK: usize = 10;
+const TALKS_MOST: usize = 28;
+/// The planner's kind of a contract talk, which names a club: its country
+/// in the entry's player field, its number after (`439`'s booking and the
+/// market's negotiations share it).
+pub const TALK_KIND: u8 = crate::records::PLANNER_CLUB_KIND;
+
+/// One talk of the list.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Talk {
+    pub slot: i16,
+    pub day: i16,
+    pub club: (u8, i16),
+}
+
+fn talks(records: &Records) -> Vec<Talk> {
+    let Some(b) = records.block(&format!("{TALKS_AT:#x}")) else { return Vec::new() };
+    let count = word(b, TALKS_COUNT).max(0) as usize;
+    (0..count)
+        .map(|k| {
+            let e = TALKS_FIRST + k * TALK;
+            Talk {
+                slot: word(b, e),
+                day: word(b, e + 2),
+                club: (b.get(e + 4).copied().unwrap_or(0), word(b, e + 5)),
+            }
+        })
+        .collect()
+}
+
+fn word(b: &[u8], at: usize) -> i16 {
+    match (b.get(at), b.get(at + 1)) {
+        (Some(lo), Some(hi)) => i16::from_le_bytes([*lo, *hi]),
+        _ => 0,
+    }
+}
+
+fn put16(b: &mut [u8], at: usize, v: i16) {
+    if let Some(slot) = b.get_mut(at..at + 2) {
+        slot.copy_from_slice(&v.to_le_bytes());
+    }
+}
+
+/// The manager's slot in the list: his place among the humans, from one.
+fn talk_slot(index: usize) -> i16 {
+    i16::try_from(index + 1).unwrap_or(0)
+}
+
+/// Whether the club's talk is booked with this manager, whenever it is
+/// (`FUN_006a8ce2`).
+pub fn talk_booked(records: &Records, index: usize, club: (u8, i16)) -> bool {
+    talks(records).iter().any(|t| t.slot == talk_slot(index) && t.club == club)
+}
+
+/// Whether this manager has a talk booked in this week (`FUN_006a8804`):
+/// from the week's first day to its last.
+pub fn talk_in_week(records: &Records, index: usize) -> bool {
+    let start = records.globals.week_start();
+    talks(records)
+        .iter()
+        .any(|t| t.slot == talk_slot(index) && (start..start + 7).contains(&t.day))
+}
+
+/// The talk booked (`FUN_006a8d67`): only if the planner's day is free,
+/// the manager has no talk booked for that day, and the list has room —
+/// then the entry and the planner's kind 0x14 entry naming the club.
+/// Whether it was booked.
+pub fn book_talk(records: &mut Records, index: usize, day: i16, club: (u8, i16)) -> bool {
+    let free = records.planners.get(index).is_some_and(|p| p.day(day as usize).kind == 0);
+    let list = talks(records);
+    if !free
+        || list.len() >= TALKS_MOST
+        || list.iter().any(|t| t.slot == talk_slot(index) && t.day == day)
+    {
+        return false;
+    }
+    let Some(b) = records.block_mut(&format!("{TALKS_AT:#x}")) else { return false };
+    let e = TALKS_FIRST + list.len() * TALK;
+    if b.len() < e + TALK {
+        return false;
+    }
+    b[e..e + TALK].fill(0);
+    put16(b, e, talk_slot(index));
+    put16(b, e + 2, day);
+    b[e + 4] = club.0;
+    put16(b, e + 5, club.1);
+    put16(b, TALKS_COUNT, i16::try_from(list.len() + 1).unwrap_or(i16::MAX));
+    if let Some(planner) = records.planners.get_mut(index) {
+        planner.book(
+            day as usize,
+            Appointment { kind: TALK_KIND, flag: ONE_DAY, player: u16::from(club.0), club: club.1 },
+        );
+    }
+    true
+}
+
+/// A single day's appointment, as the planner books a talk.
+const ONE_DAY: u8 = 1;

@@ -2,11 +2,14 @@
 //! VEREINSFUEHRUNG.md in the RE repo): the board's confidence in the
 //! manager with the president's face and its history, the opposition, the
 //! state of a contract extension, the club's shares; five things to try
-//! with the board and the trophy hall. The actions and the hall are not
+//! with the board and the trophy hall. Three of the actions work: seeking
+//! a contract extension, a talk with the board and flattering the
+//! opposition. The Freistellung, the resignation and the hall are not
 //! built yet.
 
 use std::collections::HashMap;
 
+use a3_core::contract;
 use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::{BOARD, NOTICE};
 use a3_core::records::Manager;
@@ -14,6 +17,7 @@ use a3_core::season::Rules;
 use a3_files::rch::Dialog;
 
 use super::hub::{self, BOARD_SYMBOL};
+use super::planner::PLANNER;
 use super::squad::own_team;
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
 use crate::controls::options::NONE;
@@ -71,7 +75,9 @@ const TALKS_AT: usize = 0x1f94;
 const TALKED_AT: usize = 0x1f95;
 const CONFIDENCE_AT: usize = 0x184;
 const CRAWLED_AT: usize = 0x19a;
-/// The items built: a talk with the board, flattering the opposition.
+/// The items built: seeking a contract extension, a talk with the board,
+/// flattering the opposition.
+const EXTEND: usize = 0;
 const TALK: usize = 1;
 /// Talked already, no reason to; the first talk's three outcomes by the
 /// draw, the second's, the later ones'.
@@ -90,6 +96,12 @@ const FLATTERED_ALREADY: u16 = 4997;
 const FLATTER_COST: i32 = 5;
 /// "Sie wechseln zum 30.6. v6."; the extension's states (§2.4).
 const MOVING: u16 = 3886;
+/// Seeking the extension (§4.1): leaving already, a talk booked this
+/// week, a talk booked with this board — the latter also what the line
+/// shows then (§2.4).
+const LEAVING: u16 = 1802;
+const TALKING: u16 = 3142;
+const BOOKED_TALK: u16 = 3823;
 
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     let Some(dialog) = dialogs.get_mut(&BOARD) else { return };
@@ -105,6 +117,11 @@ pub struct Board {
     /// Whether the alert now up is the opposition's, whose changes come
     /// after it closes.
     flattered: bool,
+    /// Whether an alert of the extension sought is up; after it the
+    /// original fills nothing anew.
+    sought: bool,
+    /// Whether the planner now up is to book the talk with the board.
+    booking: bool,
 }
 
 impl Screen for Board {
@@ -135,7 +152,7 @@ impl Screen for Board {
         set(view, dialog, OPPOSITION_LIKES, likes);
         let state = OPPOSITION_TEXTS.saturating_sub(u16::from(opposition.min(6)));
         set(view, dialog, OPPOSITION_STATE, game.text(state).to_owned());
-        set(view, dialog, EXTENSION, extension_text(cx, manager, c));
+        set(view, dialog, EXTENSION, extension_text(cx, c));
         // No club of the replica's saves is on the stock market.
         set(view, dialog, MY_SHARES_TEXT, game.text(NOT_LISTED).to_owned());
         for id in SHARE_ROWS.iter().chain(&SHARE_LABELS) {
@@ -153,7 +170,7 @@ impl Screen for Board {
         }
         let works = |t: Target| match t {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(ACTIONS) => {
-                item == TALK || (item == FLATTER && opposition != 0)
+                item == EXTEND || item == TALK || (item == FLATTER && opposition != 0)
             }
             Target::Button(c) if dialog.controls[c].id == Some(TROPHIES) => false,
             _ => hub::on_bar(dialog, t).is_none_or(hub::bar_works),
@@ -174,6 +191,7 @@ impl Screen for Board {
         }
         // The button stays pressed while its alert is up.
         match item {
+            EXTEND => self.seek(cx),
             TALK => Outcome::Popup(Request::with(NOTICE, Args::Text(self.talk(cx)))),
             FLATTER => {
                 let crawled = manager_flag(cx, CRAWLED_AT);
@@ -194,12 +212,47 @@ impl Screen for Board {
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
         }
-        if std::mem::take(&mut self.flattered) {
+        let (flattered, sought, booking) = (
+            std::mem::take(&mut self.flattered),
+            std::mem::take(&mut self.sought),
+            std::mem::take(&mut self.booking),
+        );
+        if flattered {
             self.crawl(cx);
+        }
+        // The clicked button shows pressed while its popup is up and is
+        // plain again after.
+        if let Some(c) = control(cx.dialog, ACTIONS) {
+            view.set_chosen(c, NONE);
+        }
+        if booking {
+            // The planner closing changes only the extension's line, and
+            // only when the talk was booked (§4.1).
+            if reply == Reply::Ok && own_talk_booked(cx) {
+                let text = cx.game.text(BOOKED_TALK).to_owned();
+                set(view, cx.dialog, EXTENSION, text);
+            }
+            return Outcome::Stay;
+        }
+        if sought {
+            return Outcome::Stay;
         }
         self.refresh(cx, view);
         Outcome::Stay
     }
+}
+
+/// Whether the manager's own club has a talk booked with his board in the
+/// shared list (`FUN_006a8ce2`).
+fn own_talk_booked(cx: &Cx) -> bool {
+    let (Some(team), Some(season), Some(records)) =
+        (own_team(cx), cx.state.season.as_ref(), cx.state.records.as_ref())
+    else {
+        return false;
+    };
+    records.human_slot(season.current).is_some_and(|index| {
+        contract::talk_booked(records, index, (team.country(), team.number().into()))
+    })
 }
 
 /// A flag byte of the manager's record.
@@ -290,19 +343,53 @@ impl Board {
 
     /// The screen filled anew after an action (`FUN_005b4ff2` and the
     /// three that follow it).
-    fn refresh(&self, cx: &Cx, view: &mut View) {
+    fn refresh(&self, cx: &mut Cx, view: &mut View) {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(manager) = super::kalkulation::own_manager(cx) else { return };
         let c = manager.shown_confidence();
+        let likes = i32::from(manager.get::<i16>(OPPOSITION_POPULARITY_AT));
         self.show(cx, view, c);
-        if let Some(team) = own_team(cx)
-            && team.get::<u8>(OPPOSITION_AT) >= 1
-        {
-            let likes = format!("{}%", manager.get::<i16>(OPPOSITION_POPULARITY_AT));
-            set(view, dialog, OPPOSITION_LIKES, likes);
+        if own_team(cx).is_some_and(|t| t.get::<u8>(OPPOSITION_AT) >= 1) {
+            set(view, dialog, OPPOSITION_LIKES, format!("{likes}%"));
         }
-        set(view, dialog, EXTENSION, extension_text(cx, manager, c));
+        set(view, dialog, EXTENSION, extension_text(cx, c));
         let _ = game;
+    }
+
+    /// Seeking a contract extension (`FUN_005b5f3b`): he is leaving the
+    /// club, has a talk booked this week, or the board has its mind on
+    /// one; only when it is ready to talk does the week planner ask for
+    /// the day.
+    fn seek(&mut self, cx: &mut Cx) -> Outcome {
+        let (Some(team), Some(manager)) = (own_team(cx), super::kalkulation::own_manager(cx))
+        else {
+            return Outcome::Stay;
+        };
+        let (country, number) = (team.country(), team.number().into());
+        let (moving, leaving) =
+            (manager.get::<u8>(MOVING_AT), manager.get::<i16>(MOVING_AT + 2));
+        let c = manager.shown_confidence();
+        if moving != 0 {
+            self.sought = true;
+            return Outcome::Popup(Request::with(
+                NOTICE,
+                Args::TextForClub(LEAVING, moving, leaving),
+            ));
+        }
+        let booked = cx.state.records.as_ref().zip(cx.state.season.as_ref()).is_some_and(
+            |(r, s)| r.human_slot(s.current).is_some_and(|i| contract::talk_in_week(r, i)),
+        );
+        if booked {
+            self.sought = true;
+            return Outcome::Popup(Request::with(NOTICE, Args::Text(TALKING)));
+        }
+        let (text, r) = ladder(cx, c);
+        if r <= 0 {
+            self.sought = true;
+            return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+        }
+        self.booking = true;
+        Outcome::Popup(Request::with(PLANNER, Args::WithClub(country, number)))
     }
 
     /// The confidence, its face, the board's mood, the chart and its
@@ -369,34 +456,51 @@ impl Board {
     }
 }
 
-/// The state of a contract extension (`FUN_005b526d`, `FUN_00757631`):
-/// moving away, or what the board thinks of extending now.
-fn extension_text(cx: &Cx, manager: &Manager, c: i32) -> String {
-    let game = cx.game;
-    let moving = manager.get::<u8>(MOVING_AT);
-    if moving != 0 {
-        let slot = game.world.slot_of(moving.into()).unwrap_or(0);
-        let number = manager.get::<i16>(MOVING_AT + 2).max(0) as usize;
-        return game.with_club(game.text(MOVING), (slot, number));
-    }
-    let season = cx.state.season.as_ref();
+/// What the board thinks of extending now (`FUN_00757631`): the text and
+/// its return. When the talks are open again — the confidence high enough
+/// and the block day past — the block day is cleared (rec +0x1f88 := 0).
+fn ladder(cx: &mut Cx, c: i32) -> (u16, i32) {
+    let (years_at, blocked_at) = super::kalkulation::own_manager(cx)
+        .map_or((0, 0), |m| {
+            (i32::from(m.get::<i16>(YEARS_AT)), i32::from(m.get::<i16>(BLOCKED_AT)))
+        });
     let today = cx.state.records.as_ref().map_or(0, |r| i32::from(r.globals.day()));
-    let month = season.map_or(1, |s| chrono::Datelike::month(&s.date()) as i32);
-    let years = i32::from(manager.get::<i16>(YEARS_AT)) - i32::from(month < 7);
-    let blocked = i32::from(manager.get::<i16>(BLOCKED_AT));
-    let text = match () {
-        _ if c < 60 => 3709,
-        _ if c < 70 => 3710,
-        _ if blocked > today + 80 => 3712,
-        _ if blocked > today => 3711,
-        _ if years == 1 && c < 90 => 3713,
-        _ if years >= 2 => 3714,
-        _ if years == 0 && c < 80 => 3715,
-        _ if (years == 0 && c < 90) || (years == 1 && c == 100) => 3716,
-        _ if years == 1 => 3718,
-        _ if years == 0 && c < 97 => 3719,
-        _ if years == 0 => 3720,
-        _ => 3721,
+    let month = cx.state.season.as_ref().map_or(1, |s| chrono::Datelike::month(&s.date()) as i32);
+    let years = years_at - i32::from(month < 7);
+    let (text, r) = match () {
+        _ if c < 60 => (3709, 0),
+        _ if c < 70 => (3710, 0),
+        _ if blocked_at > today + 80 => (3712, 0),
+        _ if blocked_at > today => (3711, 0),
+        _ if years == 1 && c < 90 => (3713, 0),
+        _ if years >= 2 => (3714, 0),
+        _ if years == 0 && c < 80 => (3715, 1),
+        _ if (years == 0 && c < 90) || (years == 1 && c == 100) => (3716, 2),
+        _ if years == 1 => (3718, 0),
+        _ if years == 0 && c < 97 => (3719, 1),
+        _ if years == 0 => (3720, 4),
+        _ => (3721, 0),
     };
+    if c >= 70 && blocked_at <= today && let Some(m) = manager_mut(cx) {
+        m.put(BLOCKED_AT, 0i16);
+    }
+    (text, r)
+}
+
+/// The state of a contract extension (`FUN_005b526d`): a talk booked with
+/// this board, moving away, or what the board thinks of extending now.
+fn extension_text(cx: &mut Cx, c: i32) -> String {
+    if own_talk_booked(cx) {
+        return cx.game.text(BOOKED_TALK).to_owned();
+    }
+    let (moving, number) = super::kalkulation::own_manager(cx)
+        .map_or((0, 0), |m| (m.get::<u8>(MOVING_AT), m.get::<i16>(MOVING_AT + 2)));
+    if moving != 0 {
+        let game = cx.game;
+        let slot = game.world.slot_of(moving.into()).unwrap_or(0);
+        return game.with_club(game.text(MOVING), (slot, number.max(0) as usize));
+    }
+    let game = cx.game;
+    let (text, _) = ladder(cx, c);
     game.text(text).to_owned()
 }

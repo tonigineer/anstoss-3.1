@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 
+use a3_core::contract;
 use a3_core::cycle::Negotiation;
 use a3_core::records::{Appointment, Records};
 use a3_core::season::Rules;
@@ -64,7 +65,7 @@ const KINDS: [(u8, u16, bool); 16] = [
 ];
 /// A negotiation with another human's club, which names the club: its
 /// country in the entry's player field, its number after.
-const WITH_CLUB: u8 = 0x14;
+const WITH_CLUB: u8 = a3_core::records::PLANNER_CLUB_KIND;
 const NEGOTIATION: u16 = 2220;
 /// The kinds 2 to 10 the original shows as missing.
 const MISSING: &str = " Fehlt !!!! ";
@@ -191,11 +192,13 @@ fn show_week(cx: &Cx, view: &mut View) -> [bool; WEEK] {
 #[derive(Default)]
 pub struct Planner {
     /// What is booked, with whom, and which days can be booked; a
-    /// negotiation's terms.
+    /// negotiation's terms; a contract talk's club number (the country
+    /// stands in `player`).
     kind: u8,
     player: u16,
     free: [bool; WEEK],
     negotiation: Option<Negotiation>,
+    club: i16,
 }
 
 /// The human manager's slot and his week: its first day and today.
@@ -235,12 +238,17 @@ impl Screen for Planner {
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
         self.negotiation = None;
+        self.club = 0;
         (self.kind, self.player) = match args {
             Args::Record(player) => (TALK, player),
             Args::Book(kind, player) => (kind, player),
             Args::Negotiation(n) => {
                 self.negotiation = Some(n);
                 (n.planner, n.player)
+            }
+            Args::WithClub(country, number) => {
+                self.club = number;
+                (contract::TALK_KIND, u16::from(country))
             }
             _ => return,
         };
@@ -298,10 +306,15 @@ impl Screen for Planner {
 impl Planner {
     /// The day booked in the planner; a negotiation also among the
     /// appointments, new (`FUN_00764cf8`, `FUN_00764f63`) or joined
-    /// (`FUN_007651de`) — the planner even when they are full.
+    /// (`FUN_007651de`) — the planner even when they are full. A contract
+    /// talk goes into the talks' shared list as well (`FUN_006a8d67`).
     fn book(&self, cx: &mut Cx, day: i16) {
         let Some((slot, ..)) = week(cx) else { return };
         let Some(records) = cx.state.records.as_mut() else { return };
+        if self.negotiation.is_none() && self.kind == contract::TALK_KIND {
+            contract::book_talk(records, slot, day, (self.player as u8, self.club));
+            return;
+        }
         if let Some(n) = self.negotiation
             && let Some(m) = records.managers.get(slot)
         {
