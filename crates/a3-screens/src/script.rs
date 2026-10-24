@@ -591,6 +591,33 @@ mod tests {
         runner.log.iter().filter(|line| **line == screen).count()
     }
 
+    /// A save of the game patched and written anew under `out`, in a copy
+    /// of the game's directory of symlinks with its own `saves`; the
+    /// directory to load the game from again.
+    fn patched(
+        dir: &std::path::Path,
+        name: &str,
+        out: &str,
+        patch: impl FnOnce(&mut a3_core::records::Records),
+    ) -> PathBuf {
+        use a3_core::records::Records;
+        let bytes = std::fs::read(dir.join(format!("saves/{name}.an3"))).unwrap();
+        let mut records = Records::from_save(a3_files::an3::Save::parse(&bytes).unwrap()).unwrap();
+        patch(&mut records);
+        let root = std::env::temp_dir().join(format!("a3-script-{out}"));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("saves")).unwrap();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() != "saves" {
+                std::os::unix::fs::symlink(entry.path(), root.join(entry.file_name())).unwrap();
+            }
+        }
+        let bytes = records.to_save().to_bytes_stored().unwrap();
+        std::fs::write(root.join(format!("saves/{out}.an3")), bytes).unwrap();
+        root
+    }
+
     /// A new game for two, played to the first matchday.
     const NEW_GAME: &str = include_str!("../scripts/new-game.txt");
 
@@ -1642,38 +1669,24 @@ mod tests {
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_board_books_a_talk_about_the_manager_s_own_contract() {
-        use a3_core::records::Records;
         let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
         // Probe1's manager has two years of contract left, enough for the
         // board to see no need; with none it is ready to talk and the
         // planner opens. The patched save sits in a copy of the game.
-        let bytes = std::fs::read(dir.join("saves/Probe1.an3")).unwrap();
-        let mut records = Records::from_save(a3_files::an3::Save::parse(&bytes).unwrap()).unwrap();
-        let slot = records.human_slot(0).unwrap();
-        records.managers[slot].put(0x172, 0i16);
-        let (today, start) =
-            (i32::from(records.globals.day()), i32::from(records.globals.week_start()));
-        let row = (0..7)
-            .find(|&i| {
-                let day = (start + i) as usize;
-                records.planners[slot].day(day).kind == 0 && start + i >= today
-            })
-            .unwrap();
-        let booked = start + row;
-        let root = std::env::temp_dir().join("a3-script-board-talk");
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("saves")).unwrap();
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let entry = entry.unwrap();
-            if entry.file_name() != "saves" {
-                std::os::unix::fs::symlink(entry.path(), root.join(entry.file_name())).unwrap();
-            }
-        }
-        std::fs::write(
-            root.join("saves/Probe2.an3"),
-            records.to_save().to_bytes_stored().unwrap(),
-        )
-        .unwrap();
+        let (mut row, mut booked) = (0, 0);
+        let root = patched(&dir, "Probe1", "board-talk", |records| {
+            let slot = records.human_slot(0).unwrap();
+            records.managers[slot].put(0x172, 0i16);
+            let (today, start) =
+                (i32::from(records.globals.day()), i32::from(records.globals.week_start()));
+            row = (0..7)
+                .find(|&i| {
+                    let day = (start + i) as usize;
+                    records.planners[slot].day(day).kind == 0 && start + i >= today
+                })
+                .unwrap();
+            booked = start + row;
+        });
         let mut game = Game::load(&root).unwrap();
         compose(&mut game);
 
@@ -1681,7 +1694,7 @@ mod tests {
             "now click bar 13\nuntil dialog 439\nnow choose 5387 0\nuntil dialog 412\n\
              now choose 5034 {row}"
         );
-        let Some(runner) = on_save(&game, "Probe2", &then) else { return };
+        let Some(runner) = on_save(&game, "board-talk", &then) else { return };
         assert_eq!(seen(&runner, 412), 1);
         assert_eq!(runner.host.view().id, 439);
         // The line now says the talk is booked.
@@ -1692,6 +1705,7 @@ mod tests {
         // the club.
         let state = runner.host.state();
         let records = state.records.as_ref().unwrap();
+        let slot = records.human_slot(0).unwrap();
         let manager = records.humans().next().unwrap();
         let team = records.team(manager.country(), manager.team()).unwrap();
         let b = records.block("0x1ba0438").unwrap();
@@ -1705,6 +1719,73 @@ mod tests {
         assert_eq!([day.kind, day.flag], [0x14, 1]);
         assert_eq!(day.player, u16::from(team.country()));
         assert_eq!(day.club, i16::from(team.number()));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_shows_the_club_s_shares_and_their_majority() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        // No club of Probe1's is on the stock market; put the manager's
+        // own there with a thousand shares and give his portfolio six
+        // hundred of them — a majority, which carries the confidence to
+        // its full.
+        let root = patched(&dir, "Probe1", "board-shares", |records| {
+            let index = records.human_slot(0).unwrap();
+            let manager = &records.managers[index];
+            let (country, number, slot) =
+                (manager.country(), manager.team(), a3_core::stock::place(records, index));
+            let b = records.block_mut("0x8be408").unwrap();
+            b[0..4].copy_from_slice(&1i32.to_le_bytes());
+            let e = 0x14;
+            b[e + 0x1c..e + 0x1e].copy_from_slice(&[country as u8, 0]);
+            b[e + 0x1e..e + 0x20].copy_from_slice(&(number as i16).to_le_bytes());
+            b[e + 0x20..e + 0x24].copy_from_slice(&1000i32.to_le_bytes());
+            let place = usize::try_from(slot - 1).unwrap_or(0);
+            let p = records.block_mut(&format!("0x8dc6e0[{place}]")).unwrap();
+            p[0] = 1;
+            p[0x34..0x38].copy_from_slice(&0i32.to_le_bytes());
+            p[0x3c..0x40].copy_from_slice(&600i32.to_le_bytes());
+        });
+        {
+            let bytes = std::fs::read(root.join("saves/board-shares.an3")).unwrap();
+            let save = a3_files::an3::Save::parse(&bytes).unwrap();
+            let b = save.block("0x8dc6e0[0]").unwrap();
+            eprintln!("written form {:?} head {:?}", b.form, &b.data[..0x40]);
+            let records = a3_core::records::Records::from_save(save).unwrap();
+            let b = records.block("0x8dc6e0[0]").unwrap();
+            eprintln!("loaded head {:?}", &b[..0x40]);
+        }
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let open = "now click bar 13\nuntil dialog 439";
+        let Some(runner) = on_save(&game, "board-shares", open) else { return };
+        let dialog = &game.dialogs[&439];
+        let text = |id| runner.host.view().text(control(dialog, id).unwrap()).to_owned();
+        let hidden = |id| runner.host.view().controls[control(dialog, id).unwrap()].hidden;
+        // The majority: all the confidence, and the shares' rows.
+        {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let index = records.human_slot(0).unwrap();
+            eprintln!(
+                "slot {} split {:?} majority {}",
+                a3_core::stock::place(records, index),
+                records
+                    .humans()
+                    .next()
+                    .and_then(|m| a3_core::stock::split(records, a3_core::stock::place(records, index), m.country() as u8, m.team() as i16)),
+                a3_core::stock::majority(records, index),
+            );
+        }
+        assert_eq!(text(2774), "100%");
+        assert_eq!(text(5371), "60.000%");
+        assert_eq!(text(5375), "40.000%");
+        assert_eq!(text(5361), dialog.controls[control(dialog, 5361).unwrap()].text);
+        assert!(!hidden(5371) && !hidden(5375) && !hidden(5369));
+        // The rows of the other humans: none, for Probe1 plays alone.
+        let alone = runner.host.state().records.as_ref().unwrap().humans().count() == 1;
+        assert_eq!(hidden(5372), !alone);
+        assert_eq!(hidden(5380), !alone);
     }
 
     #[test]

@@ -13,6 +13,7 @@ use a3_core::contract;
 use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::{BOARD, NOTICE};
 use a3_core::records::Manager;
+use a3_core::stock;
 use a3_core::season::Rules;
 use a3_files::rch::Dialog;
 
@@ -53,9 +54,15 @@ const CHART_TEXT: u16 = 5370;
 const KING: u16 = 2470;
 const MY_SHARES_TEXT: u16 = 5361;
 const NOT_LISTED: u16 = 4498;
-const SHARE_ROWS: [u16; 13] =
-    [5371, 5375, 5369, 5372, 5373, 5374, 5380, 5381, 5382, 5376, 5377, 5378, 5366];
-const SHARE_LABELS: [u16; 2] = [5367, 5368];
+/// The shares (§2.6): the manager's own holding, the rest and its label,
+/// and three rows of holding, name, "pro"/"contra" and "Aktienbesitz".
+const OWN_SHARES: u16 = 5371;
+const REST_SHARES: u16 = 5375;
+const REST_LABEL: u16 = 5369;
+const ROW_SHARES: [u16; 3] = [5372, 5373, 5374];
+const ROW_NAMES: [u16; 3] = [5380, 5381, 5382];
+const ROW_SIDES: [u16; 3] = [5376, 5377, 5378];
+const ROW_LABELS: [u16; 3] = [5366, 5367, 5368];
 /// The team's board mood and opposition (team +0x123, +0x871).
 const BOARD_AT: usize = 0x123;
 const OPPOSITION_AT: usize = 0x871;
@@ -140,7 +147,7 @@ impl Screen for Board {
         let club = game.club_name(cx.state.records.as_ref(), team.country(), team.number().into());
         let caption = super::finances::printf(game.text(CAPTION), &[&first(cx), &last(cx), &club]);
         set(view, dialog, CAPTION_ID, caption);
-        let c = manager.shown_confidence();
+        let c = confidence(cx);
         self.show(cx, view, c);
         // The opposition.
         let opposition = team.get::<u8>(OPPOSITION_AT);
@@ -152,14 +159,20 @@ impl Screen for Board {
         set(view, dialog, OPPOSITION_LIKES, likes);
         let state = OPPOSITION_TEXTS.saturating_sub(u16::from(opposition.min(6)));
         set(view, dialog, OPPOSITION_STATE, game.text(state).to_owned());
+        // The shares: no club of the replica's saves is on the market, so
+        // this reads "Keine AG" with its rows hidden.
+        let (slot, country, number) = (
+            cx.state.records.as_ref().and_then(|r| Some(stock::place(r, own_index(cx)?))).unwrap_or(0),
+            team.country(),
+            team.number().into(),
+        );
+        let split = cx
+            .state
+            .records
+            .as_ref()
+            .and_then(|r| stock::split(r, slot, country, number));
         set(view, dialog, EXTENSION, extension_text(cx, c));
-        // No club of the replica's saves is on the stock market.
-        set(view, dialog, MY_SHARES_TEXT, game.text(NOT_LISTED).to_owned());
-        for id in SHARE_ROWS.iter().chain(&SHARE_LABELS) {
-            if let Some(i) = control(dialog, *id) {
-                view.controls[i].hidden = true;
-            }
-        }
+        show_shares(cx, view, split);
         if let Some(c) = control(dialog, ACTIONS) {
             if opposition == 0
                 && let Some(options) = view.options_mut(c)
@@ -255,6 +268,72 @@ fn own_talk_booked(cx: &Cx) -> bool {
     })
 }
 
+/// The board's confidence as the screens show it: 100 for a manager
+/// holding the majority of his own club's shares (`FUN_007701b2`).
+fn confidence(cx: &Cx) -> i32 {
+    let (Some(records), Some(current)) = (cx.state.records.as_ref(), own_index(cx)) else {
+        return 0;
+    };
+    stock::confidence(records, current)
+}
+
+/// The manager's place among the managers in play.
+fn own_index(cx: &Cx) -> Option<usize> {
+    let current = cx.state.season.as_ref()?.current;
+    cx.state.records.as_ref()?.human_slot(current)
+}
+
+/// The shares as the board screen shows them (`FUN_005b548f`): the
+/// manager's own holding, the other humans' with their names, the rest —
+/// or "Keine AG" with all of the rows hidden when the club is not on the
+/// market. The refresh leaves all this alone.
+fn show_shares(cx: &Cx, view: &mut View, split: Option<stock::Split>) {
+    let dialog = cx.dialog;
+    let shown = |view: &mut View, id: u16, seen: bool| {
+        if let Some(i) = control(dialog, id) {
+            view.controls[i].hidden = !seen;
+        }
+    };
+    let Some(split) = split else {
+        set(view, dialog, MY_SHARES_TEXT, cx.game.text(NOT_LISTED).to_owned());
+        shown(view, OWN_SHARES, false);
+        shown(view, REST_SHARES, false);
+        shown(view, REST_LABEL, false);
+        for k in 0..3 {
+            for id in [ROW_SHARES[k], ROW_NAMES[k], ROW_SIDES[k], ROW_LABELS[k]] {
+                shown(view, id, false);
+            }
+        }
+        return;
+    };
+    // The own club's name stands in the file's own text here.
+    if let Some(i) = control(dialog, MY_SHARES_TEXT) {
+        set(view, dialog, MY_SHARES_TEXT, dialog.controls[i].text.clone());
+    }
+    let total = f64::from(split.total);
+    let percent = |shares: i32| format!("{:.3}%", f64::from(shares) * 100.0 / total);
+    set(view, dialog, OWN_SHARES, percent(split.own));
+    shown(view, OWN_SHARES, true);
+    let rest = split.total - split.own - split.others.iter().map(|&(_, h)| h).sum::<i32>();
+    set(view, dialog, REST_SHARES, percent(rest));
+    shown(view, REST_SHARES, true);
+    shown(view, REST_LABEL, true);
+    for k in 0..3 {
+        let name = split.others.get(k).map(|&(i, holding)| {
+            set(view, dialog, ROW_SHARES[k], percent(holding));
+            let manager = cx.state.records.as_ref().and_then(|r| r.managers.get(i));
+            let (first, last) = manager.map_or_else(|| (String::new(), String::new()), |m| (m.first_name(), m.last_name()));
+            format!("{first}, {last}")
+        });
+        if let Some(name) = name {
+            set(view, dialog, ROW_NAMES[k], name);
+        }
+        for id in [ROW_SHARES[k], ROW_NAMES[k], ROW_SIDES[k], ROW_LABELS[k]] {
+            shown(view, id, k < split.others.len());
+        }
+    }
+}
+
 /// A flag byte of the manager's record.
 fn manager_flag(cx: &Cx, at: usize) -> bool {
     super::kalkulation::own_manager(cx).is_some_and(|m| m.get::<u8>(at) & 1 != 0)
@@ -302,7 +381,7 @@ impl Board {
         let draw = cx.state.season.as_mut().map_or(0, |s| s.random.below(100));
         let Some(manager) = super::kalkulation::own_manager(cx) else { return TALKED };
         let (talks, talked) = (manager.get::<u8>(TALKS_AT), manager.get::<u8>(TALKED_AT));
-        let c = manager.shown_confidence();
+        let c = confidence(cx);
         if talked != 0 {
             return TALKED;
         }
@@ -346,7 +425,7 @@ impl Board {
     fn refresh(&self, cx: &mut Cx, view: &mut View) {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(manager) = super::kalkulation::own_manager(cx) else { return };
-        let c = manager.shown_confidence();
+        let c = confidence(cx);
         let likes = i32::from(manager.get::<i16>(OPPOSITION_POPULARITY_AT));
         self.show(cx, view, c);
         if own_team(cx).is_some_and(|t| t.get::<u8>(OPPOSITION_AT) >= 1) {
@@ -368,7 +447,7 @@ impl Board {
         let (country, number) = (team.country(), team.number().into());
         let (moving, leaving) =
             (manager.get::<u8>(MOVING_AT), manager.get::<i16>(MOVING_AT + 2));
-        let c = manager.shown_confidence();
+        let c = confidence(cx);
         if moving != 0 {
             self.sought = true;
             return Outcome::Popup(Request::with(
