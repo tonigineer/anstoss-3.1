@@ -702,6 +702,9 @@ record! {
     /// 1: he plays in his own team too, a player-manager (the manager
     /// object's +0x26).
     0x2e8 => playing, set_playing: i16;
+    /// What sets his standing apart from his level, in the bits of the
+    /// byte its lowest stands in (`FUN_006a61e5`; ERFOLGE.md B.2).
+    0x19c9 => level_bits, set_level_bits: u32;
 }
 
 /// The bits of a manager's options that choose the line-up's view.
@@ -830,6 +833,28 @@ impl Manager {
             + i32::from(c)
             + i32::from(d);
         sum.clamp(0, 100)
+    }
+
+    /// Where the manager stands among his kind, from nothing to fifteen
+    /// (`FUN_006a61e5`, ERFOLGE.md B.2): his level, with one for each of
+    /// the bits 0x40 and 0x10, two for 0x80 and 0x20, three for 8 and 4
+    /// and one off for 2 while he is below twelve, the 2 alone off at
+    /// twelve and above.
+    pub fn standing(&self) -> i32 {
+        let bits = self.level_bits();
+        let level = i32::from(self.level());
+        let mut standing = level;
+        if level < 12 {
+            for (bit, by) in [(0x40, 1), (0x80, 2), (0x20, 2), (0x10, 1), (8, 3), (4, 3), (2, -1)] {
+                if bits & bit != 0 {
+                    standing += by;
+                }
+            }
+            standing = standing.min(12);
+        } else if bits & 2 != 0 {
+            standing -= 1;
+        }
+        standing.clamp(0, 15)
     }
 }
 

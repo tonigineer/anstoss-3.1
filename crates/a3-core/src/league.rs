@@ -1,8 +1,10 @@
 //! What a club's place in its league is worth (VEREINSFUEHRUNG.md §4.4):
 //! the class of season goal the place reaches, from the program's table
 //! by the league's size (`FUN_007760ce`, `FUN_0077600e`, `FUN_00424050`,
-//! `FUN_00635a35`). The board asks this when it weighs letting its
-//! manager go.
+//! `FUN_00635a35`), how far the place stands under the goal or short of
+//! it (`FUN_00775e0a`, `FUN_00775d3c`) and the matchdays played
+//! (`FUN_00692744`). The board asks all of this when it weighs letting
+//! its manager go.
 
 use std::io;
 
@@ -108,4 +110,75 @@ pub fn class(records: &Records, tables: &LeagueTables, team: &Team) -> i32 {
 /// The season's own goal (team +0x136): the class the board set itself.
 pub fn goal(team: &Team) -> i32 {
     i32::from(team.get::<i8>(GOAL_AT))
+}
+
+/// Where the club stands in its league (team +0x132): nought for a club
+/// outside the table.
+pub fn place(team: &Team) -> i32 {
+    i32::from(team.get::<u8>(PLACE_AT))
+}
+
+/// The matchdays played in the club's league (`FUN_00692744`); nothing
+/// for a league of the sixth level and above, which keeps none of its
+/// own. They stand at the league's object +0x66.
+pub fn matchdays(records: &Records, team: &Team) -> usize {
+    let level = team.get::<u8>(LEVEL_AT);
+    if level >= OWN_SIZE {
+        return 0;
+    }
+    crate::opponent::League::of(records, team.country().into(), level).map_or(0, |l| l.played())
+}
+
+/// The class table's row the goal helpers take: eight rows for the
+/// league's size, unlike the sixteen `class` reads.
+const GOAL_ROWS: i32 = 8;
+/// How the helpers read the table: the entry of a place, and one further
+/// on for each step of their walk, as the original's two addresses do.
+fn step(tables: &LeagueTables, row: i32, place: i32) -> i32 {
+    let at = usize::try_from(row * CLASS_PLACES as i32 + place).unwrap_or(usize::MAX);
+    tables.class.get(at).copied().map_or(0, i32::from)
+}
+
+fn goal_row(teams: i32) -> i32 {
+    ((teams - 10) / 2).clamp(0, GOAL_ROWS - 1)
+}
+
+/// How far the club stands under its season's goal, reached
+/// (`FUN_00775e0a`): nought when its place's class is not short of the
+/// goal, else the places the club could still gain and stay under it.
+pub fn goal_reached(records: &Records, tables: &LeagueTables, team: &Team) -> i32 {
+    let (place, goal) = (place(team), goal(team));
+    let teams = teams(records, team.country(), team.get::<u8>(LEVEL_AT));
+    if place < 1 || teams < place {
+        return 0;
+    }
+    let row = goal_row(teams);
+    if step(tables, row, place) >= goal {
+        return 0;
+    }
+    let mut at = place;
+    while at < teams && step(tables, row, at + 1) < goal {
+        at += 1;
+    }
+    at - place
+}
+
+/// How many places the club lacks for its season's goal
+/// (`FUN_00775d3c`): nought when its place's class is not past the goal,
+/// else the places it would have to fall to reach it.
+pub fn goal_missing(records: &Records, tables: &LeagueTables, team: &Team) -> i32 {
+    let (place, goal) = (place(team), goal(team));
+    let teams = teams(records, team.country(), team.get::<u8>(LEVEL_AT));
+    if place < 1 || teams < place {
+        return 0;
+    }
+    let row = goal_row(teams);
+    if goal >= step(tables, row, place) {
+        return 0;
+    }
+    let mut at = place - 2;
+    while at > -1 && goal < step(tables, row, at + 1) {
+        at -= 1;
+    }
+    place - at - 1
 }

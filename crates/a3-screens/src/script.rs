@@ -1770,10 +1770,12 @@ mod tests {
             eprintln!(
                 "slot {} split {:?} majority {}",
                 a3_core::stock::place(records, index),
-                records
-                    .humans()
-                    .next()
-                    .and_then(|m| a3_core::stock::split(records, a3_core::stock::place(records, index), m.country() as u8, m.team() as i16)),
+                records.humans().next().and_then(|m| a3_core::stock::split(
+                    records,
+                    a3_core::stock::place(records, index),
+                    m.country() as u8,
+                    m.team() as i16
+                )),
                 a3_core::stock::majority(records, index),
             );
         }
@@ -1790,14 +1792,181 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_agrees_to_a_resignation_its_flags_stand_with() {
+        let game = game();
+        // The question comes first, and the board's own flags (§0's
+        // +0xdf1) answer it with agreement (§4.5's first step).
+        let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 4";
+        let Some(runner) = on_save(&game, "Probe1", &format!("{ask}\nuntil dialog 384")) else {
+            return;
+        };
+        let question = &game.dialogs[&384];
+        let asked = runner.host.view().text(control(question, 4738).unwrap()).to_owned();
+        assert_eq!(asked, game.text(3888));
+        // No to it: the board says nothing, fills nothing anew.
+        let no =
+            on_save(&game, "Probe1", &format!("{ask}\nuntil dialog 384\nnow press 4739")).unwrap();
+        assert_eq!(seen(&no, 380), 0);
+        assert_eq!(no.host.view().id, 439);
+        // Yes: the flags say the board has agreed, whatever the season.
+        let agreed = patched(
+            &PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap()),
+            "Probe1",
+            "board-agreed",
+            |records| {
+                let index = records.human_slot(0).unwrap();
+                let (country, number) =
+                    (records.managers[index].country(), records.managers[index].team());
+                records.team_mut(country, number).unwrap().put(0x303, 4u8);
+            },
+        );
+        let mut game = Game::load(&agreed).unwrap();
+        compose(&mut game);
+        let yes = on_save(
+            &game,
+            "board-agreed",
+            &format!("{ask}\nuntil dialog 384\nnow press 4741\nuntil dialog 380"),
+        )
+        .unwrap();
+        let notice = &game.dialogs[&380];
+        assert_eq!(
+            yes.host.view().text(control(notice, 4730).unwrap()).to_owned(),
+            game.text(1803)
+        );
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_refuses_a_resignation_at_the_seasons_start() {
+        let game = game();
+        // Ulm's nerves about him are at full hundred and its board has
+        // no flags up: the season has played no matchday, so the request
+        // is refused (§4.5's third step, as on screen v16 and v17).
+        let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 4\nuntil dialog 384\n\
+                   now press 4741\nuntil dialog 380";
+        let Some(runner) = on_save(&game, "Probe1", ask) else { return };
+        let notice = &game.dialogs[&380];
+        let text = runner.host.view().text(control(notice, 4730).unwrap()).to_owned();
+        assert_eq!(text, game.text(1805));
+        // Refused: the board fills itself anew and stays.
+        assert_eq!(seen(&runner, 439), 1);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_holds_to_its_manager_through_the_season() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        // Twelve matchdays played, a place in the table and its goal: the
+        // season's middle. The board holds to its manager whatever the
+        // goal stands at, for `FUN_00775e0a` answers nought or more.
+        let root = patched(&dir, "Probe1", "board-holds", |records| {
+            let index = records.human_slot(0).unwrap();
+            let (country, number) =
+                (records.managers[index].country(), records.managers[index].team());
+            let level = records.team(country, number).unwrap().get::<u8>(0x12e);
+            let league =
+                i32::from(records.countries.first_league(usize::from(country))) + i32::from(level);
+            let played = 12i16.to_le_bytes();
+            records.block_mut(&format!("{:#x}[{league}]", 0x1a09d48)).unwrap()[0x46..0x48]
+                .copy_from_slice(&played);
+            let team = records.team_mut(country, number).unwrap();
+            team.put(0x132, 6u8);
+            team.put(0x136, 2i8);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 4\nuntil dialog 384\n\
+                   now press 4741\nuntil dialog 380";
+        let Some(runner) = on_save(&game, "board-holds", ask) else { return };
+        let notice = &game.dialogs[&380];
+        let text = runner.host.view().text(control(notice, 4730).unwrap()).to_owned();
+        assert_eq!(text, game.text(1808));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_weighs_a_resignation_late_in_the_season() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        // Forty matchdays played and the board not thinking well of him:
+        // what the club's content with him (28) is against his standing
+        // and twenty decides.
+        let late = |out: &str, level: u8| {
+            patched(&dir, "Probe1", out, |records| {
+                let index = records.human_slot(0).unwrap();
+                let (country, number) =
+                    (records.managers[index].country(), records.managers[index].team());
+                let level_of = records.team(country, number).unwrap().get::<u8>(0x12e);
+                let league = i32::from(records.countries.first_league(usize::from(country)))
+                    + i32::from(level_of);
+                let played = 40i16.to_le_bytes();
+                records.block_mut(&format!("{:#x}[{league}]", 0x1a09d48)).unwrap()[0x46..0x48]
+                    .copy_from_slice(&played);
+                let manager = &mut records.managers[index];
+                manager.set_confidence(50);
+                manager.set_level(level);
+            })
+        };
+        let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 4\nuntil dialog 384\n\
+                   now press 4741\nuntil dialog 380";
+        let notice = |game: &Game, runner: &Runner| {
+            let dialog = &game.dialogs[&380];
+            runner.host.view().text(control(dialog, 4730).unwrap()).to_owned()
+        };
+        // Two of a standing and twenty short of the club's content with
+        // him: the board thinks it may be better so.
+        let game = {
+            let root = late("board-better", 2);
+            let mut game = Game::load(&root).unwrap();
+            compose(&mut game);
+            game
+        };
+        let runner = on_save(&game, "board-better", ask).unwrap();
+        assert_eq!(notice(&game, &runner), game.text(1806));
+        // At a standing of twelve the content is not past what the board
+        // weighs against it, and it will hear of nothing.
+        let root = late("board-no-way", 12);
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let runner = on_save(&game, "board-no-way", ask).unwrap();
+        assert_eq!(notice(&game, &runner), game.text(1807));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_lets_a_manager_without_nerves_go() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        // Nerves well under sixty: the board has understanding for him
+        // and takes the resignation, which ends his turn (§1's -3).
+        let root = patched(&dir, "Probe1", "board-resigned", |records| {
+            let index = records.human_slot(0).unwrap();
+            records.managers[index].put(0x11e, 40i16);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 4\nuntil dialog 384\n\
+                   now press 4741\nuntil dialog 380";
+        let Some(runner) = on_save(&game, "board-resigned", ask) else { return };
+        let notice = &game.dialogs[&380];
+        let text = runner.host.view().text(control(notice, 4730).unwrap()).to_owned();
+        assert_eq!(text, game.text(1804));
+        // The yes to its alert ends the turn as EndDialog(-3) does: the
+        // board is closed, and the next manager's turn opens.
+        let over =
+            on_save(&game, "board-resigned", &format!("{ask}\nnow press 4731\nuntil dialog 302"))
+                .unwrap();
+        assert_eq!(over.host.view().id, 302);
+        assert_eq!(seen(&over, 380), 1);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_board_answers_the_release_asked() {
         let game = game();
         let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 3\nuntil dialog 380";
         let Some(runner) = on_save(&game, "Probe1", ask) else { return };
         let notice = &game.dialogs[&380];
-        let text = |runner: &Runner| {
-            runner.host.view().text(control(notice, 4730).unwrap()).to_owned()
-        };
+        let text =
+            |runner: &Runner| runner.host.view().text(control(notice, 4730).unwrap()).to_owned();
         // Ulm stands under its goal, but one year of contract left is not
         // more than the season: the club will not hear of it, and the ask
         // costs five with the board.
@@ -1825,10 +1994,7 @@ mod tests {
             records.managers[index].put(0x180, 3i16);
             let manager = &records.managers[index];
             let (country, number) = (manager.country(), manager.team());
-            records
-                .team_mut(country, number)
-                .unwrap()
-                .put(a3_core::league::NO_PLACE_AT, 5i8);
+            records.team_mut(country, number).unwrap().put(a3_core::league::NO_PLACE_AT, 5i8);
         });
         let mut game = Game::load(&root).unwrap();
         compose(&mut game);

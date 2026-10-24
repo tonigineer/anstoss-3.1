@@ -2,19 +2,20 @@
 //! VEREINSFUEHRUNG.md in the RE repo): the board's confidence in the
 //! manager with the president's face and its history, the opposition, the
 //! state of a contract extension, the club's shares; five things to try
-//! with the board and the trophy hall. Four of the actions work: seeking
-//! a contract extension, a talk with the board, flattering the
-//! opposition and asking for a release. The resignation and the hall are
+//! with the board and the trophy hall. All five actions work: seeking a
+//! contract extension, a talk with the board, flattering the
+//! opposition, asking for a release and resigning, whose end of the
+//! manager's turn the bar's own exit already carries. The trophy hall is
 //! not built yet.
 
 use std::collections::HashMap;
 
 use a3_core::contract;
 use a3_core::cycle::Request;
-use a3_core::cycle::dialogs::{BOARD, NOTICE};
+use a3_core::cycle::dialogs::{BOARD, NOTICE, QUESTION};
 use a3_core::records::Manager;
-use a3_core::stock;
 use a3_core::season::Rules;
+use a3_core::stock;
 use a3_files::rch::Dialog;
 
 use super::hub::{self, BOARD_SYMBOL};
@@ -91,10 +92,11 @@ const RELEASE_ASKED: u32 = 0x1000;
 const CONFIDENCE_AT: usize = 0x184;
 const CRAWLED_AT: usize = 0x19a;
 /// The items built: seeking a contract extension, a talk with the board,
-/// flattering the opposition, asking for a release.
+/// flattering the opposition, asking for a release, and resigning.
 const EXTEND: usize = 0;
 const TALK: usize = 1;
 const RELEASE: usize = 3;
+const RESIGN: usize = 4;
 /// Talked already, no reason to; the first talk's three outcomes by the
 /// draw, the second's, the later ones'.
 const TALKED: u16 = 3763;
@@ -128,6 +130,34 @@ const HEAVY_HEART: u16 = 1813;
 const NOT_THINKING: u16 = 1814;
 /// Asking costs five with the board, unheld.
 const RELEASE_COST: i16 = 5;
+/// Resigning (§4.5): the question first, then the board's eight answers.
+const RESIGN_QUESTION: u16 = 3888;
+const AGREED: u16 = 1803;
+const UNDERSTANDING: u16 = 1804;
+const DECLINED: u16 = 1805;
+const BETTER_SO: u16 = 1806;
+const NO_WAY: u16 = 1807;
+const GOOD_WORK: u16 = 1808;
+const SORRY_TAKEN: u16 = 1809;
+const TOGETHER: u16 = 1810;
+/// What the board weighs a resignation by: its own flags (team +0x303,
+/// the club's +0xdf1) and the manager's nerves (rec +0x11e); the
+/// matchdays before which it refuses and after which it weighs the
+/// season, the places off the goal which count, the confidence which
+/// takes the season's weight off, and what the manager's standing and
+/// the club's content with him (team +0x302, the club's +0xdf0; what
+/// moves it is not known) must be underpassed to let him go.
+const CLUB_FLAGS_AT: usize = 0x303;
+const RESIGN_FLAGS: u8 = 0xc;
+const NERVES_AT: usize = 0x11e;
+const NERVES_LIMIT: i16 = 60;
+const EARLY_LIMIT: usize = 5;
+const LATE_LIMIT: usize = 31;
+const FAR_OFF: i32 = 2;
+const EASED_LIMIT: i32 = 59;
+const STANDING_LEEWAY: i32 = 20;
+const CONTENT_AT: usize = 0x302;
+const CONTENT_LIMIT: u8 = 0x47;
 
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     let Some(dialog) = dialogs.get_mut(&BOARD) else { return };
@@ -148,6 +178,11 @@ pub struct Board {
     sought: bool,
     /// Whether the planner now up is to book the talk with the board.
     booking: bool,
+    /// Whether the question of a resignation is up.
+    retiring: bool,
+    /// Whether the alert now up is the board's yes to a resignation;
+    /// after it the manager's turn ends.
+    retired: bool,
 }
 
 impl Screen for Board {
@@ -181,15 +216,15 @@ impl Screen for Board {
         // The shares: no club of the replica's saves is on the market, so
         // this reads "Keine AG" with its rows hidden.
         let (slot, country, number) = (
-            cx.state.records.as_ref().and_then(|r| Some(stock::place(r, own_index(cx)?))).unwrap_or(0),
+            cx.state
+                .records
+                .as_ref()
+                .and_then(|r| Some(stock::place(r, own_index(cx)?)))
+                .unwrap_or(0),
             team.country(),
             team.number().into(),
         );
-        let split = cx
-            .state
-            .records
-            .as_ref()
-            .and_then(|r| stock::split(r, slot, country, number));
+        let split = cx.state.records.as_ref().and_then(|r| stock::split(r, slot, country, number));
         set(view, dialog, EXTENSION, extension_text(cx, c));
         show_shares(cx, view, split);
         if let Some(c) = control(dialog, ACTIONS) {
@@ -205,6 +240,7 @@ impl Screen for Board {
                 item == EXTEND
                     || item == TALK
                     || item == RELEASE
+                    || item == RESIGN
                     || (item == FLATTER && opposition != 0)
             }
             Target::Button(c) if dialog.controls[c].id == Some(TROPHIES) => false,
@@ -229,6 +265,7 @@ impl Screen for Board {
             EXTEND => self.seek(cx),
             TALK => Outcome::Popup(Request::with(NOTICE, Args::Text(self.talk(cx)))),
             RELEASE => self.release(cx),
+            RESIGN => self.resign(),
             FLATTER => {
                 let crawled = manager_flag(cx, CRAWLED_AT);
                 self.flattered = !crawled;
@@ -248,10 +285,12 @@ impl Screen for Board {
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
         }
-        let (flattered, sought, booking) = (
+        let (flattered, sought, booking, retiring, retired) = (
             std::mem::take(&mut self.flattered),
             std::mem::take(&mut self.sought),
             std::mem::take(&mut self.booking),
+            std::mem::take(&mut self.retiring),
+            std::mem::take(&mut self.retired),
         );
         if flattered {
             self.crawl(cx);
@@ -260,6 +299,21 @@ impl Screen for Board {
         // plain again after.
         if let Some(c) = control(cx.dialog, ACTIONS) {
             view.set_chosen(c, NONE);
+        }
+        if retired {
+            // The board's yes taken in: EndDialog(-3), and the manager's
+            // turn ends (§1). What the game makes of a manager who has
+            // his club no more is not built.
+            return if reply == Reply::Ok { Outcome::Close(Reply::Ok) } else { Outcome::Stay };
+        }
+        if retiring {
+            if reply != Reply::Ok {
+                // No to the question: nothing at all, not even a refresh.
+                return Outcome::Stay;
+            }
+            let (text, taken) = self.retirement(cx);
+            self.retired = taken;
+            return Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
         }
         if booking {
             // The planner closing changes only the extension's line, and
@@ -345,7 +399,10 @@ fn show_shares(cx: &Cx, view: &mut View, split: Option<stock::Split>) {
         let name = split.others.get(k).map(|&(i, holding)| {
             set(view, dialog, ROW_SHARES[k], percent(holding));
             let manager = cx.state.records.as_ref().and_then(|r| r.managers.get(i));
-            let (first, last) = manager.map_or_else(|| (String::new(), String::new()), |m| (m.first_name(), m.last_name()));
+            let (first, last) = manager.map_or_else(
+                || (String::new(), String::new()),
+                |m| (m.first_name(), m.last_name()),
+            );
             format!("{first}, {last}")
         });
         if let Some(name) = name {
@@ -468,9 +525,8 @@ impl Board {
     /// The answer to the ask, and what it writes (§4.4's fourth step).
     fn freedom(&mut self, cx: &mut Cx, index: usize) -> u16 {
         let granted = |cx: &Cx| {
-            super::kalkulation::own_manager(cx).is_some_and(|m| {
-                m.get::<u8>(RELEASE_GRANTED_AT) & 1 != 0
-            })
+            super::kalkulation::own_manager(cx)
+                .is_some_and(|m| m.get::<u8>(RELEASE_GRANTED_AT) & 1 != 0)
         };
         if granted(cx) {
             return RELEASED;
@@ -489,9 +545,8 @@ impl Board {
             let v = manager.get::<i16>(CONFIDENCE_AT).wrapping_sub(RELEASE_COST);
             manager.put(CONFIDENCE_AT, v);
         }
-        let (ready, years) = super::kalkulation::own_manager(cx).map_or((false, 0), |m| {
-            (confidence(cx) < 80, m.get::<i16>(RELEASE_YEARS_AT))
-        });
+        let (ready, years) = super::kalkulation::own_manager(cx)
+            .map_or((false, 0), |m| (confidence(cx) < 80, m.get::<i16>(RELEASE_YEARS_AT)));
         let missed = match (own_team(cx), cx.state.records.as_ref()) {
             (Some(team), Some(records)) => {
                 a3_core::league::class(records, &cx.game.rules.league, team)
@@ -513,6 +568,68 @@ impl Board {
             manager.put(RELEASE_GRANTED_AT, 1u8);
             let v = manager.get::<u16>(RELEASE_ANSWERED_AT) | 8;
             manager.put(RELEASE_ANSWERED_AT, v);
+        }
+    }
+
+    /// Resigning (`FUN_005b6b0c`): the board asks first.
+    fn resign(&mut self) -> Outcome {
+        self.retiring = true;
+        Outcome::Popup(Request::with(QUESTION, Args::Text(RESIGN_QUESTION)))
+    }
+
+    /// The board's answer to the resignation, and whether it takes it.
+    fn retirement(&self, cx: &Cx) -> (u16, bool) {
+        let (Some(records), Some(team)) = (cx.state.records.as_ref(), own_team(cx)) else {
+            return (GOOD_WORK, false);
+        };
+        let holds = own_index(cx).is_some_and(|i| stock::majority(records, i));
+        if holds || team.get::<u8>(CLUB_FLAGS_AT) & RESIGN_FLAGS != 0 {
+            return (AGREED, true);
+        }
+        let nerves = super::kalkulation::own_manager(cx).map_or(0, |m| m.get::<i16>(NERVES_AT));
+        if nerves < NERVES_LIMIT {
+            return (UNDERSTANDING, true);
+        }
+        let played = a3_core::league::matchdays(records, team);
+        if played < EARLY_LIMIT {
+            return (DECLINED, false);
+        }
+        let tables = &cx.game.rules.league;
+        let middle = played < LATE_LIMIT
+            || (a3_core::league::goal_missing(records, tables, team) < FAR_OFF
+                && confidence(cx) > EASED_LIMIT);
+        if middle {
+            return self.hold_on(records, team, tables);
+        }
+        let standing = super::kalkulation::own_manager(cx).map_or(0, |m| m.standing());
+        if i32::from(team.get::<u8>(CONTENT_AT)) > standing + STANDING_LEEWAY {
+            (BETTER_SO, true)
+        } else {
+            (NO_WAY, false)
+        }
+    }
+
+    /// The board holds to its manager: its answer through the middle of
+    /// the season, and late when the goal hardly stands in the way.
+    fn hold_on(
+        &self,
+        records: &a3_core::records::Records,
+        team: &a3_core::records::Team,
+        tables: &a3_core::league::LeagueTables,
+    ) -> (u16, bool) {
+        let reached = a3_core::league::goal_reached(records, tables, team);
+        let place = a3_core::league::place(team);
+        // `FUN_00775e0a` answers nought or more, whatever the season
+        // stands at: the original reaches 1809 and 1810 never, its test
+        // of a negative answer holds for none of them.
+        if reached < 0 && (place == 0 || place > 3) {
+            if team.get::<u8>(CONTENT_AT) < CONTENT_LIMIT {
+                (TOGETHER, false)
+            } else {
+                (SORRY_TAKEN, true)
+            }
+        } else {
+            (GOOD_WORK, false)
         }
     }
 
@@ -553,8 +670,7 @@ impl Board {
             return Outcome::Stay;
         };
         let (country, number) = (team.country(), team.number().into());
-        let (moving, leaving) =
-            (manager.get::<u8>(MOVING_AT), manager.get::<i16>(MOVING_AT + 2));
+        let (moving, leaving) = (manager.get::<u8>(MOVING_AT), manager.get::<i16>(MOVING_AT + 2));
         let c = confidence(cx);
         if moving != 0 {
             self.sought = true;
@@ -563,9 +679,10 @@ impl Board {
                 Args::TextForClub(LEAVING, moving, leaving),
             ));
         }
-        let booked = cx.state.records.as_ref().zip(cx.state.season.as_ref()).is_some_and(
-            |(r, s)| r.human_slot(s.current).is_some_and(|i| contract::talk_in_week(r, i)),
-        );
+        let booked =
+            cx.state.records.as_ref().zip(cx.state.season.as_ref()).is_some_and(|(r, s)| {
+                r.human_slot(s.current).is_some_and(|i| contract::talk_in_week(r, i))
+            });
         if booked {
             self.sought = true;
             return Outcome::Popup(Request::with(NOTICE, Args::Text(TALKING)));
@@ -647,10 +764,9 @@ impl Board {
 /// its return. When the talks are open again — the confidence high enough
 /// and the block day past — the block day is cleared (rec +0x1f88 := 0).
 fn ladder(cx: &mut Cx, c: i32) -> (u16, i32) {
-    let (years_at, blocked_at) = super::kalkulation::own_manager(cx)
-        .map_or((0, 0), |m| {
-            (i32::from(m.get::<i16>(YEARS_AT)), i32::from(m.get::<i16>(BLOCKED_AT)))
-        });
+    let (years_at, blocked_at) = super::kalkulation::own_manager(cx).map_or((0, 0), |m| {
+        (i32::from(m.get::<i16>(YEARS_AT)), i32::from(m.get::<i16>(BLOCKED_AT)))
+    });
     let today = cx.state.records.as_ref().map_or(0, |r| i32::from(r.globals.day()));
     let month = cx.state.season.as_ref().map_or(1, |s| chrono::Datelike::month(&s.date()) as i32);
     let years = years_at - i32::from(month < 7);
@@ -668,7 +784,10 @@ fn ladder(cx: &mut Cx, c: i32) -> (u16, i32) {
         _ if years == 0 => (3720, 4),
         _ => (3721, 0),
     };
-    if c >= 70 && blocked_at <= today && let Some(m) = manager_mut(cx) {
+    if c >= 70
+        && blocked_at <= today
+        && let Some(m) = manager_mut(cx)
+    {
         m.put(BLOCKED_AT, 0i16);
     }
     (text, r)
