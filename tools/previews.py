@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Draws the overview page's preview GIFs: one per area of index.html, plus a
+tour of the menu bar.
+
+Every frame is a run of the replica without a window (`--script … --shot …`):
+a savegame or a new game, the clicks to one screen, and the screen it ends
+on, drawn in the classic look. A frame that does not end on the screen it is
+meant for is left out and named, so a GIF never shows a wrong screen.
+
+The GIFs are made of the game's own graphics, so they go to `previews/`,
+which git ignores — like the game, they are not part of the repository.
+
+    cargo build --release -p a3-app
+    python3 -I tools/previews.py            # all GIFs
+    python3 -I tools/previews.py squad      # only these
+
+It needs ImageMagick (`magick`) and gifsicle, and the oracle's game folder
+with its kept saves (see tools/oracle/setup.sh).
+"""
+
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+REPLICA = ROOT / "target/release/anstoss3-menu"
+ORACLE = Path.home() / ".cache/anstoss3-menu/oracle"
+OUT = ROOT / "previews"
+LOAD = (ROOT / "crates/a3-screens/scripts/load.txt").read_text()
+# The new-game script without its last line, so a frame can stop on any
+# dialog on the way: its `on` lines answer everything before.
+NEW_GAME = "".join(
+    line for line in (ROOT / "crates/a3-screens/scripts/new-game.txt").read_text().splitlines(True)
+    if not line.startswith("until")
+)
+DELAY = 140  # hundredths of a second per frame
+
+
+def bar(symbol, dialog, *then):
+    """A frame on A.an3: menu-bar symbol (1-19, as the page counts), then actions."""
+    return ("A.an3", [f"now click bar {symbol - 1}", f"until dialog {dialog}", *then])
+
+
+def on_a(*lines):
+    return ("A.an3", list(lines))
+
+
+def new_game(dialog):
+    return (None, [f"until dialog {dialog}"])
+
+
+def menu(symbol, dialog, combo, item, target):
+    return bar(symbol, dialog, f"now choose {combo} {item}", f"until dialog {target}")
+
+
+# Area → frames as (save, script lines after loading it, the dialog it must end on).
+AREAS = {
+    "tour": [
+        (*on_a("until dialog 147"), 147),
+        *[(*bar(s, d), d) for s, d in [
+            (2, 78), (3, 271), (4, 345), (5, 346), (6, 347), (7, 348), (8, 413), (9, 349),
+            (10, 417), (11, 218), (12, 464), (13, 404), (14, 439), (17, 175), (18, 302)]],
+    ],
+    "start": [(*new_game(d), d) for d in (9, 140, 209, 212, 374, 99, 103)],
+    "week": [(*new_game(2), 2), (*bar(8, 413), 413)],
+    "lineup": [(*on_a("until dialog 147"), 147),
+               *[(*on_a(f"now choose 5266 {i}", f"until dialog {d}"), d)
+                 for i, d in [(0, 429), (1, 244), (3, 418), (6, 151), (7, 83)]]],
+    "players": [(*on_a(f"now rclick 2510; choose 9950 {i}", f"until dialog {d}"), d)
+                for i, d in [(0, 399), (1, 412), (3, 195), (4, 85)]],
+    "comparison": [(*bar(2, 78), 78), (*bar(2, 78, "now choose 5618 1"), 78),
+                   (*bar(2, 78, "now choose 5618 1", "now click at 93 248"), 78)],
+    "tactics": [(*bar(3, 271), 271)],
+    "long": [(*bar(4, 345), 345), (*bar(4, 345, "now choose 5035 2"), 345),
+             (*bar(4, 345, "now choose 5035 2", "now click at 134 130"), 345)],
+    "short": [(*bar(5, 346), 346), (*bar(5, 346, "now choose 5035 4"), 346),
+              (*bar(5, 346, "now choose 5035 4", "now click 4427", "now row 4427 3"), 346)],
+    "individual": [(*bar(6, 347), 347), (*bar(6, 347, "now cell 3298 1 8"), 347)],
+    "calendar": [(*bar(7, 348), 348), (*bar(7, 348, "now drag at 544 355 to 244 180"), 348)],
+    "planner": [(*bar(8, 413), 413)],
+    "balance": [(*bar(9, 349), 349), (*bar(9, 349, "now press 4461", "until dialog 16"), 16),
+                (*bar(9, 349, "now press 4462", "until dialog 335"), 335)],
+    "finances": [(*bar(10, 417), 417)],
+    "squad": [(*bar(11, 218), 218),
+              *[(*menu(11, 218, 5042, i, d), d) for i, d in
+                [(0, 216), (1, 219), (2, 428), (3, 427), (4, 92), (5, 300), (6, 217)]],
+              *[(*menu(11, 218, 6371, i, d), d) for i, d in
+                [(0, 287), (1, 25), (2, 27), (3, 107), (4, 306), (5, 462), (6, 154), (7, 156)]]],
+    "stadium": [(*bar(12, 464), 464), (*bar(12, 464, "now click at 311 145", "until dialog 463"), 463),
+                (*bar(12, 464, "now press 5861", "until dialog 466"), 466),
+                # The page lists contacts, the board and the honours in the stadium's card.
+                (*bar(13, 404), 404), (*bar(14, 439), 439), (*menu(14, 439, 5387, 4, 384), 384),
+                (*bar(17, 175), 175)],
+    "options": [(*bar(18, 302), 302), (*menu(18, 302, 4035, 4, 384), 384)],
+}
+
+
+def game_dir(tmp, save):
+    """The oracle's game folder with only `save` among its saves."""
+    folder = tmp / (save or "new")
+    if not folder.exists():
+        (folder / "saves").mkdir(parents=True)
+        for entry in (ORACLE / "game").iterdir():
+            if entry.name != "saves":
+                (folder / entry.name).symlink_to(entry)
+        if save:
+            shutil.copy(ORACLE / "saves-kept" / save, folder / "saves" / save)
+    return folder
+
+
+def shoot(tmp, save, lines, want, out):
+    script = tmp / "frame.txt"
+    script.write_text((LOAD if save else NEW_GAME) + "\n".join(lines) + "\n")
+    run = subprocess.run([REPLICA, game_dir(tmp, save), "--script", script, "--shot", out],
+                         capture_output=True, text=True)
+    screens = re.findall(r"^screen (\d+)", run.stdout, re.M)
+    ended = screens[-1] if screens else "none"
+    if run.returncode != 0 or ended != str(want) or not out.exists():
+        reason = run.stderr.strip().splitlines()[-1:] or [f"ended on {ended}"]
+        print(f"  left out: {' / '.join(lines)} (wanted {want}; {reason[0]})")
+        return False
+    return True
+
+
+def main():
+    if not REPLICA.exists():
+        sys.exit(f"{REPLICA} is missing: cargo build --release -p a3-app")
+    wanted = sys.argv[1:] or list(AREAS)
+    OUT.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for name in wanted:
+            frames = []
+            for i, (save, lines, want) in enumerate(AREAS[name]):
+                png = tmp / f"{name}-{i:02}.png"
+                if shoot(tmp, save, lines, want, png):
+                    frames.append(png)
+            if not frames:
+                print(f"{name}: no frames")
+                continue
+            gif = OUT / f"{name}.gif"
+            subprocess.run(["magick", "-delay", str(DELAY), "-loop", "0", *frames, gif], check=True)
+            subprocess.run(["gifsicle", "-O3", "--colors", "256", "--lossy=40", "-b", gif], check=True)
+            print(f"{name}: {len(frames)} frames, {gif.stat().st_size // 1024} KB")
+
+
+if __name__ == "__main__":
+    main()
