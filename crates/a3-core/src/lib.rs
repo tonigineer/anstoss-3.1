@@ -17,6 +17,7 @@ pub mod forecast;
 pub mod grounds;
 pub mod individual;
 pub mod jobs;
+pub mod league;
 pub mod lineup;
 pub mod load;
 pub mod marking;

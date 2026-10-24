@@ -1790,6 +1790,61 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_answers_the_release_asked() {
+        let game = game();
+        let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 3\nuntil dialog 380";
+        let Some(runner) = on_save(&game, "Probe1", ask) else { return };
+        let notice = &game.dialogs[&380];
+        let text = |runner: &Runner| {
+            runner.host.view().text(control(notice, 4730).unwrap()).to_owned()
+        };
+        // Ulm stands under its goal, but one year of contract left is not
+        // more than the season: the club will not hear of it, and the ask
+        // costs five with the board.
+        assert_eq!(text(&runner), game.text(1814));
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let index = records.human_slot(0).unwrap();
+        assert_ne!(records.managers[index].get::<u32>(0x1f1c) & 0x1000, 0);
+        assert_eq!(records.managers[index].shown_confidence(), 77);
+        // Once a season only: the second ask is answered without asking.
+        let twice = format!("{ask}\nnow press 4731\nnow choose 5387 3\nuntil dialog 380");
+        let runner = on_save(&game, "Probe1", &twice).unwrap();
+        assert_eq!(text(&runner), game.text(5006));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_board_grants_a_release_when_it_must() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        // Three years of contract left, and a standing worse than the
+        // season goal: with the confidence under eighty the board lets
+        // the manager go, though it does not like it.
+        let root = patched(&dir, "Probe1", "board-freedom", |records| {
+            let index = records.human_slot(0).unwrap();
+            records.managers[index].put(0x180, 3i16);
+            let manager = &records.managers[index];
+            let (country, number) = (manager.country(), manager.team());
+            records
+                .team_mut(country, number)
+                .unwrap()
+                .put(a3_core::league::NO_PLACE_AT, 5i8);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let ask = "now click bar 13\nuntil dialog 439\nnow choose 5387 3\nuntil dialog 380";
+        let Some(runner) = on_save(&game, "board-freedom", ask) else { return };
+        let text = runner.host.view().text(control(&game.dialogs[&380], 4730).unwrap()).to_owned();
+        assert_eq!(text, game.text(1813));
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = &records.managers[records.human_slot(0).unwrap()];
+        assert_eq!(manager.get::<u8>(0x179) & 1, 1);
+        assert_ne!(manager.get::<u16>(0x1f0) & 8, 0);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_grounds_scroll_by_the_arrows_and_keep_their_view() {
         let game = game();
         let open = "now click bar 11\nuntil dialog 464\nnow press 5861\nuntil dialog 466";

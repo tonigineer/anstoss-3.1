@@ -2,10 +2,10 @@
 //! VEREINSFUEHRUNG.md in the RE repo): the board's confidence in the
 //! manager with the president's face and its history, the opposition, the
 //! state of a contract extension, the club's shares; five things to try
-//! with the board and the trophy hall. Three of the actions work: seeking
-//! a contract extension, a talk with the board and flattering the
-//! opposition. The Freistellung, the resignation and the hall are not
-//! built yet.
+//! with the board and the trophy hall. Four of the actions work: seeking
+//! a contract extension, a talk with the board, flattering the
+//! opposition and asking for a release. The resignation and the hall are
+//! not built yet.
 
 use std::collections::HashMap;
 
@@ -80,12 +80,21 @@ const BLOCKED_AT: usize = 0x1f88;
 /// opposition likes him and whether he has crawled to it this season.
 const TALKS_AT: usize = 0x1f94;
 const TALKED_AT: usize = 0x1f95;
+/// The release asked this season (rec +0x1f1c bit 0x1000), granted (rec
+/// +0x179 bit 0), and answered by the board (rec +0x1f0 bit 3); the
+/// years which must be left for a release (rec +0x180, §4.4).
+const RELEASE_ASKED_AT: usize = 0x1f1c;
+const RELEASE_GRANTED_AT: usize = 0x179;
+const RELEASE_ANSWERED_AT: usize = 0x1f0;
+const RELEASE_YEARS_AT: usize = 0x180;
+const RELEASE_ASKED: u32 = 0x1000;
 const CONFIDENCE_AT: usize = 0x184;
 const CRAWLED_AT: usize = 0x19a;
 /// The items built: seeking a contract extension, a talk with the board,
-/// flattering the opposition.
+/// flattering the opposition, asking for a release.
 const EXTEND: usize = 0;
 const TALK: usize = 1;
+const RELEASE: usize = 3;
 /// Talked already, no reason to; the first talk's three outcomes by the
 /// draw, the second's, the later ones'.
 const TALKED: u16 = 3763;
@@ -109,6 +118,16 @@ const MOVING: u16 = 3886;
 const LEAVING: u16 = 1802;
 const TALKING: u16 = 3142;
 const BOOKED_TALK: u16 = 3823;
+/// Asking for a release (§4.4): asked this season, the release granted
+/// or the board standing aside, and the four answers to the ask.
+const FREEDOM: u16 = 5006;
+const RELEASED: u16 = 2786;
+const FREE_TO_GO: u16 = 1811;
+const NO_STONES: u16 = 1812;
+const HEAVY_HEART: u16 = 1813;
+const NOT_THINKING: u16 = 1814;
+/// Asking costs five with the board, unheld.
+const RELEASE_COST: i16 = 5;
 
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     let Some(dialog) = dialogs.get_mut(&BOARD) else { return };
@@ -183,7 +202,10 @@ impl Screen for Board {
         }
         let works = |t: Target| match t {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(ACTIONS) => {
-                item == EXTEND || item == TALK || (item == FLATTER && opposition != 0)
+                item == EXTEND
+                    || item == TALK
+                    || item == RELEASE
+                    || (item == FLATTER && opposition != 0)
             }
             Target::Button(c) if dialog.controls[c].id == Some(TROPHIES) => false,
             _ => hub::on_bar(dialog, t).is_none_or(hub::bar_works),
@@ -206,6 +228,7 @@ impl Screen for Board {
         match item {
             EXTEND => self.seek(cx),
             TALK => Outcome::Popup(Request::with(NOTICE, Args::Text(self.talk(cx)))),
+            RELEASE => self.release(cx),
             FLATTER => {
                 let crawled = manager_flag(cx, CRAWLED_AT);
                 self.flattered = !crawled;
@@ -406,6 +429,91 @@ impl Board {
             manager.put(TALKED_AT, 1u8);
         }
         text
+    }
+
+    /// Asking the board to let him go (`FUN_005b669e`): once a season.
+    /// The board that has nothing against it gives the release at once;
+    /// else it costs five with them, and only a season goal missed, a
+    /// confidence below eighty and more than a year of contract left
+    /// makes them ready to let him go, however unwilling.
+    fn release(&mut self, cx: &mut Cx) -> Outcome {
+        let Some(manager) = super::kalkulation::own_manager(cx) else { return Outcome::Stay };
+        if manager.get::<u8>(MOVING_AT) != 0 {
+            let leaving = manager.get::<i16>(MOVING_AT + 2);
+            return Outcome::Popup(Request::with(
+                NOTICE,
+                Args::TextForClub(LEAVING, manager.get::<u8>(MOVING_AT), leaving),
+            ));
+        }
+        let index = match own_index(cx) {
+            Some(index) => index,
+            None => return Outcome::Stay,
+        };
+        if cx.state.records.as_ref().is_some_and(|r| contract::talk_in_week(r, index)) {
+            self.sought = true;
+            return Outcome::Popup(Request::with(NOTICE, Args::Text(TALKING)));
+        }
+        if manager.get::<u32>(RELEASE_ASKED_AT) & RELEASE_ASKED != 0 {
+            self.sought = true;
+            return Outcome::Popup(Request::with(NOTICE, Args::Text(FREEDOM)));
+        }
+        let asked = manager.get::<u32>(RELEASE_ASKED_AT) | RELEASE_ASKED;
+        if let Some(manager) = manager_mut(cx) {
+            manager.put(RELEASE_ASKED_AT, asked);
+        }
+        let text = self.freedom(cx, index);
+        Outcome::Popup(Request::with(NOTICE, Args::Text(text)))
+    }
+
+    /// The answer to the ask, and what it writes (§4.4's fourth step).
+    fn freedom(&mut self, cx: &mut Cx, index: usize) -> u16 {
+        let granted = |cx: &Cx| {
+            super::kalkulation::own_manager(cx).is_some_and(|m| {
+                m.get::<u8>(RELEASE_GRANTED_AT) & 1 != 0
+            })
+        };
+        if granted(cx) {
+            return RELEASED;
+        }
+        let answered = super::kalkulation::own_manager(cx)
+            .is_some_and(|m| m.get::<u16>(RELEASE_ANSWERED_AT) & 8 != 0);
+        if answered {
+            return FREE_TO_GO;
+        }
+        if cx.state.records.as_ref().is_some_and(|r| stock::majority(r, index)) {
+            self.grant(cx);
+            return NO_STONES;
+        }
+        if let Some(manager) = manager_mut(cx) {
+            // A plain i16 subtract, unheld as the rest of them are.
+            let v = manager.get::<i16>(CONFIDENCE_AT).wrapping_sub(RELEASE_COST);
+            manager.put(CONFIDENCE_AT, v);
+        }
+        let (ready, years) = super::kalkulation::own_manager(cx).map_or((false, 0), |m| {
+            (confidence(cx) < 80, m.get::<i16>(RELEASE_YEARS_AT))
+        });
+        let missed = match (own_team(cx), cx.state.records.as_ref()) {
+            (Some(team), Some(records)) => {
+                a3_core::league::class(records, &cx.game.rules.league, team)
+                    > a3_core::league::goal(team)
+            }
+            _ => false,
+        };
+        if missed && ready && years > 1 {
+            self.grant(cx);
+            return HEAVY_HEART;
+        }
+        NOT_THINKING
+    }
+
+    /// The release granted and answered (`FUN_00756507` and the board's
+    /// own bit).
+    fn grant(&self, cx: &mut Cx) {
+        if let Some(manager) = manager_mut(cx) {
+            manager.put(RELEASE_GRANTED_AT, 1u8);
+            let v = manager.get::<u16>(RELEASE_ANSWERED_AT) | 8;
+            manager.put(RELEASE_ANSWERED_AT, v);
+        }
     }
 
     /// Flattering the opposition (`FUN_005b62aa`), once a season: the
