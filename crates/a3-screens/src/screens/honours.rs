@@ -3,7 +3,9 @@
 //! pays, his national team, nerves, marks, age and image, the board's
 //! confidence, his private wealth and his shares, with two sliders that
 //! move money into the club's books and into the black till. The nine
-//! pages, the share market and the betting office are not built.
+//! pages. Four of the nine are built — his abilities, his pay, his
+//! season records and the highscores —; the rest, the share market and
+//! the betting office are not.
 
 use std::collections::HashMap;
 
@@ -20,6 +22,9 @@ use crate::pointer::Target;
 use crate::view::View;
 
 pub mod abilities;
+pub mod pay;
+pub mod scores;
+pub mod season_records;
 
 const CAPTION_ID: u16 = 9935;
 /// "ANSTOSS 3 - Persönliche Erfolge", with the manager, his club and the
@@ -60,8 +65,21 @@ const CONFIDENCE_PAGE: u16 = 5571;
 const MARKETS: u16 = 5572;
 /// Item 3 of the pages, whose label changes for a player-manager.
 const PLAYER_MANAGER: usize = 3;
-/// Item 2, the abilities' page.
-const ABILITIES_ITEM: usize = 2;
+/// The dialog each page button opens, by the item (ERFOLGE.md §5): the
+/// career, the privates, the abilities, the player-manager's page, the
+/// pay, the popularity, the comparison, the season records and the
+/// highscores. Those not built are `None`.
+const PAGE_DIALOGS: [Option<u16>; 9] = [
+    None,
+    None,
+    Some(abilities::ABILITIES_DIALOG),
+    None,
+    Some(pay::PAY_DIALOG),
+    None,
+    None,
+    Some(season_records::SEASON_RECORDS_DIALOG),
+    Some(scores::SCORES_DIALOG),
+];
 const STEP_DOWN: u16 = 4246;
 /// "Ja" / "Nein"; "(bis 30.06.%4d)"; the season's goals 1069 to 1080.
 const YES_NO: [u16; 2] = [1028, 1029];
@@ -257,10 +275,10 @@ impl Screen for Honours {
                 view.set_chosen(c, NONE);
             }
         }
-        // The two transfers and the abilities' page are built.
+        // The two transfers and the built pages are open.
         let works = |t: Target| match t {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(PAGES) => {
-                item == ABILITIES_ITEM
+                PAGE_DIALOGS.get(item).is_some_and(Option::is_some)
             }
             Target::Option { control: c, .. }
                 if matches!(dialog.controls[c].id, Some(CONFIDENCE_PAGE | MARKETS)) =>
@@ -294,9 +312,15 @@ impl Screen for Honours {
             }
             // The page's button stays pressed while it is open.
             Target::Option { control: c, item }
-                if dialog.controls[c].id == Some(PAGES) && item == ABILITIES_ITEM =>
+                if dialog.controls[c].id == Some(PAGES) =>
             {
-                Outcome::Popup(a3_core::cycle::Request::new(abilities::ABILITIES_DIALOG))
+                match PAGE_DIALOGS.get(item).copied().flatten() {
+                    Some(id) => Outcome::Popup(a3_core::cycle::Request::new(id)),
+                    None => {
+                        view.set_chosen(c, NONE);
+                        Outcome::Stay
+                    }
+                }
             }
             Target::Option { control: c, .. } => {
                 view.set_chosen(c, NONE);

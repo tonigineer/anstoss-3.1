@@ -1222,6 +1222,17 @@ impl Countries {
     }
 }
 
+/// One season record as the honours' personal pages keep it (dialog 174,
+/// block `0x1ba9f38`, ten entries of 0x40 bytes; ERFOLGE.md §A.4): the
+/// names, the season's points, the club he earned them at and the date.
+pub struct SeasonMark {
+    pub name: String,
+    pub points: i32,
+    /// Country and number; country 0 means none.
+    pub club: (u8, i16),
+    pub date: (u8, u8, u16),
+}
+
 /// A savegame's records, and the save itself for everything not read into
 /// them yet.
 pub struct Records {
@@ -1386,6 +1397,27 @@ impl Records {
         const LEN: usize = 0x16;
         let k = usize::try_from(number).ok()?.checked_sub(1)?;
         Some(text(self.block("0xbdee80")?.get(k * LEN..)?, LEN))
+    }
+
+    /// The season records the personal pages show (block `0x1ba9f38`;
+    /// ERFOLGE.md §A.4). `FUN_006d6264` inserts them sorted at a season's
+    /// end and a new game zeroes the block, so only entries with points
+    /// are ones that were earned.
+    pub fn season_marks(&self) -> Vec<SeasonMark> {
+        const ENTRY: usize = 0x40;
+        let Some(block) = self.block("0x1ba9f38") else { return Vec::new() };
+        (0..10)
+            .filter_map(|i| block.get(i * ENTRY..i * ENTRY + ENTRY))
+            .filter_map(|e| {
+                let points = i32::from_le_bytes(e[0x34..0x38].try_into().ok()?);
+                if points <= 0 {
+                    return None;
+                }
+                let club = (e[0x38], i16::from_le_bytes(e[0x3a..0x3c].try_into().ok()?));
+                let date = (e[0x3c], e[0x3d], u16::from_le_bytes(e[0x3e..0x40].try_into().ok()?));
+                Some(SeasonMark { name: text(e, 0x34), points, club, date })
+            })
+            .collect()
     }
 
     /// The same, to change.

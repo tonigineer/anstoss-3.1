@@ -2589,6 +2589,53 @@ mod tests {
         }
     }
 
+    /// The honours' three small personal pages on the save "A", as the
+    /// original showed them (ERFOLGE.md §A.7).
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_honours_pages_show_pay_records_and_scores() {
+        use crate::screens::playerinfo::money;
+        let game = game();
+        let to_pages = "now click bar 16\nuntil dialog 175";
+        // The pay: one running season at 88.500 €, its two lines below.
+        let then = format!("{to_pages}\nnow choose 5643 4\nuntil dialog 84");
+        let Some(runner) = on_save(&game, "A", &then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&84];
+        let list = view.list(control(dialog, 5248).unwrap()).unwrap();
+        assert_eq!(list.rows, [format!("2025/2026\t{}", money(&game, 88_500))]);
+        assert_eq!(view.text(control(dialog, 1860).unwrap()), money(&game, 88_500));
+        // Half a year had passed since July, hence half the yearly sum.
+        assert_eq!(view.text(control(dialog, 5591).unwrap()), money(&game, 531_000));
+        // The season records: no save yet at hand has earned one.
+        let then = format!("{to_pages}\nnow choose 5643 7\nuntil dialog 174");
+        let runner = on_save(&game, "A", &then).unwrap();
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&174];
+        assert!(view.list(control(dialog, 2830).unwrap()).unwrap().rows.is_empty());
+        // The highscores: the careers of the installation, five on the
+        // oracle's copy, none of the fixed games kept there.
+        let then = format!("{to_pages}\nnow choose 5643 8\nuntil dialog 95");
+        let runner = on_save(&game, "A", &then).unwrap();
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&95];
+        if game.high_entries(9).is_empty() {
+            eprintln!("no high09 in this installation; the oracle's copy has it");
+        } else {
+            let rows = &view.list(control(dialog, 2010).unwrap()).unwrap().rows;
+            assert_eq!(rows.len(), 5);
+            let expected = [
+                "1.\tToni Lubiniecki\t18\t151397\t151397\t9\t0\t22.10.2026",
+                "2.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t26.9.2026",
+                "3.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t26.9.2026",
+                "4.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t26.9.2026",
+                "5.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t26.9.2026",
+            ];
+            assert_eq!(rows.join("\n"), expected.join("\n"));
+        }
+        assert!(view.list(control(dialog, 2011).unwrap()).unwrap().rows.is_empty());
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_start_menu_leads_where_the_game_does() {

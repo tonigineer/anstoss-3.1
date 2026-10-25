@@ -53,6 +53,22 @@ pub struct HighScore {
     pub date: (u8, u8, u16),
 }
 
+/// One entry of `Highscore/high{cat:02}` as the honours page reads it
+/// (48 bytes, ERFOLGE.md §A.5): both names, the first counter — the age
+/// in a career, the seasons in a fixed game —, the career's seasons,
+/// points, level, the two title counters and the date.
+pub struct HighEntry {
+    pub first: String,
+    pub last: String,
+    pub counter: i16,
+    pub seasons: i32,
+    pub points: i32,
+    pub level: u8,
+    pub titles: i16,
+    pub more_titles: i16,
+    pub date: (u8, u8, u16),
+}
+
 impl Game {
     pub fn load(dir: &Path) -> Result<Self, Box<dyn Error>> {
         Ok(Self {
@@ -265,6 +281,29 @@ impl Game {
                 points: u32::from_le_bytes([e[32], e[33], e[34], e[35]]),
                 level: e[36],
                 titles: e[37],
+                date: (e[42], e[43], u16::from_le_bytes([e[44], e[45]])),
+            })
+            .collect()
+    }
+
+    /// `Highscore/high{cat:02}`, 48-byte entries (ERFOLGE.md §A.5): the
+    /// honours page's two lists, careers from `high09` and the nine
+    /// fixed games one entry apiece.
+    pub fn high_entries(&self, cat: u8) -> Vec<HighEntry> {
+        let path = self.dir.join(format!("Highscore/high{cat:02}"));
+        let Ok(data) = std::fs::read(path) else { return Vec::new() };
+        data.as_chunks::<48>()
+            .0
+            .iter()
+            .map(|e| HighEntry {
+                first: cstring(&e[0..10]),
+                last: cstring(&e[10..26]),
+                counter: i16::from_le_bytes([e[26], e[27]]),
+                seasons: i32::from_le_bytes([e[28], e[29], e[30], e[31]]),
+                points: i32::from_le_bytes([e[32], e[33], e[34], e[35]]),
+                level: e[36],
+                titles: i16::from_le_bytes([e[38], e[39]]),
+                more_titles: i16::from_le_bytes([e[40], e[41]]),
                 date: (e[42], e[43], u16::from_le_bytes([e[44], e[45]])),
             })
             .collect()
