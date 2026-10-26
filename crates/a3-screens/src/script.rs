@@ -2638,6 +2638,52 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_trainer_sees_his_titles_and_stations() {
+        let game = game();
+        let then = "now click bar 16\nuntil dialog 175\nnow choose 5643 0\nuntil dialog 405";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&405];
+        assert_eq!(view.text(control(dialog, 5928).unwrap()), "Toni Lubiniecki");
+        assert_eq!(view.text(control(dialog, 5929).unwrap()), "18 Jahre (26.3.2007)");
+        assert_eq!(view.text(control(dialog, 5930).unwrap()), "Managerlevel 9");
+        // His games, the wins of them, the seasons behind and at the club.
+        for (id, shown) in [(5955, "3"), (5956, "1"), (5957, "0"), (5958, "0")] {
+            assert_eq!(view.text(control(dialog, id).unwrap()), shown);
+        }
+        assert_eq!(view.text(control(dialog, 5952).unwrap()), "50%");
+        assert_eq!(view.text(control(dialog, 5949).unwrap()), "1");
+        assert_eq!(view.text(control(dialog, 5950).unwrap()), "0");
+        assert_eq!(view.text(control(dialog, 5951).unwrap()), "0");
+        assert_eq!(view.text(control(dialog, 5953).unwrap()), "1");
+        assert_eq!(view.text(control(dialog, 5954).unwrap()), "1");
+        // A new career has no titles; the file text shows the CL's name.
+        for id in [
+            5931, 5932, 5933, 5934, 5935, 5936, 5937, 5938, 5939, 5940, 5941, 5942, 5943, 5944,
+            5945, 5946,
+        ] {
+            assert_eq!(view.text(control(dialog, id).unwrap()), "0");
+        }
+        assert_eq!(
+            view.text(control(dialog, 6300).unwrap()),
+            "Champions League-Siege"
+        );
+        assert!(view.list(control(dialog, 6002).unwrap()).unwrap().rows.is_empty());
+        assert_eq!(
+            view.list(control(dialog, 5948).unwrap()).unwrap().rows,
+            ["1.FC Union Berlin\t7.7.25-\t\t0\t0\t0"]
+        );
+        // The one graph point: a blue line across at level 9 of fifteen.
+        assert!(
+            view.lines
+                .contains(&([26, 170, 253, 170], [0, 0, 255])),
+            "lines: {:?}",
+            view.lines
+        );
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_start_menu_leads_where_the_game_does() {
         let game = game();
         let script = Script::parse(

@@ -331,7 +331,7 @@ fn date(game: &Game, d: NaiveDate) -> String {
 }
 
 /// How old he is, as the game counts it (`FUN_0067582a`).
-fn age(birthday: Option<NaiveDate>, today: NaiveDate) -> i32 {
+pub(crate) fn age(birthday: Option<NaiveDate>, today: NaiveDate) -> i32 {
     let Some(born) = birthday else { return 0 };
     let had =
         born.month() < today.month() || born.month() == today.month() && born.day() <= today.day();

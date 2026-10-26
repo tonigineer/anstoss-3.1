@@ -1403,6 +1403,12 @@ impl Records {
     /// ERFOLGE.md §A.4). `FUN_006d6264` inserts them sorted at a season's
     /// end and a new game zeroes the block, so only entries with points
     /// are ones that were earned.
+    /// The career record of the manager in slot `n` (ERFOLGE.md §A.1):
+    /// what he won, where he worked, how often he was sacked.
+    pub fn career(&self, n: usize) -> Option<&[u8]> {
+        self.block(&format!("0xa4de58[{n}]"))
+    }
+
     pub fn season_marks(&self) -> Vec<SeasonMark> {
         const ENTRY: usize = 0x40;
         let Some(block) = self.block("0x1ba9f38") else { return Vec::new() };

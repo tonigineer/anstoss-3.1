@@ -3,9 +3,10 @@
 //! pays, his national team, nerves, marks, age and image, the board's
 //! confidence, his private wealth and his shares, with two sliders that
 //! move money into the club's books and into the black till. The nine
-//! pages. Four of the nine are built — his abilities, his pay, his
-//! season records and the highscores —; the rest, the share market and
-//! the betting office are not.
+//! pages. Five of the nine are built — his own career with its titles and
+//! stations, his abilities, his pay, his season records and the
+//! highscores —; the rest, the share market and the betting office are
+//! not.
 
 use std::collections::HashMap;
 
@@ -25,6 +26,7 @@ pub mod abilities;
 pub mod pay;
 pub mod scores;
 pub mod season_records;
+pub mod trainer_erfolge;
 
 const CAPTION_ID: u16 = 9935;
 /// "ANSTOSS 3 - Persönliche Erfolge", with the manager, his club and the
@@ -70,7 +72,7 @@ const PLAYER_MANAGER: usize = 3;
 /// pay, the popularity, the comparison, the season records and the
 /// highscores. Those not built are `None`.
 const PAGE_DIALOGS: [Option<u16>; 9] = [
-    None,
+    Some(trainer_erfolge::TRAINER_DIALOG),
     None,
     Some(abilities::ABILITIES_DIALOG),
     None,
