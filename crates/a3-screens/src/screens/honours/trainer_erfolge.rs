@@ -131,7 +131,7 @@ pub struct TrainerErfolge;
 impl TrainerErfolge {
     /// The level as it is shown (`FUN_006a61e5`): what the record says,
     /// with a bonus per mark until twelve, only the −1 above it.
-    fn shown_level(manager: &a3_core::records::Manager) -> i32 {
+    pub(super) fn shown_level(manager: &a3_core::records::Manager) -> i32 {
         let marks = manager.get::<u8>(LEVEL_BONUS_AT);
         let bonus = |bit: u8, n: i32| i32::from(marks & bit != 0) * n;
         let mut level = i32::from(manager.level());

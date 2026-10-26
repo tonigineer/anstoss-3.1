@@ -3,10 +3,10 @@
 //! pays, his national team, nerves, marks, age and image, the board's
 //! confidence, his private wealth and his shares, with two sliders that
 //! move money into the club's books and into the black till. The nine
-//! pages. Five of the nine are built — his own career with its titles and
-//! stations, his abilities, his pay, his season records and the
-//! highscores —; the rest, the share market and the betting office are
-//! not.
+//! pages. Six of the nine are built — his private life, his own career
+//! with its titles and stations, his abilities, his pay, his season
+//! records and the highscores —; the rest, the share market and the
+//! betting office are not.
 
 use std::collections::HashMap;
 
@@ -24,6 +24,7 @@ use crate::view::View;
 
 pub mod abilities;
 pub mod pay;
+pub mod privates;
 pub mod scores;
 pub mod season_records;
 pub mod trainer_erfolge;
@@ -73,7 +74,7 @@ const PLAYER_MANAGER: usize = 3;
 /// highscores. Those not built are `None`.
 const PAGE_DIALOGS: [Option<u16>; 9] = [
     Some(trainer_erfolge::TRAINER_DIALOG),
-    None,
+    Some(privates::PRIVATES_DIALOG),
     Some(abilities::ABILITIES_DIALOG),
     None,
     Some(pay::PAY_DIALOG),
@@ -332,13 +333,24 @@ impl Screen for Honours {
         }
     }
 
-    /// A page taken in: its button comes up again.
+    /// A page taken in: its button comes up again, and the wealth and
+    /// the confidence show what the page may have changed (`FUN_0053e4d4`
+    /// runs anew — the privates spend their wealth right here).
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
         }
         if let Some(c) = control(cx.dialog, PAGES) {
             view.set_chosen(c, NONE);
+        }
+        if let Some(manager) = super::kalkulation::own_manager(cx) {
+            set(view, cx.dialog, WEALTH, money(cx.game, manager.get::<i32>(WEALTH_AT).into()));
+            let confidence = if manager.get::<u16>(CLUB_AT) != 0 {
+                format!("{} %", manager.shown_confidence())
+            } else {
+                NOTHING.to_owned()
+            };
+            set(view, cx.dialog, CONFIDENCE, confidence);
         }
         Outcome::Stay
     }

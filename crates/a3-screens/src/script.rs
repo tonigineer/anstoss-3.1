@@ -2684,6 +2684,138 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_privates_page_sells_the_manager_a_better_life() {
+        let game = game();
+        let then = "now click bar 16\nuntil dialog 175\nnow choose 5643 1\nuntil dialog 443";
+        let Some(mut runner) = on_save(&game, "A", then) else { return };
+        let dialog = &game.dialogs[&443];
+        let id = |id: u16| control(dialog, id).unwrap();
+        // The caption names him; a single man keeps the file's "ledig"
+        // and "---", and the five children's rows are empty.
+        {
+            let view = runner.host.view();
+            assert_eq!(view.text(id(9946)), "ANSTOSS 3 - Privates Toni Lubiniecki");
+            assert_eq!(view.text(id(5599)), "ledig");
+            assert_eq!(view.text(id(5607)), "---");
+            for (name, years) in [(5593, 5596), (5594, 5597), (5595, 5598), (5603, 5605), (5604, 5606)] {
+                assert_eq!(view.text(id(name)), "");
+                assert_eq!(view.text(id(years)), "");
+            }
+            // The three rows: what he has, and what the next step costs.
+            assert_eq!(view.text(id(5600)), "Miete");
+            assert_eq!(view.text(id(5601)), "Rostlaube");
+            assert_eq!(view.text(id(5602)), "Tischtennis");
+            assert_eq!(view.text(id(5609)), "Kleine Eigentumswohnung (Preis 200.000 €)");
+            assert_eq!(view.text(id(5608)), "Kleinwagen (Preis 20.000 €)");
+            assert_eq!(view.text(id(5610)), "Golfausrüstung kaufen (20.000 €)");
+            assert_eq!(view.text(id(6487)), "4.000 €");
+            let wealth = {
+                let state = runner.host.state();
+                let slot = state.records.as_ref().unwrap()
+                    .human_slot(state.season.as_ref().unwrap().current).unwrap();
+                state.records.as_ref().unwrap().managers[slot].get::<i32>(0x118)
+            };
+            assert_eq!(view.text(id(5282)), crate::screens::playerinfo::money(&game, wealth.into()));
+        }
+        // A wife of the fifth name pool born on the 15th of June 1986,
+        // two children, and wealth enough for the last step of every row.
+        // (A wife of pool 14, as the RE note poked in, would name her
+        // from the mixed lists of the game's data file — not read yet.)
+        let (nation, month, year, day) = {
+            let mut state = runner.host.state();
+            let current = state.season.as_ref().unwrap().current;
+            let slot = state.records.as_ref().unwrap().human_slot(current).unwrap();
+            let records = state.records.as_mut().unwrap();
+            let [day, month, year] = records.globals.date();
+            let manager = records.managers.get_mut(slot).unwrap();
+            manager.put(0x118, 50_000_000i32);
+            manager.put(0x1c4, [3u8, 0, 5, 5, 15, 6, 0xc2, 0x07]);
+            let person = records.players.get_mut(17_001 + slot).unwrap();
+            let nation = usize::from(person.names_nation());
+            person.set_children(2);
+            person.set_children_names([3, 7, 0, 0, 0]);
+            person.put(0x174, [1u8, 1, (year % 256) as u8, (year / 256) as u8]);
+            person.put(0x178, [1u8, 1, (2005 % 256) as u8, (2005 / 256) as u8]);
+            (nation, month, year, day)
+        };
+        assert!(month >= 2, "the months' text wants a date from March on");
+        let ok = control(&game.dialogs[&443], 1).unwrap();
+        runner.host.input(&game, crate::pointer::Target::Button(ok), false);
+        let pages = control(&game.dialogs[&175], 5643).unwrap();
+        runner.host.input(&game, crate::pointer::Target::Option { control: pages, item: 1 }, false);
+        let dialog = &game.dialogs[&443];
+        let id = |id: u16| control(dialog, id).unwrap();
+        {
+            let view = runner.host.view();
+            // The wife: her name's number 4 of the fifth pool, as old
+            // as that June day.
+            assert_eq!(view.text(id(5599)), game.rules.words.first_names[5 * 100 + 4]);
+            let grown = year as i32 - 1986 - ((month, day) < (6, 15)) as i32;
+            assert_eq!(view.text(id(5607)), grown.to_string());
+            // Two children named from his own pool: the one of months,
+            // the other of years.
+            assert_eq!(
+                view.text(id(5593)),
+                game.rules.words.first_names[nation * 100 + 3]
+            );
+            assert_eq!(
+                view.text(id(5594)),
+                game.rules.words.first_names[nation * 100 + 7]
+            );
+            assert_eq!(
+                view.text(id(5596)),
+                game.rules.words.month_many.replace("%d", &i32::from(month).to_string())
+            );
+            assert_eq!(view.text(id(5597)), (year - 2005).to_string());
+            assert_eq!(view.text(id(5603)), "");
+            assert_eq!(view.text(id(5605)), "");
+            // A wife makes the household half again as dear.
+            assert_eq!(view.text(id(6487)), "6.000 €");
+            assert_eq!(view.text(id(5282)), "50.00 Mio €");
+        }
+        // The flat, step by step to the top — and the button there does
+        // nothing at all.
+        let buy = |runner: &mut Runner, id: u16| {
+            let c = control(&game.dialogs[&443], id).unwrap();
+            runner.host.input(&game, crate::pointer::Target::Button(c), false);
+        };
+        (0..8).for_each(|_| buy(&mut runner, 5609));
+        {
+            let view = runner.host.view();
+            assert_eq!(view.text(id(5600)), game.text(4531));
+            assert_eq!(view.text(id(5609)), "Alles erreicht!");
+            assert_eq!(view.text(id(5282)), "33.30 Mio €");
+        }
+        // The car's first step and the hobby's.
+        buy(&mut runner, 5608);
+        buy(&mut runner, 5610);
+        {
+            let view = runner.host.view();
+            assert_eq!(view.text(id(5601)), game.text(4518));
+            assert_eq!(view.text(id(5602)), game.text(4532));
+            assert_eq!(view.text(id(5282)), "33.26 Mio €");
+        }
+        let slot = {
+            let state = runner.host.state();
+            let current = state.season.as_ref().unwrap().current;
+            state.records.as_ref().unwrap().human_slot(current).unwrap()
+        };
+        {
+            let state = runner.host.state();
+            let manager = &state.records.as_ref().unwrap().managers[slot];
+            assert_eq!(manager.get::<i32>(0x118), 33_260_000);
+            assert_eq!(&manager.get::<[u8; 3]>(0x1d0), &[7, 1, 1]);
+        }
+        // Closed again, the page's own wealth row has the new figure.
+        let ok = control(&game.dialogs[&443], 1).unwrap();
+        runner.host.input(&game, crate::pointer::Target::Button(ok), false);
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&175];
+        assert_eq!(view.text(control(dialog, 5282).unwrap()), "33.26 Mio €");
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_start_menu_leads_where_the_game_does() {
         let game = game();
         let script = Script::parse(

@@ -196,12 +196,14 @@ impl ControlState {
         }
     }
 
-    /// The text of a static, a field or a header.
+    /// The text of a static, a field, a header or a push button — a push
+    /// button's own, until the screen gives it one (`button.rs`).
     pub fn text(&self) -> Option<&str> {
         match self {
             Self::Static(s) => Some(&s.text),
             Self::Edit(e) => Some(&e.text),
             Self::Header(h) => Some(&h.text),
+            Self::Button(b) => b.text.as_deref(),
             _ => None,
         }
     }
@@ -211,6 +213,14 @@ impl ControlState {
             Self::Static(s) => Some(&mut s.text),
             Self::Edit(e) => Some(&mut e.text),
             Self::Header(h) => Some(&mut h.text),
+            // The push button's own text, started here when a screen
+            // first gives it one.
+            Self::Button(b) => {
+                if b.text.is_none() {
+                    b.text = Some(String::new());
+                }
+                b.text.as_mut()
+            }
             _ => None,
         }
     }

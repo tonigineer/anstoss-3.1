@@ -25,6 +25,13 @@ const PARTNERSHIPS_AT: u32 = 0x888c10;
 const HOBBIES_AT: u32 = 0x8a8c7e;
 const HOBBIES: usize = 40;
 const CONTENTMENT_AT: u32 = 0x8a8734;
+/// The privates screen's formats (ERFOLGE.md §B.1): its caption, the
+/// months until his second year, and the two purchase labels.
+const PRIVATE_CAPTION_AT: u32 = 0x88664c;
+const MONTH_ONE_AT: u32 = 0x886658;
+const MONTH_MANY_AT: u32 = 0x886660;
+const PURCHASE_AT: u32 = 0x88666c;
+const PURCHASE_HOBBY_AT: u32 = 0x886684;
 const REASONS_AT: u32 = 0x888b38;
 const REASON_MASKS_AT: u32 = 0x888bfc;
 const BITS: usize = 16;
@@ -69,6 +76,15 @@ pub struct Words {
     pub contentment: Vec<u16>,
     pub reasons: Vec<u16>,
     pub reason_masks: Vec<u32>,
+    /// "ANSTOSS 3 - Privates Toni Lubiniecki".
+    pub private_caption: String,
+    /// "1 Monat" and "%d Monate".
+    pub month_one: String,
+    pub month_many: String,
+    /// "Kleine Eigentumswohnung (Preis 200.000 €)" and the hobby's
+    /// shorter "Golfausrüstung kaufen (20.000 €)".
+    pub purchase: String,
+    pub purchase_hobby: String,
 }
 
 impl Words {
@@ -98,6 +114,11 @@ impl Words {
             contentment: ids(CONTENTMENT_AT, 4)?,
             reasons: ids(REASONS_AT, 32)?,
             reason_masks: exe.u32s(REASON_MASKS_AT, 3)?,
+            private_caption: exe.text_at(PRIVATE_CAPTION_AT).unwrap_or_default(),
+            month_one: exe.text_at(MONTH_ONE_AT).unwrap_or_default(),
+            month_many: exe.text_at(MONTH_MANY_AT).unwrap_or_default(),
+            purchase: exe.text_at(PURCHASE_AT).unwrap_or_default(),
+            purchase_hobby: exe.text_at(PURCHASE_HOBBY_AT).unwrap_or_default(),
         })
     }
 
