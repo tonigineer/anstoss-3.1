@@ -449,7 +449,7 @@ impl Talk<'_> {
         r.set_intensity(0);
         let club = self.club;
         if let Some(team) = team_mut(self.records, club) {
-            team.set_spirit((i32::from(team.spirit()) - 2).clamp(10, 50) as u8);
+            team.set_public_image((i32::from(team.public_image()) - 2).clamp(10, 50) as u8);
         }
         text
     }

@@ -3,10 +3,10 @@
 //! pays, his national team, nerves, marks, age and image, the board's
 //! confidence, his private wealth and his shares, with two sliders that
 //! move money into the club's books and into the black till. The nine
-//! pages. Six of the nine are built — his private life, his own career
-//! with its titles and stations, his abilities, his pay, his season
-//! records and the highscores —; the rest, the share market and the
-//! betting office are not.
+//! pages. Seven of the nine are built — his own career with its titles
+//! and stations, his private life, his abilities, his pay, how popular
+//! he is, his season records and the highscores —; the player-manager's
+//! page and the comparison with other managers are not.
 
 use std::collections::HashMap;
 
@@ -23,6 +23,7 @@ use crate::pointer::Target;
 use crate::view::View;
 
 pub mod abilities;
+pub mod beliebtheit;
 pub mod pay;
 pub mod privates;
 pub mod scores;
@@ -78,7 +79,7 @@ const PAGE_DIALOGS: [Option<u16>; 9] = [
     Some(abilities::ABILITIES_DIALOG),
     None,
     Some(pay::PAY_DIALOG),
-    None,
+    Some(beliebtheit::BELIEBT_DIALOG),
     None,
     Some(season_records::SEASON_RECORDS_DIALOG),
     Some(scores::SCORES_DIALOG),

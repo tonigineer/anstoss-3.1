@@ -2816,6 +2816,46 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_popularity_page_rates_the_manager_four_ways() {
+        let game = game();
+        let then = "now click bar 16\nuntil dialog 175\nnow choose 5643 5\nuntil dialog 26";
+        let Some(mut runner) = on_save(&game, "A", then) else { return };
+        let dialog = &game.dialogs[&26];
+        let id = |id: u16| control(dialog, id).unwrap();
+        {
+            let view = runner.host.view();
+            assert_eq!(
+                view.text(id(9947)),
+                "ANSTOSS 3 - Beliebtheit Toni Lubiniecki (1.FC Union Berlin), 8.9.2025"
+            );
+            assert_eq!(view.text(id(1320)), "Toni Lubiniecki");
+            // A.an3's four rows, of the public, the fans, the media and
+            // his players: the percent, the rank's word and its picture.
+            for (picture, percent, shown, rank, word, graphic) in [
+                (1321, 5644, "49%", 1316, 1497, 1382),
+                (1322, 5645, "56%", 1317, 1496, 1381),
+                (1323, 5646, "36%", 1318, 1498, 1383),
+                (5589, 5647, "84%", 5590, 1493, 1378),
+            ] {
+                assert_eq!(view.text(id(percent)), shown);
+                assert_eq!(view.text(id(rank)), game.text(word));
+                let bitmap = view.controls[id(picture)].state.as_bitmap().unwrap();
+                assert_eq!(bitmap.picture, Some(crate::controls::bitmap::Picture::graphic(graphic)));
+            }
+            // What the club's own look and the association's say; A.an3
+            // is neutral to the public and earned the best word there.
+            for (ctl, word) in [(1327, 1502), (1328, 1509)] {
+                let shown = view.text(id(ctl));
+                assert!(shown.ends_with(&format!("\\t{}", game.text(word))), "{shown}");
+            }
+        }
+        let ok = control(dialog, 1319).unwrap();
+        runner.host.input(&game, crate::pointer::Target::Button(ok), false);
+        assert_eq!(runner.host.view().id, 175);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_start_menu_leads_where_the_game_does() {
         let game = game();
         let script = Script::parse(

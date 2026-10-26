@@ -466,8 +466,13 @@ record! {
     0x256 => next_venue, set_next_venue: i16;
     0x258 => next_kind, set_next_kind: u8;
     0x25a => referee, set_referee: i16;
-    /// Kept between 10 and 50, 30 at first (meaning not traced).
-    0x138 => spirit, set_spirit: u8;
+    /// How the public sees the club, kept between 10 and 50, 30 at first
+    /// (the club object's +0x10f; the popularity page reads it).
+    0x138 => public_image, set_public_image: u8;
+    /// How the association rates the club's conduct: bits 0 to 4 count
+    /// the steps down from "ausgezeichnet", bits `0x20` and `0x40` pull
+    /// it one further (the club object's +0x102).
+    0x12c => association, set_association: u8;
     /// This season: bonuses paid the first team, fines taken from players.
     0x500 => bonuses_paid, set_bonuses_paid: i32;
     0x504 => fines, set_fines: i32;
