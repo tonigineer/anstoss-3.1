@@ -3205,6 +3205,21 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn neues_spiel_goes_back_to_the_start_menu() {
+        let game = game();
+        // The dressing room's game options: "Neues Spiel", and yes.
+        let then = "now click bar 17\nuntil dialog 302\nnow choose 4035 3\nuntil dialog 384\n\
+                    now press 4741\nuntil dialog 9";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let screens: Vec<&str> =
+            runner.log.iter().filter_map(|l| l.strip_prefix("screen ")).collect();
+        // The dressing room closes after its question, and the game cycle
+        // with it: the start menu is next.
+        assert_eq!(screens[screens.len() - 4..], ["302", "384", "302", "9"]);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_dragged_player_goes_with_the_pointer() {
         let game = game();
         let Some(runner) = on_save(&game, "Probe1", "") else { return };

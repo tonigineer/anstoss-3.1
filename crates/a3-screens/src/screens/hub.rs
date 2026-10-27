@@ -292,6 +292,19 @@ const DRESSING_OPTIONS: u16 = 4035;
 const QUIT_ITEM: usize = 4;
 const QUIT_REALLY: u16 = 2690;
 const QUIT_QUESTION: u16 = u16::MAX;
+/// "Neues Spiel" and its question (`FUN_005b11e7`); yes gives the game up.
+const NEW_GAME_ITEM: usize = 3;
+const NEW_GAME_REALLY: u16 = 2689;
+const NEW_GAME_QUESTION: u16 = u16::MAX - 2;
+
+/// Lights a game option under its question, as the original's pressed
+/// button stays lit until the question is answered; `None` puts it out.
+fn light_option(dialog: &Dialog, view: &mut View, item: Option<usize>) {
+    if let Some(options) = control(dialog, DRESSING_OPTIONS).and_then(|i| view.options_mut(i)) {
+        options.actions = item.is_none();
+        options.chosen = item.unwrap_or(crate::controls::options::NONE);
+    }
+}
 
 /// Puts the main screens together: the bar along the bottom, the title in
 /// the frame, and on the line-up the boxes where the first formation and the
@@ -541,7 +554,7 @@ impl Screen for MenuBar {
                             | AMATEURS_ITEM
                     )
                 }
-                Some(DRESSING_OPTIONS) => item == QUIT_ITEM,
+                Some(DRESSING_OPTIONS) => matches!(item, QUIT_ITEM | NEW_GAME_ITEM),
                 _ => false,
             }
         };
@@ -716,7 +729,16 @@ impl Screen for MenuBar {
             && item == QUIT_ITEM
         {
             self.popup = Some(QUIT_QUESTION);
+            light_option(cx.dialog, view, Some(item));
             return Outcome::Popup(Request::with(QUESTION, Args::Text(QUIT_REALLY)));
+        }
+        if view.id == DRESSING_ROOM
+            && cx.dialog.controls[c].id == Some(DRESSING_OPTIONS)
+            && item == NEW_GAME_ITEM
+        {
+            self.popup = Some(NEW_GAME_QUESTION);
+            light_option(cx.dialog, view, Some(item));
+            return Outcome::Popup(Request::with(QUESTION, Args::Text(NEW_GAME_REALLY)));
         }
         if cx.dialog.controls[c].id != Some(BAR_ID) {
             if let Kind::Options { items, .. } = &cx.dialog.controls[c].kind {
@@ -779,6 +801,11 @@ impl Screen for MenuBar {
                 Outcome::Stay
             }
             (Some(QUIT_QUESTION), Reply::Ok) => Outcome::Close(Reply::Quit),
+            (Some(NEW_GAME_QUESTION), Reply::Ok) => Outcome::Close(Reply::NewGame),
+            (Some(QUIT_QUESTION | NEW_GAME_QUESTION), _) => {
+                light_option(cx.dialog, view, None);
+                Outcome::Stay
+            }
             (Some(KEEP_QUESTION), Reply::Ok) => {
                 keep_formation(cx);
                 Outcome::Stay

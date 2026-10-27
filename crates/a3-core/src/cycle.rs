@@ -388,6 +388,8 @@ pub enum Reply {
     Goto(u16),
     /// The game is to end: the program closes.
     Quit,
+    /// The game is given up for a new one: back to the start menu.
+    NewGame,
 }
 
 /// The screens' end of the line to the cycle: its requests, and where the
@@ -618,7 +620,9 @@ impl Cycle {
             let managers = self.season(|s| s.managers.len()).unwrap_or(0);
             for manager in 0..managers {
                 self.season(|s| s.current = manager);
-                self.turn()?;
+                if !self.turn()? {
+                    return Ok(());
+                }
             }
             self.season(|s| s.before_match = false);
             let Some(week) = self.season(|s| self.start_week(s)).flatten() else {
@@ -745,9 +749,9 @@ impl Cycle {
     }
 
     /// The current manager's turn, on the main screens with the menu bar or
-    /// in the office, until it is ended.
-    fn turn(&self) -> Result<(), Gone> {
-        let Some(mut screen) = self.season(|s| self.turn_screen(s)) else { return Ok(()) };
+    /// in the office, until it is ended; false once the game is given up.
+    fn turn(&self) -> Result<bool, Gone> {
+        let Some(mut screen) = self.season(|s| self.turn_screen(s)) else { return Ok(true) };
         // A manager with a note on his page reads it before his turn screen:
         // the hub opens the notepad, and only then its own dialog — office,
         // text menu or line-up, all guarded by the same `strlen`
@@ -763,7 +767,10 @@ impl Cycle {
                 }
                 // "Spiel beenden": the cycle ends, and with it the program.
                 Reply::Quit => return Err(Gone),
-                _ => return Ok(()),
+                // "Neues Spiel": its flag 8 ends the game cycle, and the
+                // main loop goes back to the start menu (`FUN_00788115`).
+                Reply::NewGame => return Ok(false),
+                _ => return Ok(true),
             }
         }
     }
