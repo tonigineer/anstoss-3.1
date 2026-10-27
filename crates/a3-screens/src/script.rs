@@ -2617,6 +2617,62 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_books_compare_with_the_season_before() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let open = "now click bar 9\nuntil dialog 417";
+        let game = game();
+        let combo = |runner: &Runner| {
+            runner
+                .host
+                .view()
+                .combo(control(&game.dialogs[&417], 2227).unwrap())
+                .unwrap()
+                .clone()
+        };
+        // Without a last season the combo has nothing to compare with.
+        let runner = on_save(&game, "Probe1", open).unwrap();
+        assert_eq!(
+            combo(&runner).items,
+            [game.text(2363).to_owned(), game.text(2365).to_owned()]
+        );
+        // Probe1's extra data can keep one: its club's booked accounts
+        // stand in for last season's (with one word raised to tell the
+        // columns apart), and what its transfers came to — figures no
+        // account of this season shows.
+        let root = patched(&dir, "Probe1", "vorjahr", |records| {
+            let index = records.human_slot(0).unwrap();
+            let (country, number) =
+                (records.managers[index].country(), records.managers[index].team());
+            let team = records.team_index(country, number).unwrap();
+            let slot = usize::from(records.teams[team].human()) - 1;
+            let booked: Vec<u32> = (0..60).map(|w| records.teams[team].get(0x4a0 + 4 * w)).collect();
+            let extra = &mut records.extras[slot];
+            for (w, word) in booked.into_iter().enumerate() {
+                let word = if w == 22 { word.wrapping_add(7000) } else { word };
+                extra.put(0x4c8 + 4 * w, word);
+            }
+            extra.put(0x710, 12345678i64);
+            extra.put(0x718, 23456789i64);
+            extra.put(0x898, 1i16);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let runner = on_save(&game, "vorjahr", &format!("{open}\nnow row 2227 1")).unwrap();
+        let view = runner.host.view();
+        let combo = view.combo(control(&game.dialogs[&417], 2227).unwrap()).unwrap();
+        assert_eq!(combo.items[1], game.text(2364));
+        assert_eq!(combo.selected, Some(1));
+        // The transfers row shows last season's sales and purchases, and
+        // both comparison columns are headed "Vorjahr".
+        let text = |id| view.text(control(&game.dialogs[&417], id).unwrap()).to_owned();
+        assert_eq!(text(5059), "23.456.789");
+        assert_eq!(text(5073), "12.345.678");
+        assert_eq!(text(5780), game.text(2396));
+        assert_eq!(text(5782), game.text(2396));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn players_are_watched_and_dropped() {
         let game = game();
         let menu = "now click bar 10\nuntil dialog 218";
