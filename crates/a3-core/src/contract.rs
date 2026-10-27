@@ -603,3 +603,65 @@ pub fn book_talk(records: &mut Records, index: usize, day: i16, club: (u8, i16))
 
 /// A single day's appointment, as the planner books a talk.
 const ONE_DAY: u8 = 1;
+
+/// The players' contract-extension talks booked (`0x1c53f08`, object
+/// 0x1c53ee8): an i16 count, then up to thirty entries of 8 bytes — the
+/// day, the player, the club's country (a byte) and number
+/// (`FUN_00762f07`).
+const EXTENSIONS_AT: u32 = 0x1c53ee8;
+const EXTENSION: usize = 8;
+const EXTENSIONS_MOST: usize = 30;
+/// The national team's search, whose entries a talk may not clash with
+/// (`0x1c53d98`; 6 bytes, the player first).
+const SEARCH_AT: u32 = 0x1c53d98;
+const SEARCH: usize = 6;
+/// The planner's kind of an extension talk.
+pub const EXTENSION_KIND: u8 = 0x0c;
+
+/// Whether a talk with him can still be booked (`FUN_007648fa`): he is
+/// neither in the national team's search nor in a negotiation.
+pub fn talk_free(records: &Records, id: u16) -> bool {
+    let searched = records.block(&format!("{SEARCH_AT:#x}")).is_some_and(|b| {
+        let count = usize::try_from(word(b, 0)).unwrap_or(0);
+        (0..count).any(|k| word(b, 2 + k * SEARCH) as u16 == id)
+    });
+    !searched && !crate::transfers::appointments(records).iter().any(|t| t.player == id)
+}
+
+/// An extension talk with him on `day` (`FUN_007653f6`): into the list —
+/// a booked one moves to the new day — and the club's planner; false when
+/// the list is full.
+pub fn book_extension(
+    records: &mut Records,
+    index: usize,
+    id: u16,
+    (country, number): (u8, u16),
+    day: i16,
+) -> bool {
+    let Some(b) = records.block_mut(&format!("{EXTENSIONS_AT:#x}")) else { return false };
+    let count = usize::try_from(word(b, 0)).unwrap_or(0);
+    if count >= EXTENSIONS_MOST {
+        return false;
+    }
+    match (0..count).find(|&k| word(b, 2 + k * EXTENSION + 2) as u16 == id) {
+        Some(k) => put16(b, 2 + k * EXTENSION, day),
+        None => {
+            let e = 2 + count * EXTENSION;
+            if b.len() < e + EXTENSION {
+                return false;
+            }
+            put16(b, e, day);
+            put16(b, e + 2, id as i16);
+            b[e + 4] = country;
+            put16(b, e + 6, number as i16);
+            put16(b, 0, count as i16 + 1);
+        }
+    }
+    if let Some(planner) = records.planners.get_mut(index) {
+        planner.book(
+            day as usize,
+            Appointment { kind: EXTENSION_KIND, flag: ONE_DAY, player: id, club: 0 },
+        );
+    }
+    true
+}

@@ -366,6 +366,14 @@ impl Planner {
         // A professional contract's talk goes into the youth's or the
         // amateurs' list first; a full list books nothing (`FUN_00765a59`,
         // `FUN_007660ca`).
+        // A contract's extension: its own list and the planner
+        // (`FUN_007653f6`).
+        if self.negotiation.is_none() && self.kind == contract::EXTENSION_KIND {
+            let Some(m) = records.managers.get(slot) else { return };
+            let club = (m.country() as u8, m.team() as u16);
+            contract::book_extension(records, slot, self.player, club, day);
+            return;
+        }
         let contract = [youth::YOUTH_CONTRACT_TALK, youth::AMATEUR_CONTRACT_TALK];
         if self.negotiation.is_none() && contract.contains(&self.kind) {
             let Some(m) = records.managers.get(slot) else { return };

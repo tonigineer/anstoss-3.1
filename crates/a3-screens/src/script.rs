@@ -3363,6 +3363,39 @@ mod tests {
         runner.host.view().text(control(&game.dialogs[&380], 4730).unwrap()).to_owned()
     }
 
+    /// "Vertrag verlängern" in the current squad (216): on Probe1 a talk
+    /// is booked in the week planner (kind 0x0c, into the extension
+    /// talks' list too), as the original books Rönnow's on A.an3.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn an_extension_talk_is_booked() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 0\nuntil dialog 216\n\
+                    now choose 5657 0";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let list = control(&game.dialogs[&216], 3298).unwrap();
+        let keys = runner.host.view().list(list).unwrap().keys.clone();
+        drop(runner);
+        // The first row that leads to the planner.
+        let row = (0..keys.len()).find(|&row| {
+            let then = format!("{open}\nnow row 3298 {row}");
+            on_save(&game, "Probe1", &then).is_some_and(|r| r.host.view().id == 412)
+        });
+        let Some(row) = row else { panic!("nobody to talk to") };
+        let then = format!(
+            "{open}\nnow row 3298 {row}\nuntil dialog 412\nnow choose 5034 1\nuntil dialog 216"
+        );
+        let Some(runner) = on_save(&game, "Probe1", &then) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let day = usize::from(records.globals.day()) + 1;
+        let booked = records.planners[0].day(day);
+        let season = state.season.as_ref().unwrap();
+        let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+        assert_eq!((booked.kind, booked.player), (0x0c, club.status[keys[row]].id));
+        assert!(a3_core::transfers::pending(records, booked.player));
+    }
+
     /// Doping (dialog 394) on Probe1, as the original shows it: Ortag
     /// ready, Schmitt not; "Kondition steigern" doses Ortag at once — doped,
     /// his condition ten up, the dose on the medical bill — and a second

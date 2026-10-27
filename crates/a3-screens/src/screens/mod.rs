@@ -183,6 +183,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(squad::LoanedOut),
         Box::new(squad::Extensions::default()),
         Box::new(squad::DrawOption),
+        Box::new(squad::NoDate),
         Box::new(squad::Relations),
         Box::new(stadium::StadiumScreen::default()),
         Box::new(stadium::Expansion::default()),

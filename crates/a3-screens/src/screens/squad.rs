@@ -10,7 +10,7 @@ use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::NOTICE;
 use a3_core::cycle::dialogs::{
     AMATEUR_PLAYERS, APPOINTMENTS, CLUB_SEARCH, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT,
-    MARKET_VALUES, NEXT_SQUAD, NORACSA_REQUEST, NORACSA_SEARCH, RELATIONS, TRANSFER_LIST,
+    MARKET_VALUES, NO_DATE, NEXT_SQUAD, NORACSA_REQUEST, NORACSA_SEARCH, RELATIONS, TRANSFER_LIST,
     WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
 };
 use a3_core::records::Team;
@@ -171,6 +171,24 @@ impl Screen for SquadMenu {
     }
 }
 
+/// The club's option drawn on him from the current squad (305's OK,
+/// `FUN_0056397e` step 4): terms cheap for him hurt him
+/// (`FUN_00709c74`, `FUN_00770800(L, 0x20)`), the option gone, a year
+/// more, and no longer retiring.
+fn draw_club_option(cx: &mut Cx, id: u16) {
+    let cheap = with_reckoning(cx, |club| {
+        signee(cx, id).map(|p| cx.game.rules.contract.index(&p, club) < CHEAP)
+    });
+    if let Some(r) = cx.state.records.as_mut().and_then(|r| r.players.get_mut(usize::from(id))) {
+        if cheap.flatten() == Some(true) {
+            cx.game.rules.discipline.mood.set_reasons(r, CHEAP_OPTION);
+        }
+        r.set_terms(r.terms() & !CLUB_OPTION);
+        r.set_retiring(r.retiring() & !RETIRING);
+    }
+    extend(cx, id);
+}
+
 /// Whether the club is another club's amateur department
 /// (`FUN_0063e793`).
 fn amateurs(cx: &Cx) -> bool {
@@ -209,6 +227,19 @@ pub struct CurrentSquad {
     mode: Option<Mode>,
     /// The player whose menu is open.
     menu_player: Option<usize>,
+    /// What the popup opened by a row's click leads to.
+    pending: Pending,
+}
+
+/// The current squad's popups that do something when answered.
+#[derive(Default, Clone, Copy)]
+enum Pending {
+    #[default]
+    Nothing,
+    /// The club's option on him (305): drawn, or the talk goes on.
+    Option(u16),
+    /// The week planner booking his extension talk.
+    Booking,
 }
 
 /// What a click on a row does, by the mode buttons' items.
@@ -256,6 +287,22 @@ const OWN_CONTRACT: u16 = 4444;
 const BORROWED: u16 = 2362;
 const LEAVING: u16 = 2381;
 const RETIRES: u16 = 3135;
+/// The contract's further refusals (`FUN_0056397e` steps 6, 7, 9).
+const NO_MORE_EXTENSION: u16 = 4803;
+const CONTENT_WITH_CONTRACT: u16 = 3189;
+const NO_MOOD: u16 = 2694;
+/// R+0x27f bit 6: no further extension (`FUN_00707834`); R+0x1b0 bit 5
+/// and R+0x1e2 bit 9 as the talk's checks read them.
+const NO_EXTENSION: u8 = 0x40;
+const WANTS_TALK: u32 = 0x20;
+const NO_MOOD_FLAG: u16 = 0x200;
+const MOOD_FLAGS: usize = 0x1e2;
+/// He is content when his terms please him above this (`FUN_00767cb9`).
+const CONTENT_ABOVE: i32 = 149;
+/// The season's day after which a contract's last year counts as run
+/// out (`FUN_0075827a`).
+const LATE_DAY: i32 = 216;
+const OLD: u32 = 30;
 /// The transfer list's: the manager himself; the loan's: the manager, a
 /// borrowed player.
 const OWN_LISTING: u16 = 3315;
@@ -292,7 +339,7 @@ impl Screen for CurrentSquad {
         }
         let works = |target: Target| match target {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(MODE_BUTTONS) => {
-                matches!(MODES.get(item), Some(Mode::Bonus | Mode::Fine))
+                matches!(MODES.get(item), Some(Mode::Contract | Mode::Bonus | Mode::Fine))
             }
             _ => true,
         };
@@ -343,11 +390,25 @@ impl Screen for CurrentSquad {
             Target::Row { control: c, row } if id(c) == Some(SQUAD_LIST) => {
                 let player = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied());
                 match (self.mode, player) {
-                    (Some(mode), Some(player)) => act(cx, mode, player),
+                    (Some(mode), Some(player)) => act(cx, mode, player, &mut self.pending),
                     _ => Outcome::Stay,
                 }
             }
             _ => Outcome::Stay,
+        }
+    }
+
+    /// The club's option drawn, refilled; declined, the talk goes on. The
+    /// planner's booking refills nothing.
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        match std::mem::take(&mut self.pending) {
+            Pending::Option(id) if reply == Reply::Ok => {
+                draw_club_option(cx, id);
+                fill_squad(cx, view);
+                Outcome::Stay
+            }
+            Pending::Option(id) => contract_talk(cx, id, true, &mut self.pending),
+            Pending::Booking | Pending::Nothing => Outcome::Stay,
         }
     }
 }
@@ -355,7 +416,7 @@ impl Screen for CurrentSquad {
 /// A row's player acted on by the mode chosen (`OnSelChange` 0x564c02):
 /// the bonus and the fine in their dialogs; the contract, the transfer
 /// list and the loan as far as their refusals go.
-fn act(cx: &Cx, mode: Mode, player: usize) -> Outcome {
+fn act(cx: &Cx, mode: Mode, player: usize, pending: &mut Pending) -> Outcome {
     let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
     match mode {
         Mode::Bonus => {
@@ -387,11 +448,71 @@ fn act(cx: &Cx, mode: Mode, player: usize) -> Outcome {
     };
     match refusal {
         Some(text) => notice(text),
+        None if mode == Mode::Contract => contract_talk(cx, id, false, pending),
         None => {
             info!("{mode:?} ({id}): not built yet");
             Outcome::Stay
         }
     }
+}
+
+/// "Vertrag verlängern" past its first refusals (`FUN_0056397e` steps
+/// 4–10): the club's option drawn or not (305), then the player's own
+/// reasons, and the week planner booking the talk (kind 0x0c). With
+/// `optioned` the option was offered and declined.
+fn contract_talk(cx: &Cx, id: u16, optioned: bool, pending: &mut Pending) -> Outcome {
+    let notice = |args| Outcome::Popup(Request::with(NOTICE, args));
+    let no_date = || Outcome::Popup(Request::with(NO_DATE, Args::Record(id)));
+    let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
+    let Some(r) = records.player(id) else { return Outcome::Stay };
+    let free = a3_core::contract::talk_free(records, id);
+    if !optioned && r.terms() & CLUB_OPTION != 0 {
+        if !free {
+            return no_date();
+        }
+        *pending = Pending::Option(id);
+        return Outcome::Popup(Request::with(DRAW_OPTION, Args::Record(id)));
+    }
+    let today = cx.state.season.as_ref().map(|s| s.date());
+    let age = shown(cx, id).zip(today).map_or(0, |(s, d)| s.player.age(d));
+    if r.retiring() & RETIRING != 0 && age > OLD {
+        return notice(Args::Text(RETIRES));
+    }
+    if r.problems() & NO_EXTENSION != 0 {
+        return notice(Args::Text(NO_MORE_EXTENSION));
+    }
+    if r.flags() & WANTS_TALK == 0 && content(cx, id) {
+        return notice(Args::Text(CONTENT_WITH_CONTRACT));
+    }
+    if !free {
+        return no_date();
+    }
+    if r.get::<u16>(MOOD_FLAGS) & NO_MOOD_FLAG != 0 {
+        return notice(Args::TextFor(NO_MOOD, id));
+    }
+    *pending = Pending::Booking;
+    let args = Args::Book(a3_core::contract::EXTENSION_KIND, id);
+    Outcome::Popup(Request::with(super::planner::PLANNER, args))
+}
+
+/// Whether he is happy with his contract as it runs (`FUN_00767cb9`):
+/// years left — more than one late in the season — and his terms
+/// pleasing him above 149.
+fn content(cx: &Cx, id: u16) -> bool {
+    let (Some(records), Some(season)) = (cx.state.records.as_ref(), cx.state.season.as_ref())
+    else {
+        return false;
+    };
+    let Some(r) = records.player(id) else { return false };
+    let years = years_left(r, i32::from(records.globals.start_year()));
+    let late = i32::try_from(season.day).unwrap_or(0) > LATE_DAY;
+    if years <= 0 || late && years <= 1 {
+        return false;
+    }
+    let Some(p) = signee(cx, id) else { return false };
+    let rules = &cx.game.rules.contract;
+    let pleased = with_reckoning(cx, |club| rules.satisfaction(&p, club, &p.terms));
+    pleased.is_some_and(|v| v > CONTENT_ABOVE)
 }
 
 /// The club he signed with for next season, if any (R+0x14c).
@@ -781,9 +902,9 @@ const NEXT_CLUB_COUNTRY: usize = 0x14c;
 const INFO_ONLY: [hub::Command; 1] = [hub::Command::Info];
 
 pub(crate) fn compose_next(dialogs: &mut HashMap<u16, Dialog>) {
-    for id in [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION, RELATIONS] {
+    for id in [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION, RELATIONS, NO_DATE] {
         if let Some(dialog) = dialogs.get_mut(&id) {
-            let kept = matches!(id, DRAW_OPTION | RELATIONS);
+            let kept = matches!(id, DRAW_OPTION | RELATIONS | NO_DATE);
             let title = if kept { dialog.title.clone() } else { String::new() };
             dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
             if matches!(id, NEXT_SQUAD | EXTENSIONS) {
@@ -1365,6 +1486,39 @@ fn extend(cx: &mut Cx, id: u16) {
         season.clubs.get_mut(&club).and_then(|c| c.status.iter_mut().find(|s| s.id == id))
     {
         status.contract = Some(years.into());
+    }
+}
+
+/// "Kein Termin mehr frei" (dialog 262, `CSummeKeinTermin`): the player
+/// has no appointment free this week; OK closes it.
+pub struct NoDate;
+
+const NO_DATE_TEXT: u16 = 3704;
+const NO_DATE_OK: u16 = 3705;
+
+impl Screen for NoDate {
+    fn ids(&self) -> &[u16] {
+        &[NO_DATE]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let dialog = cx.dialog;
+        if let Args::Record(id) = args {
+            let name = cx.state.records.as_ref().and_then(|r| r.known_as(id)).unwrap_or_default();
+            let text = control(dialog, NO_DATE_TEXT).map(|c| dialog.controls[c].text.clone());
+            set(view, dialog, NO_DATE_TEXT, text.unwrap_or_default().replacen("%s", &name, 1));
+        }
+        super::popups::ball(view, cx);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(c) if cx.dialog.controls[c].id == Some(NO_DATE_OK) => {
+                Outcome::Close(Reply::Ok)
+            }
+            _ => Outcome::Stay,
+        }
     }
 }
 

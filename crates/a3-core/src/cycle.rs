@@ -113,6 +113,8 @@ pub mod dialogs {
     /// to draw an option.
     pub const EXTENSIONS: u16 = 92;
     pub const DRAW_OPTION: u16 = 305;
+    /// "Kein Termin mehr frei": a player with no free appointment this week.
+    pub const NO_DATE: u16 = 262;
     /// Other clubs' youths to poach, and the pre-contract offered.
     pub const YOUTH_POACHING: u16 = 107;
     pub const PRE_CONTRACT: u16 = 325;
