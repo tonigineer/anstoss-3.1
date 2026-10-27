@@ -3911,6 +3911,20 @@ mod tests {
         let (runner, result) = Runner::play(&game, &Script::parse(&load).unwrap());
         result.unwrap_or_else(|err| panic!("bare: {err}\n{}", runner.log.join("\n")));
         assert_eq!(seen(&runner, 397), 0, "a page of none popped: {}", runner.log.join("\n"));
+        let line = patched(&dir, "Toni", "line-noted", |records| {
+            let page = records.human_slot(0).unwrap();
+            records.notes[page].set_text("Abstieg knapp");
+        });
+        let mut game = Game::load(&line).unwrap();
+        compose(&mut game);
+        let load = LOAD.replace("until dialog 147", "until dialog 397");
+        let script = format!("{load}now press 1\nuntil dialog 147");
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("line: {err}\n{}", runner.log.join("\n")));
+        let at = |what: &str| runner.log.iter().position(|l| l == what);
+        let note = at("screen 397").expect("no notepad at the line-up turn");
+        let up = at("screen 147").expect("no line-up after the note");
+        assert!(note < up, "the notepad came after the line-up: {}", runner.log.join("\n"));
     }
 
     #[test]
