@@ -56,7 +56,9 @@ impl Host {
             .enumerate()
             .flat_map(|(i, screen)| screen.ids().iter().map(move |&id| (id, i)))
             .collect();
-        let state = Arc::new(Mutex::new(GameState::default()));
+        let mut first = GameState::default();
+        first.play = a3_core::playtime::PlayTime::read(&game.dir.join(a3_core::playtime::FILE));
+        let state = Arc::new(Mutex::new(first));
         let cycle = cycle::spawn(game.data.clone(), state.clone(), seed);
         let (requests, replies) = (Mutex::new(cycle.requests), cycle.replies);
         Self { screens, by_dialog, open: Vec::new(), answered: false, state, requests, replies }

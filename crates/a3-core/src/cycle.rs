@@ -525,6 +525,7 @@ impl Cycle {
             let mut state = self.state();
             newgame::log(&self.data.world, &state.setup);
             state.season = Some(newgame::calculate(&self.data, &state.setup, seed));
+            state.play.game_loaded(0);
         }
         self.job_offers()?;
         self.weeks(true)
@@ -831,6 +832,11 @@ impl Cycle {
         {
             let mut state = self.state();
             state.season = Some(season);
+            // The play time it was saved with (`0xae6e34`), counting on from
+            // now (`0xae6e30`).
+            let stored = records.block(a3_files::an3::REAL_TIME[0]).and_then(|b| b.get(..4));
+            let stored = stored.map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+            state.play.game_loaded(stored);
             state.records = Some(records);
         }
         self.weeks(false)

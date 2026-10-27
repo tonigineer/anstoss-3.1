@@ -302,6 +302,8 @@ const KONFIG_3D_ITEM: usize = 7;
 const MUSIK_ITEM: usize = 1;
 /// "Optionen" (`FUN_005b1516`), for a loaded game.
 const OPTIONEN_ITEM: usize = 6;
+/// "Wie oft & Wie lange" (`FUN_005b14b3`).
+const NUTZUNG_ITEM: usize = 8;
 
 /// Lights a game option under its question, as the original's pressed
 /// button stays lit until the question is answered; `None` puts it out.
@@ -562,7 +564,10 @@ impl Screen for MenuBar {
                     )
                 }
                 Some(DRESSING_OPTIONS) => {
-                    matches!(item, QUIT_ITEM | NEW_GAME_ITEM | KONFIG_3D_ITEM | MUSIK_ITEM)
+                    matches!(
+                        item,
+                        QUIT_ITEM | NEW_GAME_ITEM | KONFIG_3D_ITEM | MUSIK_ITEM | NUTZUNG_ITEM
+                    )
                         || item == OPTIONEN_ITEM && options_shown
                 }
                 _ => false,
@@ -754,6 +759,7 @@ impl Screen for MenuBar {
         let settings = match item {
             KONFIG_3D_ITEM => Some(super::konfig3d::KONFIG_3D),
             MUSIK_ITEM => Some(super::musik::MUSIK),
+            NUTZUNG_ITEM => Some(super::nutzung::NUTZUNG),
             OPTIONEN_ITEM if super::optionen::available(cx) => Some(super::optionen::OPTIONEN),
             _ => None,
         };
@@ -830,7 +836,7 @@ impl Screen for MenuBar {
             (
                 Some(
                     QUIT_QUESTION | NEW_GAME_QUESTION | super::konfig3d::KONFIG_3D
-                    | super::musik::MUSIK | super::optionen::OPTIONEN,
+                    | super::musik::MUSIK | super::optionen::OPTIONEN | super::nutzung::NUTZUNG,
                 ),
                 _,
             ) => {

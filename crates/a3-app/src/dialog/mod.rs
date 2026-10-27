@@ -652,7 +652,10 @@ fn write_settings(mut exit: MessageReader<AppExit>, view: Res<OpenDialog>, dir: 
     if exit.read().next().is_none() {
         return;
     }
-    for (file, bytes) in &view.0.state().settings_files {
+    let state = view.0.state();
+    // And the play time's counts, as `FUN_0078873a` writes them.
+    let play = (a3_core::playtime::FILE, state.play.file(std::time::Instant::now()));
+    for (file, bytes) in state.settings_files.iter().chain([&play]) {
         match std::fs::write(dir.0.join(file), bytes) {
             Ok(()) => info!("{file} written"),
             Err(err) => warn!("{file}: {err}"),

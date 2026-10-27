@@ -48,6 +48,8 @@ pub struct GameState {
     /// game writes `musik.cfg` and `Konfig3D.cfg` on its way out
     /// (`FUN_00431e01`).
     pub settings_files: Vec<(&'static str, Vec<u8>)>,
+    /// How long and how often the game is played (`zeit.saq`).
+    pub play: crate::playtime::PlayTime,
 }
 
 impl GameState {

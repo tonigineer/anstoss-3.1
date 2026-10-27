@@ -3328,6 +3328,31 @@ mod tests {
         assert_eq!(runner.host.view().id, 413);
     }
 
+    /// "Wie oft & Wie lange" (dialog 158): the counts of the oracle's
+    /// zeit.saq with this start counted in, its longest session, and the
+    /// game's play time as Probe1 was saved with it, counting on.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_play_time_counts_from_the_files() {
+        let game = game();
+        let words = std::fs::read(game.dir.join("zeit.saq")).ok();
+        let word = |i: usize| {
+            words.as_ref().map(|w| u32::from_le_bytes(w[4 * i..4 * i + 4].try_into().unwrap()))
+        };
+        let then = "now click bar 17\nuntil dialog 302\nnow choose 4035 8\nuntil dialog 158";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&158];
+        let text = |id| view.text(control(dialog, id).unwrap()).to_owned();
+        assert_eq!(text(2687), word(0).map_or(1, |w| w + 1).to_string());
+        assert_eq!(text(2689), word(1).unwrap_or(1).to_string());
+        let longest = word(3).unwrap_or(0);
+        assert_eq!(text(6412), a3_core::playtime::split(longest).1);
+        // Probe1 was saved after 162 seconds of play.
+        assert!(text(2691).starts_with("00:02:4"), "{}", text(2691));
+        assert_eq!(text(2686), "");
+    }
+
     /// "Optionen" (dialog 503): OK writes the switches into the globals'
     /// block, the start screen into the manager and the difficulty once,
     /// locked from then on; cancel writes nothing.

@@ -25,6 +25,7 @@ pub mod medical;
 pub mod menu_text;
 pub mod musik;
 pub mod notepad;
+pub mod nutzung;
 pub mod office;
 pub mod optionen;
 pub mod opponent;
@@ -153,6 +154,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(musik::Musik::default()),
         Box::new(optionen::Optionen::default()),
         Box::new(announcement::Announcement),
+        Box::new(nutzung::Nutzung::default()),
         Box::new(year::YearCalendar::default()),
         Box::new(finances::Balance::default()),
         Box::new(finances::Finances::default()),
@@ -269,6 +271,7 @@ pub fn compose(game: &mut Game) {
     musik::compose(&mut game.dialogs);
     optionen::compose(&mut game.dialogs);
     announcement::compose(&mut game.dialogs);
+    nutzung::compose(&mut game.dialogs);
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);

@@ -27,6 +27,7 @@ pub mod mood;
 pub mod newgame;
 pub mod noracsa;
 pub mod opponent;
+pub mod playtime;
 pub mod random;
 pub mod records;
 pub mod refit;
