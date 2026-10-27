@@ -3071,8 +3071,9 @@ mod tests {
         }
         // A wife of the fifth name pool born on the 15th of June 1986,
         // two children, and wealth enough for the last step of every row.
-        // (A wife of pool 14, as the RE note poked in, would name her
-        // from the mixed lists of the game's data file — not read yet.)
+        // (Pool 14, as an old RE note poked in, is out of range: the
+        // original keeps eight pools, and past that it reads a name out
+        // of unrelated memory — nothing to match.)
         let (nation, month, year, day) = {
             let mut state = runner.host.state();
             let current = state.season.as_ref().unwrap().current;

@@ -124,10 +124,13 @@ impl Screen for Privates {
         set(view, dialog, WEALTH, money(game, manager.get::<i32>(WEALTH_AT).into()));
 
         // The wife: her number names her in one of the pools of first
-        // names the executable keeps; the higher pools of mixed names
-        // come from the game's data file (`FUN_0067503a`'s tables) and
-        // are not read yet, leaving the name empty. Without a wife the
-        // "ledig" and "---" of the file stay.
+        // names. The original keeps eight of them (`FUN_00674fb9` fills
+        // `DAT_00b9f048` from the executable's table of 800 names, and
+        // `FUN_0067503a` reads `pool * 100 + number` from it). A pool
+        // past the eighth reads past the table into unrelated memory —
+        // the "Thomas" an old note saw for pool 14 is just string 46
+        // of the original's own table — here the name stays empty.
+        // Without a wife the "ledig" and "---" of the file stay.
         let block = manager.get::<[u8; 40]>(PRIVATE_AT);
         self.levels = [block[0xc], block[0xd], block[0xe]];
         let picture = |view: &mut View, id: u16| {
