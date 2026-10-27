@@ -277,6 +277,51 @@ pub fn youth_talk_booked(records: &Records, id: u16) -> bool {
     })
 }
 
+/// The professional-contract talks with the youth (`0x1c53ba8`) and the
+/// amateurs (`0x1c53a68`, block from 0x20 before): a count, then up to 28
+/// entries of 10 bytes — the player, the club's country and number, the
+/// day, 0 (`FUN_00763937`); and the planner's kinds they are booked as.
+const AMATEUR_TALKS_AT: u32 = 0x1c53a48;
+const TALKS_MOST: usize = 0x1c;
+pub const YOUTH_CONTRACT_TALK: u8 = 0x0f;
+pub const AMATEUR_CONTRACT_TALK: u8 = 0x10;
+
+/// Whether a contract talk with him is booked among the amateurs', which
+/// "Profivertrag geben" asks for youths too (`FUN_00763cca`).
+pub fn amateur_talk_booked(records: &Records, id: u16) -> bool {
+    records.block(&format!("{AMATEUR_TALKS_AT:#x}")).is_some_and(|b| {
+        let count = usize::try_from(word(b, 0)).unwrap_or(0);
+        (0..count).any(|k| word(b, 2 + k * YOUTH_TALK) as u16 == id)
+    })
+}
+
+/// A contract talk on `day`, into the youth's list or the amateurs'
+/// (`FUN_00765a59`, `FUN_007660ca`); false when the list is full.
+pub fn book_contract_talk(
+    records: &mut Records,
+    youth: bool,
+    id: u16,
+    (country, number): (u8, u16),
+    day: i16,
+) -> bool {
+    let at = if youth { YOUTH_TALKS_AT } else { AMATEUR_TALKS_AT };
+    let Some(block) = records.block_mut(&format!("{at:#x}")) else { return false };
+    let count = usize::try_from(word(block, 0)).unwrap_or(0);
+    let entry = 2 + count * YOUTH_TALK;
+    if count >= TALKS_MOST || block.len() < entry + YOUTH_TALK {
+        return false;
+    }
+    let mut put = |at: usize, value: u16| block[at..at + 2].copy_from_slice(&value.to_le_bytes());
+    put(entry, id);
+    put(entry + 4, number);
+    put(entry + 6, day as u16);
+    put(entry + 8, 0);
+    put(0, count as u16 + 1);
+    // The country a byte of its own; the one after it stays as it was.
+    block[entry + 2] = country;
+    true
+}
+
 /// A club's amateur pool: those moved up, the amateurs (`FUN_00407ecd`).
 pub fn pool(records: &Records, country: u8, number: u16) -> [Vec<u16>; 2] {
     let Some(block) = records

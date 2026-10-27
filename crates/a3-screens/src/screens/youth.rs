@@ -290,6 +290,10 @@ impl Screen for Youths {
             }
         }
         fill_youths(cx, view);
+        // The table buttons stand up until one is pressed.
+        if let Some(tables) = control(dialog, TABLES).and_then(|c| view.options_mut(c)) {
+            tables.chosen = crate::controls::options::NONE;
+        }
         mark_inert(view, dialog, |_| true);
     }
 
@@ -793,12 +797,14 @@ fn own_extra_mut<'a>(cx: &'a mut Cx) -> Option<&'a mut a3_core::records::Extra> 
 }
 
 /// What to do with a youth or an amateur (dialog 11): four weeks with the
-/// professionals, a professional contract (needs the week planner's
-/// booking, not built), nothing.
+/// professionals, a professional contract's talk booked in the week
+/// planner, nothing.
 #[derive(Default)]
 pub struct TrialChoice {
     player: u16,
     youth: bool,
+    /// The week planner is open to book the contract talk.
+    booking: bool,
 }
 
 const TRIAL_TEXT: u16 = 1252;
@@ -808,6 +814,10 @@ const CONTRACT: usize = 1;
 const NOTHING: usize = 2;
 const YOUTH_TITLE: u16 = 4289;
 const INJURED_TOO_LONG: u16 = 2920;
+/// "Profivertrag geben" refused: a talk with him booked already, or the
+/// week's last day.
+const CONTRACT_TALK_BOOKED: u16 = 2921;
+const NO_DAY_LEFT: u16 = 2922;
 const ON_TRIAL: u16 = 2461;
 const TRIAL_MASK: u8 = 0x0f;
 /// The amateurs with a known status a squad may hold (dialog 10, not
@@ -839,8 +849,8 @@ impl Screen for TrialChoice {
             view.set_chosen(c, crate::controls::options::NONE);
         }
         super::market::question_ball(view, dialog);
-        let contract = |t| matches!(t, Target::Option { control: c, item: CONTRACT } if dialog.controls[c].id == Some(TRIAL_CHOICES));
-        mark_inert(view, dialog, |t| !contract(t));
+        self.booking = false;
+        mark_inert(view, dialog, |_| true);
     }
 
     /// `CAmateurspielerProbetraining`: the trial's checks, then a shirt
@@ -852,13 +862,42 @@ impl Screen for TrialChoice {
         }
         match item {
             TRY => self.try_out(cx),
+            CONTRACT => self.offer_contract(cx),
             NOTHING => Outcome::Close(Reply::Cancel),
             _ => Outcome::Stay,
         }
     }
+
+    /// After the planner the dialog ends, booked or not; after an alert it
+    /// stays.
+    fn answer(&mut self, _: &mut Cx, _: &mut View, _: Reply) -> Outcome {
+        if std::mem::take(&mut self.booking) {
+            return Outcome::Close(Reply::Cancel);
+        }
+        Outcome::Stay
+    }
 }
 
 impl TrialChoice {
+    /// "Profivertrag geben" (`FUN_00441fc9` item 1): refused for a player
+    /// with a talk among the amateurs' already and on the week's last day,
+    /// else the week planner books the talk (kind 0x0f for a youth, 0x10
+    /// for an amateur).
+    fn offer_contract(&mut self, cx: &mut Cx) -> Outcome {
+        let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+        let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };
+        if youth::amateur_talk_booked(records, self.player) {
+            return notice(CONTRACT_TALK_BOOKED);
+        }
+        if records.globals.day() % 7 == 6 {
+            return notice(NO_DAY_LEFT);
+        }
+        let kind =
+            if self.youth { youth::YOUTH_CONTRACT_TALK } else { youth::AMATEUR_CONTRACT_TALK };
+        self.booking = true;
+        Outcome::Popup(Request::with(super::planner::PLANNER, Args::Book(kind, self.player)))
+    }
+
     fn try_out(&self, cx: &mut Cx) -> Outcome {
         let notice = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
         let Some(records) = cx.state.records.as_ref() else { return Outcome::Stay };

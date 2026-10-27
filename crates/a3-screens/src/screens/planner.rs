@@ -14,6 +14,7 @@ use a3_core::cycle::Negotiation;
 use a3_core::records::{Appointment, Records};
 use a3_core::season::Rules;
 use a3_core::transfers;
+use a3_core::youth;
 use a3_files::rch::Dialog;
 
 use super::hub::{self, WEEK_PLANNER, WEEK_PLANNER_SYMBOL};
@@ -360,6 +361,18 @@ impl Planner {
                     [0; transfers::TERMS]
                 };
                 transfers::book(records, n.kind, day, n.player, seller, buyer, terms);
+            }
+        }
+        // A professional contract's talk goes into the youth's or the
+        // amateurs' list first; a full list books nothing (`FUN_00765a59`,
+        // `FUN_007660ca`).
+        let contract = [youth::YOUTH_CONTRACT_TALK, youth::AMATEUR_CONTRACT_TALK];
+        if self.negotiation.is_none() && contract.contains(&self.kind) {
+            let Some(m) = records.managers.get(slot) else { return };
+            let club = (m.country() as u8, m.team() as u16);
+            let youth = self.kind == youth::YOUTH_CONTRACT_TALK;
+            if !youth::book_contract_talk(records, youth, self.player, club, day) {
+                return;
             }
         }
         if let Some(planner) = records.planners.get_mut(slot) {

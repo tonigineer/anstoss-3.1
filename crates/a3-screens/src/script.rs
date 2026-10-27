@@ -3188,6 +3188,34 @@ mod tests {
         assert_eq!((booked.kind, booked.flag, booked.player), (0x19, 1, 3204));
     }
 
+    /// "Profivertrag geben" for Probe1's amateur Wilson (dialog 11): the
+    /// week planner books the talk on Monday, kind 0x10, into the
+    /// amateurs' list too; asked again, alert 2921 refuses — as the
+    /// original does.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_professional_contract_talk_is_booked() {
+        let game = game();
+        let wilson = "now click at 80 91\nuntil dialog 11";
+        let book = format!(
+            "now click bar 10\nuntil dialog 218\nnow choose 5042 3\nuntil dialog 427\n\
+             {wilson}\nnow choose 1254 1\nuntil dialog 412\nnow choose 5034 1\nuntil dialog 427"
+        );
+        let Some(runner) = on_save(&game, "Probe1", &book) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let monday = usize::from(records.globals.day()) + 1;
+        let booked = records.planners[0].day(monday);
+        assert_eq!((booked.kind, booked.flag), (0x10, 1));
+        assert!(a3_core::youth::amateur_talk_booked(records, booked.player));
+        drop(state);
+        let again = format!("{book}\n{wilson}\nnow choose 1254 1\nuntil dialog 380");
+        let Some(runner) = on_save(&game, "Probe1", &again) else { return };
+        let view = runner.host.view();
+        let text = view.text(control(&game.dialogs[&380], 4730).unwrap());
+        assert_eq!(text, game.text(2921));
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn spiel_beenden_ends_the_game() {
