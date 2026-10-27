@@ -280,20 +280,39 @@ impl<'a> Original<'a> {
         Ok(day as i16 as usize)
     }
 
-    /// Acts on the controls of the dialog `up`.
+    /// Acts on the controls of the dialog `up`; `dbl` clicks the action it
+    /// holds twice, close enough together for the original's Windows to
+    /// take it as a double click.
     fn act(&mut self, up: Up, action: &Action) -> Result<(), Error> {
+        if let Action::Dbl(inner) = action {
+            self.act_on(up, inner, false)?;
+            self.act_on(up, inner, false)?;
+            sleep(PAUSE);
+            return Ok(());
+        }
+        self.act_on(up, action, true)
+    }
+
+    /// Acts on the controls of the dialog `up`, waiting `pause` afterwards
+    /// for the original to take the action in.
+    fn act_on(&mut self, up: Up, action: &Action, pause: bool) -> Result<(), Error> {
+        let rest = || {
+            if pause {
+                sleep(PAUSE);
+            }
+        };
         self.log.push(format!("  {action:?}"));
         if let Action::Wait = action {
             return self.wait(up);
         }
         if let Action::ClickAt((x, y)) = *action {
             self.click(Vec2::new(f32::from(x), f32::from(y)))?;
-            sleep(PAUSE);
+            rest();
             return Ok(());
         }
         if let Action::DragAt((x0, y0), (x1, y1)) = *action {
             self.probe.ask(format!("drag {x0} {y0} {x1} {y1}").as_bytes())?;
-            sleep(PAUSE);
+            rest();
             return Ok(());
         }
         let dialog = self.game.dialogs.get(&up.id).ok_or(Error::NoActions(up.id))?;
@@ -331,7 +350,7 @@ impl<'a> Original<'a> {
             let at = rect(grip(at))?.center();
             self.probe.ask(format!("rclick {} {}", at.x as i32, at.y as i32).as_bytes())?;
             self.menu_at = Some(at);
-            sleep(PAUSE);
+            rest();
             return Ok(());
         }
         // An entry of the menu a right click opened (dialog 415).
@@ -341,7 +360,7 @@ impl<'a> Original<'a> {
             let at =
                 self.menu_at.ok_or_else(|| Error::Unsupported(up.id, format!("{action:?}")))?;
             self.click(menu::entry(at, item).center())?;
-            sleep(PAUSE);
+            rest();
             return Ok(());
         }
         if let Target::Drop { from, to, .. } = target {
@@ -360,7 +379,7 @@ impl<'a> Original<'a> {
             let command =
                 format!("drag {} {} {} {}", from.x as i32, from.y as i32, to.x as i32, to.y as i32);
             self.probe.ask(command.as_bytes())?;
-            sleep(PAUSE);
+            rest();
             return Ok(());
         }
         self.click(rect(target)?.center())?;
@@ -377,7 +396,7 @@ impl<'a> Original<'a> {
             command.extend(text.chars().map(windows_1252));
             self.probe.ask(&command)?;
         }
-        sleep(PAUSE);
+        rest();
         Ok(())
     }
 

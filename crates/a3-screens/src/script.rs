@@ -94,6 +94,9 @@ pub(crate) enum Action {
     PointAt((i16, i16)),
     /// A right click on a control or a list's row.
     RightClick(Spot),
+    /// A second click on what another action clicked: the double click of
+    /// a list's row, which the game takes for a choice.
+    Dbl(Box<Action>),
     Wait,
 }
 
@@ -250,6 +253,7 @@ fn parse_action(action: &str) -> Option<Action> {
             (spot, []) => Action::RightClick(spot),
             _ => return None,
         },
+        ["dbl", ref rest @ ..] => Action::Dbl(Box::new(parse_action(&rest.join(" "))?)),
         ["click", "at", x, y] => Action::ClickAt((x.parse().ok()?, y.parse().ok()?)),
         ["point", "at", x, y] => Action::PointAt((x.parse().ok()?, y.parse().ok()?)),
         ["drag", "at", x0, y0, "to", x1, y1] => {
@@ -375,8 +379,20 @@ impl<'a> Runner<'a> {
         Ok(())
     }
 
-    /// Acts on the controls of the dialog `shown`.
+    /// Acts on the controls of the dialog `shown`; `dbl` clicks the action
+    /// it holds a second time, which is what Windows takes for a double
+    /// click.
     fn act(&mut self, shown: u16, action: &Action) -> Result<(), Error> {
+        if let Action::Dbl(inner) = action {
+            self.act(shown, inner)?;
+            return self.act_on(shown, inner, true);
+        }
+        self.act_on(shown, action, false)
+    }
+
+    /// Acts on the controls of the dialog `shown`, `double` for the second
+    /// click of a double click.
+    fn act_on(&mut self, shown: u16, action: &Action, double: bool) -> Result<(), Error> {
         self.log.push(format!("  {action:?}"));
         let game = self.game;
         let controls = &game.dialogs[&shown];
@@ -449,7 +465,7 @@ impl<'a> Runner<'a> {
                 target => target,
             },
         };
-        let change = self.host.input(game, target, false);
+        let change = self.host.input(game, target, double);
         self.change(change);
         Ok(())
     }
@@ -552,6 +568,8 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::RightClick(spot) => Target::Menu(grip(controls, dialog, spot)?),
         Action::Type(id, _) => Target::Edit(find(id)?),
         Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
+        // A double click acts twice; the runner does that, not this.
+        Action::Dbl(_) => return Err(Error::Unsupported(dialog, "a double click".into())),
         Action::DragAt(..) | Action::ClickAt(_) | Action::PointAt(_) => {
             return Err(Error::Unsupported(dialog, "an action by pixels".into()));
         }
@@ -1249,6 +1267,56 @@ mod tests {
         let week = usize::from(records.globals.day()) / 7;
         assert_eq!(manager.week(week).template, 3);
         assert_eq!(manager.camp_rules()[0], 3);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_double_click_on_a_week_asks_which_player_to_watch() {
+        let game = game();
+        // Week 30 of the season, mid-week: on the page of weeks the double
+        // click of week 36 asks whom to watch that week (281) — the list the
+        // short training's combo holds. A row names the player, "keiner" and
+        // the OK store nobody, a cancellation keeps him, and a double click
+        // on a week already over asks nothing.
+        let now = on_save(&game, "Probe1", "").unwrap();
+        let week = now.host.state().season.as_ref().unwrap().day / 7;
+        let (open, past) = (week + 6, week - 3);
+        let page = format!("now click bar 3\nuntil dialog 345\nnow choose 4403 {}", open / 25);
+        let dbl = |row: usize| format!("now dbl row 4407 {row}\nuntil dialog 281");
+        let asked = format!("{page}\n{}", dbl(open % 25));
+        let picked = format!("{asked}\nnow row 3827 2\nuntil dialog 345");
+        let watch = |answer: &str| format!("{picked}\n{}\n{answer}", dbl(open % 25));
+        let player = |runner: &Runner| {
+            runner.host.state().records.as_ref().unwrap().humans().next().unwrap().week(open).player
+        };
+        let before = player(&now);
+        let rows = |runner: &Runner, dialog: u16, id: u16| {
+            let c = crate::screens::control(&game.dialogs[&dialog], id).unwrap();
+            runner.host.view().list(c).unwrap().rows.clone()
+        };
+        let runner = on_save(&game, "Probe1", &asked).unwrap();
+        assert_eq!(runner.host.view().id, 281, "{}", runner.log.join("\n"));
+        let asked_rows = rows(&runner, 281, 3827);
+        assert_eq!(asked_rows[0], game.text(1091));
+        let shown = on_save(&game, "Probe1", "now click bar 4\nuntil dialog 346").unwrap();
+        let combo = crate::screens::control(&game.dialogs[&346], 4427).unwrap();
+        let items = shown.host.view().combo(combo).unwrap().items.clone();
+        assert_eq!(asked_rows, items);
+        let named = asked_rows.get(2).map_or(String::new(), |r| r.split('\t').next().unwrap().into());
+        let runner = on_save(&game, "Probe1", &picked).unwrap();
+        let chosen = player(&runner);
+        assert_ne!(chosen, 0);
+        let listed = rows(&runner, 345, 4407).remove(open % 25);
+        assert_eq!(listed.split('\t').nth(2), Some(named.as_str()));
+        let runner = on_save(&game, "Probe1", &watch("now cancel")).unwrap();
+        assert_eq!((player(&runner), seen(&runner, 281)), (chosen, 2), "{}", runner.log.join("\n"));
+        let runner = on_save(&game, "Probe1", &watch("now row 3827 0")).unwrap();
+        assert_eq!(player(&runner), 0);
+        let runner = on_save(&game, "Probe1", &watch("now ok")).unwrap();
+        assert_eq!(player(&runner), 0);
+        let over = format!("now dbl row 4407 {}", past % 25);
+        let runner = on_save(&game, "Probe1", &format!("{page}\n{over}")).unwrap();
+        assert_eq!((player(&runner), seen(&runner, 281)), (before, 0), "{}", runner.log.join("\n"));
     }
 
     #[test]

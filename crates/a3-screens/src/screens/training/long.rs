@@ -3,7 +3,8 @@
 //! weeks, twenty-five at a time, each with its template, its player in
 //! individual training, its kind and the team's condition and freshness;
 //! a template chosen for the selected week, who the week's player is when
-//! nobody is chosen, who the detective watches, a training camp's food,
+//! nobody is chosen, a double click on a week asking which player to watch
+//! (dialog 281), who the detective watches, a training camp's food,
 //! going out and control, secret training, and the co-trainer planning
 //! the empty weeks.
 
@@ -16,6 +17,7 @@ use a3_files::rch::Dialog;
 
 use super::super::duties::short_name;
 use super::super::hub::{self, LONG_TRAINING, LONG_TRAINING_SYMBOL};
+use super::super::talk::PLAYER_CHOICE;
 use super::super::{Args, Cx, Outcome, Reply, Request, Screen, control, mark_inert, set};
 use super::change as change_training;
 use super::change_week;
@@ -88,6 +90,8 @@ pub struct LongTraining {
     watched: Vec<u16>,
     /// Whether the whistle asks.
     whistle: bool,
+    /// The week the double click asked a player for, while 281 is up.
+    pick: Option<usize>,
 }
 
 impl Screen for LongTraining {
@@ -157,7 +161,7 @@ impl Screen for LongTraining {
         mark_inert(view, dialog, works);
     }
 
-    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, double: bool) -> Outcome {
         let dialog = cx.dialog;
         let id = |c: usize| dialog.controls[c].id.unwrap_or(0);
         if let Some(item) = hub::on_bar(dialog, target) {
@@ -170,14 +174,19 @@ impl Screen for LongTraining {
         }
         match target {
             // A week not over yet is selected; one that is keeps the
-            // selection where it was.
+            // selection where it was. Its double click asks which player to
+            // watch that week (dialog 281, `LBN_DBLCLK`).
             Target::Row { control: c, row } if id(c) == WEEKS => {
                 let week = self.page * PAGE + row;
-                let done = week_entry(cx, week).is_none_or(|w| w.done);
-                if !done {
+                let open = week_entry(cx, week).is_none_or(|w| !w.done);
+                if open {
                     self.selected = week;
                 }
                 self.select(view);
+                if double && open {
+                    self.pick = Some(week);
+                    return Outcome::Popup(Request::with(PLAYER_CHOICE, Args::WeekPlayer));
+                }
             }
             Target::Option { control: c, item } if id(c) == PAGES => {
                 self.page = item;
@@ -213,8 +222,17 @@ impl Screen for LongTraining {
         Outcome::Stay
     }
 
-    /// The whistle's question: a yes ends the turn.
-    fn answer(&mut self, _: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+    /// The whistle's question: a yes ends the turn. 281's choice names the
+    /// week's player — "keiner" as 0 — and the weeks are filled again; a
+    /// cancellation leaves the week as it was.
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        if let Some(week) = self.pick.take() {
+            if let Reply::Choice(player) = reply {
+                change_week(cx, week, |w| w.player = u16::try_from(player).unwrap_or(0));
+                self.fill(cx, view);
+            }
+            return Outcome::Stay;
+        }
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
         }

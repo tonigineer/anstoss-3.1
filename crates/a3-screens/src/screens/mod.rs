@@ -214,7 +214,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(market::WatchList::default()),
         Box::new(market::WatchedPlayer::default()),
         Box::new(talk::TalkScreen::default()),
-        Box::new(talk::Mates::default()),
+        Box::new(talk::PlayerChoice::default()),
         Box::new(tactics::TacticsScreen::default()),
         Box::new(comparison::Comparison::default()),
         Box::new(training::ShortTraining::default()),

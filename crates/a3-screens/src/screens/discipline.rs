@@ -73,7 +73,7 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
         QUESTION,
         super::planner::PLANNER,
         super::talk::TALK,
-        super::talk::MATES,
+        super::talk::PLAYER_CHOICE,
     ];
     for id in ids {
         let Some(dialog) = dialogs.get_mut(&id) else { continue };

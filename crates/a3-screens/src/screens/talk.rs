@@ -20,7 +20,7 @@ use crate::pointer::Target;
 use crate::view::View;
 
 pub const TALK: u16 = a3_core::cycle::dialogs::TALK;
-pub const MATES: u16 = 281;
+pub const PLAYER_CHOICE: u16 = 281;
 const NAME: u16 = 5833;
 const PORTRAIT: u16 = 1256;
 const FORM: u16 = 5834;
@@ -36,8 +36,8 @@ const OK: u16 = 1;
 const OK_LOOK: (u16, u16) = (1272, 1273);
 const SUSPEND_ITEM: usize = 5;
 const INFORMER_ITEM: usize = 10;
-const MATES_TEXT: u16 = 3828;
-const MATES_LIST: u16 = 3827;
+const CHOICE_TEXT: u16 = 3828;
+const CHOICE_LIST: u16 = 3827;
 
 /// Texts of the game.
 const SECOND_CHANCE: u16 = 4442;
@@ -127,7 +127,7 @@ impl TalkScreen {
             }
             Some(Said::ChooseMate) => {
                 self.waiting = Waiting::Mate;
-                Outcome::Popup(Request::with(MATES, Args::Record(self.player)))
+                Outcome::Popup(Request::with(PLAYER_CHOICE, Args::Record(self.player)))
             }
         }
     }
@@ -247,40 +247,49 @@ impl Screen for TalkScreen {
     }
 }
 
-/// With whom to reconcile the player: nobody, or one of his team-mates
-/// (dialog 281); a row chosen closes it with that one.
+/// Which player out of the squad (dialog 281): "keiner" first, then the
+/// players to choose from; a row clicked closes it with that one, OK with
+/// nobody. The talk's "Versöhnung" asks for a team-mate to reconcile with,
+/// naming him in the question, the team-mates without the player himself;
+/// the long-term training's double click on a week asks whom to watch that
+/// week, asking with the sentence its dialog already carries and listing the
+/// squad as [`super::training`] does, under seven days out and the least in
+/// form first.
 #[derive(Default)]
-pub struct Mates {
-    ids: Vec<u16>,
+pub struct PlayerChoice {
+    /// The rows: the player's id, 0 for "keiner", and the row's text.
+    rows: Vec<(u16, String)>,
 }
 
-impl Screen for Mates {
+impl Screen for PlayerChoice {
     fn ids(&self) -> &[u16] {
-        &[MATES]
+        &[PLAYER_CHOICE]
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
-        let Args::Record(player) = args else { return };
-        let records = cx.state.records.as_ref();
-        let name = |id: u16| records.and_then(|r| r.known_as(id)).unwrap_or_default();
-        set(
-            view,
-            cx.dialog,
-            MATES_TEXT,
-            cx.game.text(RECONCILE_WITH).replacen("%s", &name(player), 1),
-        );
-        let squad = whose(cx)
-            .and_then(|(club, _, _)| records?.team(club.country, club.number))
-            .map_or_else(Vec::new, |t| t.players());
-        self.ids = std::iter::once(0).chain(squad.into_iter().filter(|&id| id != player)).collect();
-        let rows = self
-            .ids
-            .iter()
-            .map(|&id| if id == 0 { cx.game.text(NOBODY).to_owned() } else { name(id) })
-            .collect();
-        if let Some(list) = control(cx.dialog, MATES_LIST).and_then(|c| view.list_mut(c)) {
+        self.rows = match args {
+            Args::Record(player) => {
+                let records = cx.state.records.as_ref();
+                let name = |id: u16| records.and_then(|r| r.known_as(id)).unwrap_or_default();
+                set(
+                    view,
+                    cx.dialog,
+                    CHOICE_TEXT,
+                    cx.game.text(RECONCILE_WITH).replacen("%s", &name(player), 1),
+                );
+                let squad = whose(cx)
+                    .and_then(|(club, _, _)| records?.team(club.country, club.number))
+                    .map_or_else(Vec::new, |t| t.players());
+                std::iter::once((0, cx.game.text(NOBODY).to_owned()))
+                    .chain(squad.into_iter().filter(|&id| id != player).map(|id| (id, name(id))))
+                    .collect()
+            }
+            Args::WeekPlayer => super::training::pickable(cx),
+            _ => return,
+        };
+        if let Some(list) = control(cx.dialog, CHOICE_LIST).and_then(|c| view.list_mut(c)) {
             *list = Default::default();
-            list.rows = rows;
+            list.rows = self.rows.iter().map(|(_, row)| row.clone()).collect();
         }
     }
 
@@ -293,10 +302,10 @@ impl Screen for Mates {
             return Outcome::Close(Reply::Choice(0));
         }
         if let Target::Row { control: c, row } = target
-            && cx.dialog.controls[c].id == Some(MATES_LIST)
+            && cx.dialog.controls[c].id == Some(CHOICE_LIST)
         {
             let scroll = view.list(c).map_or(0, |l| l.scroll);
-            let id = self.ids.get(scroll + row).copied().unwrap_or(0);
+            let id = self.rows.get(scroll + row).map_or(0, |&(id, _)| id);
             return Outcome::Close(Reply::Choice(usize::from(id)));
         }
         Outcome::Stay

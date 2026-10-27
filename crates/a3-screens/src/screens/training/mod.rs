@@ -358,27 +358,15 @@ impl ShortTraining {
         }
     }
 
-    /// "keiner", then the players out for a week at most, the least in form
-    /// first, the one chosen for this week selected (`FUN_005979f1`).
+    /// The combo of the player to single out: "keiner", then the squad as
+    /// [`pickable`] lists it, the one chosen for this week selected.
     fn fill_players(&mut self, cx: &Cx, view: &mut View) {
-        let Some(club) = own(cx) else { return };
         let Some(c) = control(cx.dialog, INDIVIDUAL) else { return };
-        let mut squad: Vec<(i32, usize)> = (0..club.players.len())
-            .filter(|&p| club.status.get(p).is_none_or(|s| s.injured <= MOST_DAYS_OUT))
-            .map(|p| (lineup::form(lineup::fitness_of(&club.fitness, p)), p))
-            .collect();
-        squad.sort_by_key(|&(form, _)| form);
-        let pitch = &cx.game.rules.pitch;
-        let mut items = vec![cx.game.text(NOBODY).to_owned()];
-        self.players.clear();
-        for &(form, p) in &squad {
-            let player = &club.players[p];
-            let id = club.status.get(p).map_or(0, |s| s.id);
-            let kind = pitch.abbreviations.get(usize::from(player.positions[0])).copied();
-            let position = kind.map_or("", |k| cx.game.text(k as u16));
-            items.push(format!("{}\t{position}\t{form}", short_name(cx, player, id)));
-            self.players.push(id);
+        let rows = pickable(cx);
+        if rows.is_empty() {
+            return;
         }
+        self.players = rows.iter().skip(1).map(|&(id, _)| id).collect();
         let chosen = cx
             .state
             .season
@@ -388,7 +376,7 @@ impl ShortTraining {
             .map_or(0, |w| w.player);
         let selected = self.players.iter().position(|&id| id != 0 && id == chosen);
         if let Some(combo) = view.combo_mut(c) {
-            combo.items = items;
+            combo.items = rows.into_iter().map(|(_, row)| row).collect();
             combo.selected = Some(selected.map_or(0, |row| row + 1));
         }
     }
@@ -589,6 +577,29 @@ fn own<'a>(cx: &'a Cx) -> Option<&'a ClubState> {
 
 fn own_key(cx: &Cx) -> Option<(usize, usize)> {
     cx.state.season.as_ref()?.manager()?.club
+}
+
+/// The players a week may single out: "keiner" first, then the club's own
+/// who are out for a week at most, the least in form first — dialog 346's
+/// combo and dialog 281's list the same (`FUN_005979f1`, `FUN_005a03fe`).
+/// A row is the player's id, 0 for "keiner", and its text.
+pub(super) fn pickable(cx: &Cx) -> Vec<(u16, String)> {
+    let Some(club) = own(cx) else { return Vec::new() };
+    let mut squad: Vec<(i32, usize)> = (0..club.players.len())
+        .filter(|&p| club.status.get(p).is_none_or(|s| s.injured <= MOST_DAYS_OUT))
+        .map(|p| (lineup::form(lineup::fitness_of(&club.fitness, p)), p))
+        .collect();
+    squad.sort_by_key(|&(form, _)| form);
+    let pitch = &cx.game.rules.pitch;
+    let mut rows = vec![(0, cx.game.text(NOBODY).to_owned())];
+    for &(form, p) in &squad {
+        let player = &club.players[p];
+        let id = club.status.get(p).map_or(0, |s| s.id);
+        let kind = pitch.abbreviations.get(usize::from(player.positions[0])).copied();
+        let position = kind.map_or("", |k| cx.game.text(k as u16));
+        rows.push((id, format!("{}\t{position}\t{form}", short_name(cx, player, id))));
+    }
+    rows
 }
 
 /// A team's condition, freshness and offside trap, as the screen shows

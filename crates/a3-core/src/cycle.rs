@@ -221,6 +221,9 @@ pub enum Args {
     Player(usize),
     /// A player of the game, by his record's id.
     Record(u16),
+    /// Which player to watch a week: dialog 281 asking for one of the
+    /// club's own, none excluded, "keiner" among them.
+    WeekPlayer,
     /// An alert the game writes itself, by where it is in the program.
     Message(u32),
     /// A text by its id, with a player's name for its `%s`.

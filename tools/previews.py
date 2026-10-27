@@ -77,7 +77,9 @@ AREAS = {
                    (*bar(2, 78, "now choose 5618 1", "now click at 93 248"), 78)],
     "tactics": [(*bar(3, 271), 271)],
     "long": [(*bar(4, 345), 345), (*bar(4, 345, "now choose 5035 2"), 345),
-             (*bar(4, 345, "now choose 5035 2", "now click at 134 130"), 345)],
+             (*bar(4, 345, "now choose 5035 2", "now click at 134 130"), 345),
+             # The double click of a week asks which player to watch (281).
+             (*bar(4, 345, "now dbl row 4407 15", "until dialog 281"), 281)],
     "short": [(*bar(5, 346), 346), (*bar(5, 346, "now choose 5035 4"), 346),
               (*bar(5, 346, "now choose 5035 4", "now click 4427", "now row 4427 3"), 346)],
     "individual": [(*bar(6, 347), 347), (*bar(6, 347, "now cell 3298 1 8"), 347)],
