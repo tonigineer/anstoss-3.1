@@ -3261,6 +3261,22 @@ mod tests {
         assert_eq!(shown(&runner), (14, 2, from_file.clone()));
     }
 
+    /// "Musikstücke anspielen": pressed, with the chosen pieces' mode, a
+    /// piece switched on is to be heard at once; not pressed, it is not.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_stereo_plays_a_piece_switched_on() {
+        let game = game();
+        let open = "now click bar 17\nuntil dialog 302\nnow choose 4035 1\nuntil dialog 259";
+        // "Go West", off in the oracle's musik.cfg, is the last row.
+        let heard = format!("{open}\nnow choose 6452 0\nnow choose 6451 3\nnow row 6453 13");
+        let Some(runner) = on_save(&game, "Probe1", &heard) else { return };
+        assert_eq!(runner.host.state().listen, Some(15));
+        let quiet = format!("{open}\nnow choose 6451 3\nnow row 6453 13");
+        let Some(runner) = on_save(&game, "Probe1", &quiet) else { return };
+        assert_eq!(runner.host.state().listen, None);
+    }
+
     /// "3D - Optionen" (dialog 511): open on the original's values, OK
     /// keeps a change for the next opening, cancel drops one.
     #[test]

@@ -3,8 +3,9 @@
 //! whether the game makes its sounds. A click on a piece switches it, red
 //! when on (`FUN_005833a2`). It opens on what `musik.cfg` holds, read once
 //! as the game reads it at its start (`CMusik::FUN_006eca39`); OK keeps it
-//! all for the session (`FUN_00583551`), cancel leaves it. Playing a
-//! piece on its own, "Musikstücke anspielen", stays crossed out.
+//! all for the session (`FUN_00583551`), cancel leaves it. With
+//! "Musikstücke anspielen" pressed and the chosen pieces' mode set, a
+//! piece switched on plays at once (`OnSelChange…_00583481`).
 
 use std::collections::HashMap;
 
@@ -117,10 +118,7 @@ impl Screen for Musik {
         }
         self.shown = self.pieces;
         self.show_pieces(dialog, view);
-        super::mark_inert(view, dialog, |target| match target {
-            Target::Option { control: c, .. } => dialog.controls[c].id != Some(LISTEN),
-            _ => true,
-        });
+        super::mark_inert(view, dialog, |_| true);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -134,6 +132,13 @@ impl Screen for Musik {
         if let Some(row) = row {
             if let Some(slot) = slots().nth(row) {
                 self.shown ^= 1 << slot;
+                let chosen = |id| control(dialog, id).map(|c| view.chosen(c));
+                if chosen(LISTEN) == Some(0)
+                    && chosen(MODE) == Some(CHOSEN_PIECES)
+                    && self.shown & 1 << slot != 0
+                {
+                    cx.state.listen = Some(slot);
+                }
             }
             self.show_pieces(dialog, view);
             return Outcome::Stay;

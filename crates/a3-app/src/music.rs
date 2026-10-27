@@ -140,6 +140,18 @@ fn follow_stereo(
     playing: Query<Entity, With<Playing>>,
 ) {
     let Some(dialog) = dialog else { return };
+    // A piece to be heard now ends the one playing and comes next.
+    if let Some(track) = dialog.0.state().listen.take()
+        && jukebox.loading.is_none()
+    {
+        for playing in &playing {
+            commands.entity(playing).despawn();
+        }
+        jukebox.current = Some(track);
+        let archive = jukebox.archive.clone();
+        let task = AsyncComputeTaskPool::get().spawn(async move { load(&archive, TRACKS[track]) });
+        jukebox.loading = Some(task);
+    }
     let Some((mode, sounds, ticked)) = dialog.0.state().music.take() else { return };
     jukebox.mode = mode_of(mode, ticked);
     effects.0 = sounds != 0;

@@ -41,6 +41,8 @@ pub struct GameState {
     /// What the stereo's OK set last — `musik.cfg`'s mode, sounds and
     /// pieces — until the music takes it over.
     pub music: Option<(u16, u16, u32)>,
+    /// The piece the stereo wants heard at once, by its slot.
+    pub listen: Option<usize>,
     /// Settings files of the game's folder the settings dialogs changed,
     /// with their new bytes, to be written when the program ends — as the
     /// game writes `musik.cfg` and `Konfig3D.cfg` on its way out
