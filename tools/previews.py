@@ -54,6 +54,11 @@ def on_menu(*lines):
     return ("Menu.an3", list(lines))
 
 
+def on_office(*lines):
+    """A frame on Office.an3: Toni's save with the office chosen."""
+    return ("Office.an3", list(lines))
+
+
 def new_game(dialog):
     return (None, [f"until dialog {dialog}"])
 
@@ -73,7 +78,7 @@ AREAS = {
     "start": [(*new_game(d), d) for d in (9, 140, 209, 212, 374, 99, 103)] + [
         # The fifth entry's high scores, captioned like every window.
         (None, ["now choose 4771 5; ok", "until dialog 95"], 95)],
-    "week": [(*new_game(2), 2), (*on_menu(), 501),
+    "week": [(*new_game(2), 2), (*on_office(), 483), (*on_menu(), 501),
              (*on_menu("now choose 6302 0", "until dialog 147"), 147),
              (*bar(8, 413), 413)],
     "lineup": [(*on_a("until dialog 147"), 147),
@@ -152,8 +157,10 @@ def game_dir(tmp, save):
 def shoot(tmp, save, lines, want, out):
     script = tmp / "frame.txt"
     load = LOAD if save else NEW_GAME
-    if save == "Menu.an3":  # a text-menu save opens on the menu, not the line-up
-        load = load.replace("until dialog 147", "until dialog 501")
+    # saves that chose another start view open there, not on the line-up
+    opening = {"Menu.an3": 501, "Office.an3": 483}.get(save)
+    if opening:
+        load = load.replace("until dialog 147", f"until dialog {opening}")
     script.write_text(load + "\n".join(lines) + "\n")
     run = subprocess.run([REPLICA, game_dir(tmp, save), "--script", script, "--shot", out],
                          capture_output=True, text=True)
