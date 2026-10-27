@@ -1,9 +1,10 @@
 //! Music and sound effects, from the dressing room's game options (dialog
 //! 259, `CStereoanlage`): how the music plays, which pieces it plays, and
 //! whether the game makes its sounds. A click on a piece switches it, red
-//! when on (`FUN_005833a2`); OK keeps it all for the session
-//! (`FUN_00583551`), cancel leaves it. The replica plays no music, so
-//! "Musikstücke anspielen" stays crossed out.
+//! when on (`FUN_005833a2`). It opens on what `musik.cfg` holds, read once
+//! as the game reads it at its start (`CMusik::FUN_006eca39`); OK keeps it
+//! all for the session (`FUN_00583551`), cancel leaves it. Playing a
+//! piece on its own, "Musikstücke anspielen", stays crossed out.
 
 use std::collections::HashMap;
 
@@ -39,8 +40,9 @@ const TITLES: [Option<&str>; 16] = [
     Some("Go West"),
 ];
 const ON: [u8; 3] = [255, 0, 0];
-/// "Alle hintereinander abspielen", as the original starts.
-const ALL_IN_TURN: usize = 2;
+/// What the game holds without `musik.cfg`: no music, no sounds, every
+/// piece but the third and the fifteenth.
+const NO_FILE: (u16, u16, u32) = (0, 0, 0xbffb);
 /// "Bestimmte Musikstücke spielen": with no piece left on, OK makes it
 /// "Keine Musik".
 const CHOSEN_PIECES: usize = 3;
@@ -56,17 +58,25 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
 }
 
 /// The settings OK last kept, and the pieces switched in the open dialog.
+#[derive(Default)]
 pub struct Musik {
+    read: bool,
     mode: usize,
     sounds: bool,
     pieces: u32,
     shown: u32,
 }
 
-impl Default for Musik {
-    fn default() -> Self {
-        Self { mode: ALL_IN_TURN, sounds: true, pieces: u32::from(u16::MAX), shown: 0 }
-    }
+/// `musik.cfg`: the mode (16 bits, 0–3), the sounds (16 bits, 0–1) and the
+/// pieces (32 bits), each kept in its range as the game keeps it.
+fn settings(game: &crate::game::Game) -> (u16, u16, u32) {
+    let Ok(cfg) = std::fs::read(game.dir.join("musik.cfg")) else { return NO_FILE };
+    let word = |at: usize| cfg.get(at..at + 2).map(|b| i16::from_le_bytes([b[0], b[1]]));
+    let mode = word(0).map_or(NO_FILE.0, |m| m.clamp(0, 3) as u16);
+    let sounds = word(2).map_or(NO_FILE.1, |s| s.clamp(0, 1) as u16);
+    let pieces =
+        cfg.get(4..8).map_or(NO_FILE.2, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    (mode, sounds, pieces)
 }
 
 /// The slots of the listed pieces, row by row.
@@ -89,6 +99,11 @@ impl Screen for Musik {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        if !self.read {
+            let (mode, sounds, pieces) = settings(cx.game);
+            (self.mode, self.sounds, self.pieces) = (mode.into(), sounds != 0, pieces);
+            self.read = true;
+        }
         let dialog = cx.dialog;
         if let Some(c) = control(dialog, MODE) {
             view.set_chosen(c, self.mode);

@@ -1,8 +1,9 @@
 //! The 3D options of the dressing room's game options (dialog 511,
 //! `CKonfig3DDetail`): the resolution, the quality of the figures and of
-//! the textures, and five effects. OK keeps what was set for the rest of
-//! the session, as the original keeps it in its globals
-//! (`FUN_004f9086`); cancel leaves them.
+//! the textures, and five effects. It opens on what `Konfig3D.cfg` holds,
+//! read once as the game reads it (`FUN_00433e30`);
+//! OK keeps what was set for the rest of the session, as the original
+//! keeps it in its globals (`FUN_004f9086`); cancel leaves them.
 
 use std::collections::HashMap;
 
@@ -15,15 +16,17 @@ use crate::view::View;
 pub const KONFIG_3D: u16 = 511;
 const FIGURES: u16 = 6466;
 const TEXTURES: u16 = 6475;
-/// Beleuchtung, Schatten, Details Rasen/Himmel, Bengalische Feuer,
-/// Sonstige Effekte.
-const EFFECTS: [u16; 5] = [6472, 6473, 6474, 6467, 6468];
+/// The five effects in the file's order, the dialog's own order of them
+/// (Bengalische Feuer, Sonstige Effekte, Beleuchtung, Schatten, Details
+/// Rasen/Himmel); the oracle's file has them all on, so the order is the
+/// dialog's members', not seen.
+const EFFECTS: [u16; 5] = [6467, 6468, 6472, 6473, 6474];
 /// The resolutions the 3D device offers; the replica has none to ask, so
-/// it shows the one the original showed under Wine and drops no list.
+/// it shows the file's and drops no list.
 const RESOLUTION: u16 = 6469;
-const SHOWN_RESOLUTION: &str = "640x480";
-/// "Hoch", the original's choice for both qualities.
-const HIGH: usize = 2;
+/// What the game holds without `Konfig3D.cfg`: 640x480, both qualities
+/// "Hoch", every effect on.
+const NO_FILE: [u32; 10] = [640, 480, 0, 2, 2, 1, 1, 1, 1, 1];
 
 /// The dialog keeps its title to itself; the caption bar takes it.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
@@ -32,18 +35,28 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     dialog.controls.insert(0, caption);
 }
 
-/// What OK last kept: both qualities high and every effect on, as the
-/// original shows them on a fresh start.
+/// What OK last kept, the file's until then.
+#[derive(Default)]
 pub struct Konfig3d {
+    read: bool,
+    resolution: String,
     figures: usize,
     textures: usize,
     effects: [bool; 5],
 }
 
-impl Default for Konfig3d {
-    fn default() -> Self {
-        Self { figures: HIGH, textures: HIGH, effects: [true; 5] }
+/// `Konfig3D.cfg`: ten words — width, height, depth, the two qualities and
+/// the five effects — and two more the dialog does not show.
+fn settings(game: &crate::game::Game) -> [u32; 10] {
+    let mut words = NO_FILE;
+    if let Ok(cfg) = std::fs::read(game.dir.join("Konfig3D.cfg")) {
+        for (i, word) in words.iter_mut().enumerate() {
+            if let Some(b) = cfg.get(i * 4..i * 4 + 4) {
+                *word = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+            }
+        }
     }
+    words
 }
 
 impl Screen for Konfig3d {
@@ -52,6 +65,15 @@ impl Screen for Konfig3d {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        if !self.read {
+            let words = settings(cx.game);
+            self.resolution = format!("{}x{}", words[0], words[1]);
+            (self.figures, self.textures) = (words[3] as usize, words[4] as usize);
+            for (on, &word) in self.effects.iter_mut().zip(&words[5..]) {
+                *on = word != 0;
+            }
+            self.read = true;
+        }
         let dialog = cx.dialog;
         for (id, chosen) in [(FIGURES, self.figures), (TEXTURES, self.textures)] {
             if let Some(c) = control(dialog, id) {
@@ -65,7 +87,7 @@ impl Screen for Konfig3d {
         }
         if let Some(c) = control(dialog, RESOLUTION) {
             if let Some(combo) = view.combo_mut(c) {
-                combo.items = vec![SHOWN_RESOLUTION.to_owned()];
+                combo.items = vec![self.resolution.clone()];
                 combo.selected = Some(0);
             }
             view.inert = vec![Target::Combo(c)];
