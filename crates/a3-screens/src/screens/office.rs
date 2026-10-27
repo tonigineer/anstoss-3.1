@@ -205,3 +205,33 @@ pub(crate) fn side(game: &Game, name: &str, home: bool, position: Option<usize>)
         None => game.text(if home { HOME } else { AWAY }).replacen("%s", name, 1),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::OBJECTS;
+    use a3_core::cycle::dialogs::{GRAND_OFFICE, NATIONAL_OFFICE, OFFICE};
+
+    /// The pairing table, pinned against the game files: both club offices
+    /// carry every object id, and the national office keeps the others at
+    /// other places while dropping its seven.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_object_tables_are_the_files_own() {
+        let dir = std::path::PathBuf::from(std::env::var_os("ANSTOSS3_DIR").expect("ANSTOSS3_DIR"));
+        let game = super::Game::load(&dir).unwrap();
+        let ids = |dialog: u16| -> Vec<u16> {
+            game.dialogs[&dialog].controls.iter().filter_map(|c| c.id).collect()
+        };
+        for office in [OFFICE, GRAND_OFFICE] {
+            let at = ids(office);
+            for (id, _) in OBJECTS {
+                assert!(at.contains(&id), "dialog {office} has no object {id}");
+            }
+        }
+        let at = ids(NATIONAL_OFFICE);
+        for (id, symbol) in OBJECTS {
+            let kept = !matches!(id, 6119 | 6120 | 6125 | 6126 | 6127 | 6129 | 6315);
+            assert_eq!(at.contains(&id), kept, "national office, object {id} of symbol {symbol}");
+        }
+    }
+}

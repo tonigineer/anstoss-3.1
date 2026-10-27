@@ -49,6 +49,10 @@ pub mod dialogs {
     pub const QUESTION: u16 = 384;
     pub const WAIT: u16 = 381;
     pub const OFFICE: u16 = 483;
+    /// The national manager's office.  Its objects keep the club office's
+    /// ids at other places and drop squad, money, trainings, nation and
+    /// honours; it is not reached by a manager's choice of start view.
+    pub const NATIONAL_OFFICE: u16 = 484;
     /// The grand office of the grandest clubs.
     pub const GRAND_OFFICE: u16 = 504;
     /// The text menu of a manager who chose it.  Dialog 502, the national
