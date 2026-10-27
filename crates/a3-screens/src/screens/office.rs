@@ -7,13 +7,14 @@ use std::collections::HashMap;
 use bevy_math::Vec2;
 use tracing::info;
 
+use a3_core::records::Records;
 use a3_core::season::Match;
 use a3_files::rch::{Dialog, Kind};
 
 use a3_core::cycle::dialogs::{GRAND_OFFICE, OFFICE};
 
 use super::calendar::bitmap;
-use super::{Args, Cx, Outcome, Reply, Screen, control, hub, indices, set};
+use super::{Args, Cx, Outcome, Reply, Screen, control, hub, indices, menu_text, set};
 use crate::controls::bitmap::Picture;
 use crate::game::Game;
 use crate::pointer::Target;
@@ -159,7 +160,7 @@ fn show_office(cx: &Cx, view: &mut View) {
         .and_then(|club| season.next_match(&game.world, &game.calendar, club).map(|m| (club, m)))
         .map_or_else(
             || club.map(|c| c.name.clone()).unwrap_or_default(),
-            |(club, m)| pairing(game, club, &m),
+            |(club, m)| pairing(game, cx.state.records.as_ref(), club, &m),
         );
     set(view, dialog, OFFICE_PAIRING, pairing);
     if let Some(crest) = control(dialog, OFFICE_CREST_ID) {
@@ -179,16 +180,17 @@ fn show_office(cx: &Cx, view: &mut View) {
     }
 }
 
-/// "Own club (H) - opponent (A)": the manager's club first, each side marked
-/// home or away, with its table position once the league has begun.
-fn pairing(game: &Game, own: (usize, usize), m: &Match) -> String {
-    let name = |(slot, club): (usize, usize)| {
-        game.world.country(slot).and_then(|c| c.clubs.get(club)).map_or("", |c| c.name.as_str())
-    };
+/// "Own club (A, 6.) - opponent (H, 9.)": the manager's club first, each
+/// side marked home or away, with its table position once the league has
+/// one (seen so on the original's office, as on its text menu).
+fn pairing(game: &Game, records: Option<&Records>, own: (usize, usize), m: &Match) -> String {
     let home = m.home == own;
     let opponent = if home { m.away } else { m.home };
-    // There is no table before the first matchday, and so no positions.
-    format!("{} - {}", side(game, name(own), home, None), side(game, name(opponent), !home, None))
+    let one = |club: (usize, usize), home: bool| {
+        let (name, place) = menu_text::club_of(game, records, club);
+        side(game, &name, home, menu_text::place(place))
+    };
+    format!("{} - {}", one(own, home), one(opponent, !home))
 }
 
 /// One side of a pairing: "Name (H)", or "Name (H, 3.)" with its position.

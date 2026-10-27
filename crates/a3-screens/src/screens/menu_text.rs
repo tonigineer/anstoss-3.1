@@ -213,7 +213,7 @@ fn show_menu(cx: &Cx, view: &mut View) {
 
 /// A club of the pairing: its name and its place in the table, 0 while
 /// the league has none.
-fn club_of(game: &Game, records: Option<&Records>, club: (usize, usize)) -> (String, u8) {
+pub(crate) fn club_of(game: &Game, records: Option<&Records>, club: (usize, usize)) -> (String, u8) {
     let country = game.world.country(club.0);
     let name = country
         .and_then(|c| c.clubs.get(club.1))
@@ -226,7 +226,7 @@ fn club_of(game: &Game, records: Option<&Records>, club: (usize, usize)) -> (Str
 
 /// The table place as the pairing texts want it, none while the league
 /// has none.
-fn place(place: u8) -> Option<usize> {
+pub(crate) fn place(place: u8) -> Option<usize> {
     (place != 0).then_some(place as usize)
 }
 
