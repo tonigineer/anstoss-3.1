@@ -3880,6 +3880,21 @@ mod tests {
         assert!(view.list(control(dialog, 2011).unwrap()).unwrap().rows.is_empty());
     }
 
+    /// Back from the scores the start menu shows its first entry again,
+    /// as the original's does, not the scores' it was left by.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_start_menu_forgets_the_scores_entry() {
+        let game = game();
+        let script =
+            Script::parse("now choose 4771 5; ok\nuntil dialog 95\nnow press 1\nuntil dialog 9")
+                .unwrap();
+        let (runner, result) = Runner::play(&game, &script);
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let entries = control(&game.dialogs[&9], 4771).unwrap();
+        assert_eq!(runner.host.view().chosen(entries), 0);
+    }
+
     /// The notepad of the week planner (`CDiNotizen`, dialog 397): what
     /// the manager types stays on his own page, which he sees again when
     /// he opens it; löschen empties the edit, and OK keeps it that way.
