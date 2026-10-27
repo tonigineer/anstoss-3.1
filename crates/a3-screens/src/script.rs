@@ -1503,6 +1503,66 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_co_trainer_settings_stand_and_go() {
+        let game = game();
+        // Probe1 has a co-trainer: the corner button 4417 in the long-term
+        // training opens his settings (391).  Abbruch leaves everything as
+        // it was; OK takes the box, the days and a Schwerunkt off — and
+        // with the current week still unplanned, the co-trainer plans it
+        // himself.
+        let opened = "now click bar 3\nuntil dialog 345";
+        let now = on_save(&game, "Probe1", "").unwrap();
+        let state = now.host.state();
+        let season = state.season.as_ref().unwrap();
+        let key = season.manager().unwrap().club.unwrap();
+        let club = season.clubs.get(&key).unwrap();
+        let (was_days, was_flags) = (club.co_training.days, club.line_up_flags);
+        let cur = season.day / 7;
+        let was_plan = season.manager().unwrap().weeks.get(cur).map_or(0, |w| w.template);
+        assert_eq!((was_flags & 1, was_days), (0, 5), "{}", now.log.join("\n"));
+
+        let kept = on_save(
+            &game,
+            "Probe1",
+            &format!("{opened}\nnow press 4417\nuntil dialog 391\nnow spin 4796 up\nnow cancel\nuntil dialog 345"),
+        )
+        .unwrap();
+        assert_eq!(seen(&kept, 391), 1, "{}", kept.log.join("\n"));
+        let state = kept.host.state();
+        let club = state.season.as_ref().unwrap().clubs.get(&key).unwrap();
+        assert_eq!(club.co_training.days, was_days, "{}", kept.log.join("\n"));
+        assert_eq!((club.line_up_flags, was_flags), (was_flags, was_flags));
+
+        let took = on_save(
+            &game,
+            "Probe1",
+            &format!(
+                "{opened}\nnow press 4417\nuntil dialog 391\nnow click 4925\n\
+                 now spin 4796 up\nnow slide 4786 0\nnow ok\nuntil dialog 345"
+            ),
+        )
+        .unwrap();
+        assert_eq!(seen(&took, 391), 1, "{}", took.log.join("\n"));
+        let state = took.host.state();
+        let season = state.season.as_ref().unwrap();
+        let club = season.clubs.get(&key).unwrap();
+        assert_eq!(club.line_up_flags & 1, 1, "{}", took.log.join("\n"));
+        assert_eq!(club.co_training.days, 6, "{}", took.log.join("\n"));
+        assert_eq!(club.co_training.focus[0], 0, "{}", took.log.join("\n"));
+        let records = state.records.as_ref().unwrap();
+        let extra = records
+            .extras
+            .get(records.human_slot(season.current).expect("a human manager"))
+            .expect("the human's extra data");
+        assert_eq!((extra.line_up_flags() & 1, extra.co_training_days()), (1, 6));
+        if was_plan <= 0 {
+            let after = season.manager().unwrap().weeks.get(cur).map_or(0, |w| w.template);
+            assert_ne!(after, 0, "{}", took.log.join("\n"));
+        }
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_calendar_books_and_the_planner_shows() {
         let game = game();
         // September: the family day dragged onto the 10th, the club party

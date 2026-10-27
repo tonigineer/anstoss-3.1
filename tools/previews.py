@@ -85,7 +85,9 @@ AREAS = {
              # Saving the weeks asks first (241), then names the file (506).
              (*bar(4, 345, "now choose 5652 0", "until dialog 241"), 241),
              (*bar(4, 345, "now choose 5652 0", "until dialog 241", "now ok",
-                   "until dialog 506"), 506)],
+                   "until dialog 506"), 506),
+             # The co-trainer's corner button opens his settings (391).
+             (*bar(4, 345, "now press 4417", "until dialog 391"), 391)],
     "short": [(*bar(5, 346), 346), (*bar(5, 346, "now choose 5035 4"), 346),
               (*bar(5, 346, "now choose 5035 4", "now click 4427", "now row 4427 3"), 346)],
     "individual": [(*bar(6, 347), 347), (*bar(6, 347, "now cell 3298 1 8"), 347)],

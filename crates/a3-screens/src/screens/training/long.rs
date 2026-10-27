@@ -6,7 +6,8 @@
 //! nobody is chosen, a double click on a week asking which player to watch
 //! (dialog 281), who the detective watches, a training camp's food,
 //! going out and control, secret training, the co-trainer planning the
-//! empty weeks, and the file strip saving, reading and putting back the
+//! empty weeks and opening his own settings (dialog 391), and the file
+//! strip saving, reading and putting back the
 //! manager's training weeks and clearing the plan of the weeks ahead, each
 //! after asking.
 
@@ -40,6 +41,8 @@ const DETECTIVE: u16 = 4406;
 const CAMP: [u16; 3] = [4408, 4409, 4410];
 const SECRET_BUTTON: u16 = 5344;
 const CO_PLAN: u16 = 6465;
+/// The corner's co-trainer button, which opens his settings.
+const CO_TRAINER: u16 = 4417;
 /// Saving, loading and restoring the templates and the plan.
 const FILES: u16 = 5652;
 /// Its last item, "Trainingsplan löschen"; its third and fourth save and
@@ -117,6 +120,8 @@ pub struct LongTraining {
     /// The strip's items, while they ask and select: what they asked for,
     /// and whether the asking is over and the select is up.
     strip: Option<(Strip, bool)>,
+    /// Whether the co-trainer's settings are up below this dialog.
+    settings: bool,
 }
 
 impl Screen for LongTraining {
@@ -173,7 +178,7 @@ impl Screen for LongTraining {
         self.fill(cx, view);
         let works = |target: Target| match target {
             Target::Button(c) => {
-                [SECRET_BUTTON, CO_PLAN].contains(&dialog.controls[c].id.unwrap_or(0))
+                [SECRET_BUTTON, CO_PLAN, CO_TRAINER].contains(&dialog.controls[c].id.unwrap_or(0))
             }
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(TEMPLATES) => true,
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(PAGES) => true,
@@ -268,6 +273,18 @@ impl Screen for LongTraining {
                 }
             }
             Target::Button(c) if id(c) == CO_PLAN => return self.co_plan(cx, view),
+            // The co-trainer's corner: his settings, or the word that the
+            // club has no co-trainer (`CTrainingCoTrainer`, CAlert 3131).
+            Target::Button(c) if id(c) == CO_TRAINER => {
+                if own(cx).is_some_and(|club| club.co_trainer) {
+                    self.settings = true;
+                    return Outcome::Popup(Request::with(
+                        super::settings::CO_TRAINER_SETTINGS,
+                        Args::None,
+                    ));
+                }
+                return Outcome::Popup(Request::with(NOTICE, Args::Text(NO_CO_TRAINER)));
+            }
             _ => {}
         }
         Outcome::Stay
@@ -284,6 +301,14 @@ impl Screen for LongTraining {
     /// the labels; putting the game's own weeks back is what 243's yes alone
     /// does, without a select (`FUN_0059f8f0`).
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        // The co-trainer's settings are filled in: after either button the
+        // weeks stand again (`FUN_0059ee7e` after EndDialog).
+        if std::mem::take(&mut self.settings) {
+            let _ = reply;
+            self.fill(cx, view);
+            self.labels(cx, view);
+            return Outcome::Stay;
+        }
         if let Some(week) = self.pick.take() {
             if let Reply::Choice(player) = reply {
                 change_week(cx, week, |w| w.player = u16::try_from(player).unwrap_or(0));

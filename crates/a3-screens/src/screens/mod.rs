@@ -224,6 +224,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(training::long::LongTraining::default()),
         Box::new(training::individual::IndividualTraining::default()),
         Box::new(training::individual::AbilityChoice::default()),
+        Box::new(training::settings::CoTrainerSettings::default()),
     ]
 }
 
@@ -247,6 +248,7 @@ pub fn compose(game: &mut Game) {
     training::compose(&mut game.dialogs, &game.data.rules);
     training::long::compose(&mut game.dialogs, &game.data.rules);
     training::individual::compose(&mut game.dialogs, &game.data.rules);
+    training::settings::compose(&mut game.dialogs);
     popups::compose(&mut game.dialogs);
     planner::compose(&mut game.dialogs, &game.data.rules);
     notepad::compose(&mut game.dialogs);

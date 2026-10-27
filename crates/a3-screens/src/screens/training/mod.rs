@@ -10,6 +10,7 @@
 
 pub mod individual;
 pub mod long;
+pub mod settings;
 
 use std::collections::HashMap;
 

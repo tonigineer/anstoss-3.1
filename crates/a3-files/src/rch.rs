@@ -158,11 +158,12 @@ pub enum Kind {
     },
     /// A strip the screen paints bars into, the game's `CMyPaint`.
     Paint,
-    /// An upright slider, the game's `CMySchieber` (its kind 12 with its
-    /// second word 0; lying ones are not read yet): the picture of its
-    /// handle.
+    /// A slider, the game's `CMySchieber` (its kind 12): standing ones
+    /// (second word 0) run their handle up and down, lying ones (word 1)
+    /// from side to side; the picture of the handle.
     Fader {
         handle: u16,
+        upright: bool,
     },
     Other,
 }
@@ -384,7 +385,8 @@ fn parse_control(bytes: &[u8]) -> Option<Control> {
         13 => Kind::Check { round: u16s(CHECK_STYLE).unwrap_or(0) & 0x300 == 0x200 },
         14 => Kind::PushButton { normal: u16s(5)?, hover: u16s(6)? },
         15 => Kind::Paint,
-        12 if u16s(1) == Some(0) => Kind::Fader { handle: u16s(0)? },
+        12 if u16s(1) == Some(0) => Kind::Fader { handle: u16s(0)?, upright: true },
+        12 if u16s(1) == Some(1) => Kind::Fader { handle: u16s(0)?, upright: false },
         _ => Kind::Other,
     };
     let align = match style & 3 {
