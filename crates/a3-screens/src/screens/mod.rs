@@ -22,6 +22,7 @@ pub mod konfig3d;
 pub mod market;
 pub mod medical;
 pub mod menu_text;
+pub mod musik;
 pub mod notepad;
 pub mod office;
 pub mod opponent;
@@ -147,6 +148,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(planner::WeekPlanner::default()),
         Box::new(notepad::Notepad),
         Box::new(konfig3d::Konfig3d::default()),
+        Box::new(musik::Musik::default()),
         Box::new(year::YearCalendar::default()),
         Box::new(finances::Balance::default()),
         Box::new(finances::Finances::default()),
@@ -260,6 +262,7 @@ pub fn compose(game: &mut Game) {
     planner::compose(&mut game.dialogs, &game.data.rules);
     notepad::compose(&mut game.dialogs);
     konfig3d::compose(&mut game.dialogs);
+    musik::compose(&mut game.dialogs);
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);

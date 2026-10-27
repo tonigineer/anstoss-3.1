@@ -17,7 +17,7 @@ use crate::pointer::{Geometry, Target};
 pub const TICK: &str = "CheckHacken.tga";
 /// Where a round box's dot is centred (494, shot k08).
 const ROUND_DOT: Vec2 = Vec2::new(5.0, 7.0);
-const TICK_DOWN: f32 = 2.0;
+pub(crate) const TICK_DOWN: f32 = 2.0;
 const LABEL_LEFT: i32 = 13;
 
 #[derive(Clone, Default, Debug)]

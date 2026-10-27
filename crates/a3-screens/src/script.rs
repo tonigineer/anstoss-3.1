@@ -3222,6 +3222,38 @@ mod tests {
         assert_eq!(runner.host.view().chosen(entries), 0);
     }
 
+    /// "Musik & Soundeffekte" (dialog 259): every piece red, as on the
+    /// original; a click on a piece puts it out, OK keeps that and drops
+    /// "Go West" with the original's 0x3fff, cancel keeps nothing.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_music_keeps_its_pieces() {
+        let game = game();
+        let dialog = &game.dialogs[&259];
+        let shown = |runner: &Runner| {
+            let view = runner.host.view();
+            let list = view.list(control(dialog, 6453).unwrap()).unwrap();
+            let on: Vec<bool> = list.inks.iter().map(Option::is_some).collect();
+            (list.rows.len(), view.chosen(control(dialog, 6451).unwrap()), on)
+        };
+        let open = "now click bar 17\nuntil dialog 302\nnow choose 4035 1\nuntil dialog 259";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        assert_eq!(shown(&runner), (14, 2, vec![true; 14]));
+        let changed = format!("{open}\nnow row 6453 0\nnow choose 6451 3");
+        let Some(runner) = on_save(&game, "Probe1", &changed) else { return };
+        assert!(!shown(&runner).2[0]);
+        let again = "until dialog 302\nnow choose 4035 1\nuntil dialog 259";
+        let kept = format!("{changed}\nnow press 1\n{again}");
+        let Some(runner) = on_save(&game, "Probe1", &kept) else { return };
+        let mut on = vec![true; 14];
+        on[0] = false;
+        on[13] = false;
+        assert_eq!(shown(&runner), (14, 3, on));
+        let dropped = format!("{changed}\nnow press 2\n{again}");
+        let Some(runner) = on_save(&game, "Probe1", &dropped) else { return };
+        assert_eq!(shown(&runner), (14, 2, vec![true; 14]));
+    }
+
     /// "3D - Optionen" (dialog 511): open on the original's values, OK
     /// keeps a change for the next opening, cancel drops one.
     #[test]

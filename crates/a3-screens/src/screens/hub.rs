@@ -298,6 +298,8 @@ const NEW_GAME_REALLY: u16 = 2689;
 const NEW_GAME_QUESTION: u16 = u16::MAX - 2;
 /// "3D - Optionen": the 3D settings (`FUN_005b15ec`).
 const KONFIG_3D_ITEM: usize = 7;
+/// "Musik & Soundeffekte" (`FUN_005b1653`).
+const MUSIK_ITEM: usize = 1;
 
 /// Lights a game option under its question, as the original's pressed
 /// button stays lit until the question is answered; `None` puts it out.
@@ -557,7 +559,7 @@ impl Screen for MenuBar {
                     )
                 }
                 Some(DRESSING_OPTIONS) => {
-                    matches!(item, QUIT_ITEM | NEW_GAME_ITEM | KONFIG_3D_ITEM)
+                    matches!(item, QUIT_ITEM | NEW_GAME_ITEM | KONFIG_3D_ITEM | MUSIK_ITEM)
                 }
                 _ => false,
             }
@@ -744,13 +746,19 @@ impl Screen for MenuBar {
             light_option(cx.dialog, view, Some(item));
             return Outcome::Popup(Request::with(QUESTION, Args::Text(NEW_GAME_REALLY)));
         }
+        // The settings' own dialogs: 3D and music.
+        let settings = match item {
+            KONFIG_3D_ITEM => Some(super::konfig3d::KONFIG_3D),
+            MUSIK_ITEM => Some(super::musik::MUSIK),
+            _ => None,
+        };
         if view.id == DRESSING_ROOM
             && cx.dialog.controls[c].id == Some(DRESSING_OPTIONS)
-            && item == KONFIG_3D_ITEM
+            && let Some(settings) = settings
         {
-            self.popup = Some(super::konfig3d::KONFIG_3D);
+            self.popup = Some(settings);
             light_option(cx.dialog, view, Some(item));
-            return Outcome::Popup(Request::new(super::konfig3d::KONFIG_3D));
+            return Outcome::Popup(Request::new(settings));
         }
         if cx.dialog.controls[c].id != Some(BAR_ID) {
             if let Kind::Options { items, .. } = &cx.dialog.controls[c].kind {
@@ -814,7 +822,13 @@ impl Screen for MenuBar {
             }
             (Some(QUIT_QUESTION), Reply::Ok) => Outcome::Close(Reply::Quit),
             (Some(NEW_GAME_QUESTION), Reply::Ok) => Outcome::Close(Reply::NewGame),
-            (Some(QUIT_QUESTION | NEW_GAME_QUESTION | super::konfig3d::KONFIG_3D), _) => {
+            (
+                Some(
+                    QUIT_QUESTION | NEW_GAME_QUESTION | super::konfig3d::KONFIG_3D
+                    | super::musik::MUSIK,
+                ),
+                _,
+            ) => {
                 light_option(cx.dialog, view, None);
                 Outcome::Stay
             }

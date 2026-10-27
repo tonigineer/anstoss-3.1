@@ -22,6 +22,15 @@ const LABEL_INSET: f32 = 10.0;
 const DOT_COLOR: Rgba<u8> = Rgba([0, 0, 0, 255]);
 /// A picture group whose labels are centred in their options.
 const CENTRED_LABELS: u16 = 0x2;
+/// A group of bullets drawn as boxes to tick: the chosen one gets a check
+/// box's tick, and the labels stand 12 pixels in, a pixel short of a
+/// check box's (259's music modes, as the original shows them).
+const TICKED: u16 = 0x100;
+const TICKED_LABEL: i32 = 12;
+
+fn ticked(control: &Control) -> bool {
+    matches!(control.kind, Kind::Options { style, .. } if style & TICKED != 0)
+}
 
 /// What [`OptionsState::chosen`] is with no option chosen.
 pub const NONE: usize = usize::MAX;
@@ -108,7 +117,12 @@ impl OptionsState {
             if !lit || self.off.get(item).copied().unwrap_or(false) {
                 continue;
             }
-            if *image == 0 {
+            if *image == 0 && ticked(control) {
+                if let Some(tick) = paint.widget(super::check::TICK) {
+                    let at = r.min + it.rect.min + Vec2::new(0.0, super::check::TICK_DOWN);
+                    crate::classic::paste(frame, tick, at);
+                }
+            } else if *image == 0 {
                 dot(frame, bullet_centre(control, item));
             } else if let Some(strip) = paint.image(*image) {
                 // The chosen option shows its part of the button strip, cut
@@ -144,7 +158,10 @@ impl OptionsState {
                 ink
             };
             let color = if pointed { TEXT_HOVER } else { Rgba([ir, ig, ib, 255]) };
-            if *image == 0 {
+            if *image == 0 && ticked(control) {
+                let left = x + it.rect.min.x as i32 + TICKED_LABEL;
+                font.draw(frame, left, y + it.rect.min.y as i32, label, color, false);
+            } else if *image == 0 {
                 // Windows centres a radio button's label on its bullet.
                 let top = (bullet_centre(control, item).y - cell / 2.0).floor() as i32;
                 let left = x + (it.rect.min.x + LABEL_INSET) as i32;
