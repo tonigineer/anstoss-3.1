@@ -5,8 +5,9 @@
 //! a template chosen for the selected week, who the week's player is when
 //! nobody is chosen, a double click on a week asking which player to watch
 //! (dialog 281), who the detective watches, a training camp's food,
-//! going out and control, secret training, and the co-trainer planning
-//! the empty weeks.
+//! going out and control, secret training, the co-trainer planning the
+//! empty weeks, and the last item of the file strip clearing the plan of
+//! the weeks ahead, after asking.
 
 use std::collections::HashMap;
 
@@ -24,7 +25,7 @@ use super::change_week;
 use crate::controls::options::NONE;
 use crate::pointer::{Grip, Target};
 use crate::view::View;
-use a3_core::cycle::dialogs::NOTICE;
+use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 
 /// Controls by their ids in the dialog file.
 const WEEKS: u16 = 4407;
@@ -38,6 +39,9 @@ const SECRET_BUTTON: u16 = 5344;
 const CO_PLAN: u16 = 6465;
 /// Saving, loading and restoring the templates and the plan.
 const FILES: u16 = 5652;
+/// Its last item, "Trainingsplan löschen"; its five others read and write
+/// files, which the replica does not have yet.
+const PLAN_ITEM: usize = 5;
 /// The OK, whose place the bar takes.
 const OK: u16 = 1;
 const CAPTION_ID: u16 = 9928;
@@ -48,6 +52,8 @@ const NOBODY: u16 = 5032;
 const CAMP_WEEK_TAKEN: u16 = 3606;
 const NO_CO_TRAINER: u16 = 3131;
 const CO_TRAINER_WEEK: u16 = 4231;
+/// "Soll der Trainingsplan wirklich gelöscht werden?"
+const PLAN_DELETE: u16 = 3885;
 /// The weeks' kinds: preparation, winter, no match, one, two or more.
 const KINDS: [u16; 5] = [1439, 1440, 1441, 1442, 1443];
 const NO_KIND: &str = "-";
@@ -92,6 +98,8 @@ pub struct LongTraining {
     whistle: bool,
     /// The week the double click asked a player for, while 281 is up.
     pick: Option<usize>,
+    /// Whether the strip's last item asked about clearing the plan.
+    clearing: bool,
 }
 
 impl Screen for LongTraining {
@@ -196,6 +204,16 @@ impl Screen for LongTraining {
                 view.set_chosen(c, NONE);
                 return self.choose(cx, view, item);
             }
+            // The strip's last item asks whether the plan may really go; its
+            // choice falls back to none either way. Its five others save and
+            // load to files, which the replica does not read yet.
+            Target::Option { control: c, item } if id(c) == FILES => {
+                view.set_chosen(c, NONE);
+                if item == PLAN_ITEM {
+                    self.clearing = true;
+                    return Outcome::Popup(Request::with(QUESTION, Args::Text(PLAN_DELETE)));
+                }
+            }
             Target::Row { control: c, .. } if id(c) == RULE => {
                 let rule = view.combo(c).and_then(|combo| combo.selected).unwrap_or(0) as u8;
                 change_manager(cx, |m| m.individual_rule = rule);
@@ -224,13 +242,25 @@ impl Screen for LongTraining {
 
     /// The whistle's question: a yes ends the turn. 281's choice names the
     /// week's player — "keiner" as 0 — and the weeks are filled again; a
-    /// cancellation leaves the week as it was.
+    /// cancellation leaves the week as it was. The strip's question clears
+    /// the templates of the weeks ahead of the current one, which keeps its
+    /// own and every week's player (`FUN_0059ffc1`).
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if let Some(week) = self.pick.take() {
             if let Reply::Choice(player) = reply {
                 change_week(cx, week, |w| w.player = u16::try_from(player).unwrap_or(0));
                 self.fill(cx, view);
             }
+            return Outcome::Stay;
+        }
+        if std::mem::take(&mut self.clearing) && reply == Reply::Ok {
+            let current = cx.state.season.as_ref().map(|s| s.day / DAYS);
+            if let Some(current) = current {
+                for week in current + 1..SEASON_WEEKS {
+                    change_week(cx, week, |w| w.template = 0);
+                }
+            }
+            self.fill(cx, view);
             return Outcome::Stay;
         }
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {

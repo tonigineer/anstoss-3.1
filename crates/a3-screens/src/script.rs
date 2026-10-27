@@ -1321,6 +1321,47 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_cleared_plan_leaves_the_current_week_and_the_players() {
+        let game = game();
+        // Probe1 mid-week: the current week's and the next two templates
+        // chosen, the next week's player watched. The strip's last item asks
+        // whether the plan may go (384); cancelled all stays, and with OK the
+        // weeks ahead of the current one stand empty — that week's template
+        // and every week's player among them.
+        let now = on_save(&game, "Probe1", "").unwrap();
+        let cur = now.host.state().season.as_ref().unwrap().day / 7;
+        let weeks = |runner: &Runner| {
+            let state = runner.host.state();
+            let manager = state.records.as_ref().unwrap().humans().next().unwrap();
+            [cur, cur + 1, cur + 2].map(|w| (manager.week(w).template, manager.week(w).player))
+        };
+        let row = (cur + 1) % 25;
+        let fill = "now click bar 3\nuntil dialog 345\nnow choose 5035 4\nnow choose 5035 7";
+        let asked = format!(
+            "{fill}\nnow dbl row 4407 {row}\nuntil dialog 281\nnow row 3827 2\nuntil dialog 345\n\
+             now choose 5652 5\nuntil dialog 384"
+        );
+        let before = weeks(&now);
+        let kept = on_save(&game, "Probe1", &format!("{asked}\nnow cancel")).unwrap();
+        let filled = weeks(&kept);
+        assert_eq!((filled[0].0, filled[1].0), (5, 8), "{}", kept.log.join("\n"));
+        assert_ne!(filled[1].1, 0, "{}", kept.log.join("\n"));
+        assert_eq!(filled[2], before[2], "{}", kept.log.join("\n"));
+        let runner = on_save(&game, "Probe1", &format!("{asked}\nnow ok")).unwrap();
+        assert_eq!(
+            weeks(&runner),
+            [(5, filled[0].1), (0, filled[1].1), (0, filled[2].1)],
+            "{}",
+            runner.log.join("\n")
+        );
+        let list = crate::screens::control(&game.dialogs[&345], 4407).unwrap();
+        let rows = runner.host.view().list(list).unwrap().rows.clone();
+        let blank = |week: usize| rows[week % 25].split('\t').nth(1).unwrap_or_default().is_empty();
+        assert!(!blank(cur) && blank(cur + 1) && blank(cur + 2), "{}", runner.log.join("\n"));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_calendar_books_and_the_planner_shows() {
         let game = game();
         // September: the family day dragged onto the 10th, the club party
