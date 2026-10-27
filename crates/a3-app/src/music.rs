@@ -44,7 +44,10 @@ const IMA_ADPCM: u16 = 0x11;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, setup)
-        .add_systems(Update, (poll, start).chain().run_if(not(in_state(Screen::Intro))));
+        .add_systems(
+            Update,
+            (follow_stereo, poll, start).chain().run_if(not(in_state(Screen::Intro))),
+        );
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -99,11 +102,34 @@ fn setup(mut commands: Commands, dir: Res<GameDir>) {
 fn settings(path: &Path) -> Mode {
     let Ok(cfg) = std::fs::read(path) else { return Mode::Mood };
     let mode = cfg.get(..2).map_or(2, |b| u16::from_le_bytes([b[0], b[1]]));
+    mode_of(mode, u32_at(&cfg, 4).unwrap_or(u32::MAX))
+}
+
+fn mode_of(mode: u16, ticked: u32) -> Mode {
     match mode {
         0 => Mode::Off,
         1 => Mode::Random,
-        3 => Mode::Playlist(u32_at(&cfg, 4).unwrap_or(u32::MAX)),
+        3 => Mode::Playlist(ticked),
         _ => Mode::Mood,
+    }
+}
+
+/// What the stereo's OK set (dialog 259) becomes the music's mode; no music
+/// stops the playing track at once (`FUN_00583551` → `FUN_006cb9e2`).
+fn follow_stereo(
+    mut commands: Commands,
+    dialog: Option<Res<crate::dialog::OpenDialog>>,
+    mut jukebox: ResMut<Jukebox>,
+    playing: Query<Entity, With<Playing>>,
+) {
+    let Some(dialog) = dialog else { return };
+    let Some((mode, _, ticked)) = dialog.0.state().music.take() else { return };
+    jukebox.mode = mode_of(mode, ticked);
+    info!("music: {:?}", jukebox.mode);
+    if matches!(jukebox.mode, Mode::Off) {
+        for track in &playing {
+            commands.entity(track).despawn();
+        }
     }
 }
 

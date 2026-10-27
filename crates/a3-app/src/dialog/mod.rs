@@ -130,7 +130,7 @@ fn in_dialog(screen: Res<State<Screen>>) -> bool {
 /// The game's screens as a resource; once the game cycle has asked for the
 /// first, it shows as the view of the screen on top.
 #[derive(Resource)]
-struct OpenDialog(Host);
+pub(crate) struct OpenDialog(pub(crate) Host);
 
 impl std::ops::Deref for OpenDialog {
     type Target = View;

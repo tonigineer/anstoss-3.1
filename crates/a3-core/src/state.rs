@@ -38,6 +38,9 @@ pub struct GameState {
     pub grounds_stadiums: Option<GroundsStadiums>,
     /// The grounds as 466 has them, for its sub-dialogs.
     pub grounds_shown: Option<crate::grounds::Grounds>,
+    /// What the stereo's OK set last — `musik.cfg`'s mode, sounds and
+    /// pieces — until the music takes it over.
+    pub music: Option<(u16, u16, u32)>,
 }
 
 /// What the stadium screen hands the grounds (`FUN_0057eb54`): its three

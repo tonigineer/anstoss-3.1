@@ -3251,6 +3251,8 @@ mod tests {
         let mut on = from_file.clone();
         on[0] = false;
         assert_eq!(shown(&runner), (14, 3, on));
+        // What OK set waits there for the music: "1987" out, "Go West" too.
+        assert_eq!(runner.host.state().music, Some((3, 1, 0x3ffb & !1)));
         let dropped = format!("{changed}\nnow press 2\n{again}");
         let Some(runner) = on_save(&game, "Probe1", &dropped) else { return };
         assert_eq!(shown(&runner), (14, 2, from_file.clone()));

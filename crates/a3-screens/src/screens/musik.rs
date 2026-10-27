@@ -151,6 +151,7 @@ impl Screen for Musik {
             if self.mode == CHOSEN_PIECES && self.pieces == 0 {
                 self.mode = 0;
             }
+            cx.state.music = Some((self.mode as u16, u16::from(self.sounds), self.pieces));
             return Outcome::Close(Reply::Ok);
         }
         Outcome::Stay
