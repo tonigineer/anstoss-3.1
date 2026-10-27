@@ -18,6 +18,7 @@ pub mod honours;
 pub mod hub;
 pub mod jobs;
 pub mod kalkulation;
+pub mod konfig3d;
 pub mod market;
 pub mod medical;
 pub mod menu_text;
@@ -145,6 +146,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(planner::Planner::default()),
         Box::new(planner::WeekPlanner::default()),
         Box::new(notepad::Notepad),
+        Box::new(konfig3d::Konfig3d::default()),
         Box::new(year::YearCalendar::default()),
         Box::new(finances::Balance::default()),
         Box::new(finances::Finances::default()),
@@ -257,6 +259,7 @@ pub fn compose(game: &mut Game) {
     popups::compose(&mut game.dialogs);
     planner::compose(&mut game.dialogs, &game.data.rules);
     notepad::compose(&mut game.dialogs);
+    konfig3d::compose(&mut game.dialogs);
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);

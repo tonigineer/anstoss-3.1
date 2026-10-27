@@ -3222,6 +3222,35 @@ mod tests {
         assert_eq!(runner.host.view().chosen(entries), 0);
     }
 
+    /// "3D - Optionen" (dialog 511): open on the original's values, OK
+    /// keeps a change for the next opening, cancel drops one.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_3d_options_keep_what_ok_keeps() {
+        let game = game();
+        let dialog = &game.dialogs[&511];
+        let shown = |runner: &Runner| {
+            let view = runner.host.view();
+            let at = |id| control(dialog, id).unwrap();
+            let checks: Vec<bool> = [6472, 6473, 6474, 6467, 6468]
+                .into_iter()
+                .map(|id| view.check(at(id)).unwrap().checked)
+                .collect();
+            (view.chosen(at(6466)), view.chosen(at(6475)), checks)
+        };
+        let open = "now click bar 17\nuntil dialog 302\nnow choose 4035 7\nuntil dialog 511";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        assert_eq!(shown(&runner), (2, 2, vec![true; 5]));
+        let changed = format!("{open}\nnow choose 6466 0\nnow click 6473");
+        let again = "until dialog 302\nnow choose 4035 7\nuntil dialog 511";
+        let kept = format!("{changed}\nnow press 1\n{again}");
+        let Some(runner) = on_save(&game, "Probe1", &kept) else { return };
+        assert_eq!(shown(&runner), (0, 2, vec![true, false, true, true, true]));
+        let dropped = format!("{changed}\nnow press 2\n{again}");
+        let Some(runner) = on_save(&game, "Probe1", &dropped) else { return };
+        assert_eq!(shown(&runner), (2, 2, vec![true; 5]));
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn neues_spiel_lights_its_entry_until_answered() {

@@ -296,6 +296,8 @@ const QUIT_QUESTION: u16 = u16::MAX;
 const NEW_GAME_ITEM: usize = 3;
 const NEW_GAME_REALLY: u16 = 2689;
 const NEW_GAME_QUESTION: u16 = u16::MAX - 2;
+/// "3D - Optionen": the 3D settings (`FUN_005b15ec`).
+const KONFIG_3D_ITEM: usize = 7;
 
 /// Lights a game option under its question, as the original's pressed
 /// button stays lit until the question is answered; `None` puts it out.
@@ -554,7 +556,9 @@ impl Screen for MenuBar {
                             | AMATEURS_ITEM
                     )
                 }
-                Some(DRESSING_OPTIONS) => matches!(item, QUIT_ITEM | NEW_GAME_ITEM),
+                Some(DRESSING_OPTIONS) => {
+                    matches!(item, QUIT_ITEM | NEW_GAME_ITEM | KONFIG_3D_ITEM)
+                }
                 _ => false,
             }
         };
@@ -740,6 +744,14 @@ impl Screen for MenuBar {
             light_option(cx.dialog, view, Some(item));
             return Outcome::Popup(Request::with(QUESTION, Args::Text(NEW_GAME_REALLY)));
         }
+        if view.id == DRESSING_ROOM
+            && cx.dialog.controls[c].id == Some(DRESSING_OPTIONS)
+            && item == KONFIG_3D_ITEM
+        {
+            self.popup = Some(super::konfig3d::KONFIG_3D);
+            light_option(cx.dialog, view, Some(item));
+            return Outcome::Popup(Request::new(super::konfig3d::KONFIG_3D));
+        }
         if cx.dialog.controls[c].id != Some(BAR_ID) {
             if let Kind::Options { items, .. } = &cx.dialog.controls[c].kind {
                 let label = items.get(item).map_or("", |i| i.text.as_str()).replace("\\n", " ");
@@ -802,7 +814,7 @@ impl Screen for MenuBar {
             }
             (Some(QUIT_QUESTION), Reply::Ok) => Outcome::Close(Reply::Quit),
             (Some(NEW_GAME_QUESTION), Reply::Ok) => Outcome::Close(Reply::NewGame),
-            (Some(QUIT_QUESTION | NEW_GAME_QUESTION), _) => {
+            (Some(QUIT_QUESTION | NEW_GAME_QUESTION | super::konfig3d::KONFIG_3D), _) => {
                 light_option(cx.dialog, view, None);
                 Outcome::Stay
             }
