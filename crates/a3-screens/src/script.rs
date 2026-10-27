@@ -1830,6 +1830,62 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_reporter_makes_the_release_clause_public() {
+        let game = game();
+        let ask = "now click bar 12\nuntil dialog 404\nnow choose 4975 7\nuntil dialog 493";
+        let items = control(&game.dialogs[&493], 6214).unwrap();
+        // Probe1 has no clause: the item is off, and a click on it stays.
+        let Some(runner) = on_save(&game, "Probe1", &format!("{ask}\nnow choose 6214 0")) else {
+            return;
+        };
+        assert_eq!(runner.host.view().id, 493);
+        assert!(runner.host.view().options(items).unwrap().dimmed[0]);
+        // One with a clause at 420.000 € (§7.3).
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "Probe1", "reporter", |records| {
+            let index = records.human_slot(0).unwrap();
+            let manager = &mut records.managers[index];
+            manager.put(0x178, 42u8);
+            manager.set_popularity([30, 60, 38]);
+            manager.set_confidence(75);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let runner = on_save(&game, "reporter", &ask).unwrap();
+        assert!(!runner.host.view().options(items).unwrap().dimmed[0]);
+        // The interview: its reporter turns through his sixteen pictures,
+        // and the sentence of the interview stands in the file.
+        let seen = format!("{ask}\nnow choose 6214 0\nuntil dialog 66");
+        let runner = on_save(&game, "reporter", &seen).unwrap();
+        let ball = runner.host.view().anim(control(&game.dialogs[&66], 1336).unwrap()).unwrap();
+        assert_eq!(ball.frames.len(), 16);
+        assert!(ball.playing);
+        assert!(
+            game.dialogs[&66]
+                .controls
+                .iter()
+                .any(|c| c.text.contains("Freigabeklausel in meinem Vertrag"))
+        );
+        // Closing it makes the clause public and costs five points with
+        // the fans and ten of the board's confidence; and since nothing
+        // sets the "already known" bit, the item stays ready (§7.3).
+        let twice = format!(
+            "{seen}\nnow press 2\nuntil dialog 493\nnow choose 6214 0\n\
+             until dialog 66\nnow press 2\nuntil dialog 493"
+        );
+        let runner = on_save(&game, "reporter", &twice).unwrap();
+        assert_eq!(runner.host.view().id, 493);
+        let state = runner.host.state();
+        let manager = &state.records.as_ref().unwrap().managers[usize::from(
+            state.records.as_ref().unwrap().human_slot(0).unwrap(),
+        )];
+        assert_ne!(manager.get::<u8>(0x179) & 1, 0);
+        assert_eq!(manager.popularity(), [30, 50, 38]);
+        assert_eq!(manager.confidence(), 55);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_refused_co_trainer_leaves_the_market_list() {
         let game = game();
         let open = "now click bar 12\nuntil dialog 404";

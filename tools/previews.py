@@ -98,6 +98,7 @@ AREAS = {
                        "now click 1361", "until dialog 36"), 36),
                 (*bar(13, 404, "now choose 4975 0", "until dialog 35", "now row 1359 0",
                        "until dialog 32"), 32),
+                (*menu(13, 404, 4975, 7, 493), 493),
                 (*bar(14, 439), 439), (*menu(14, 439, 5387, 4, 384), 384),
                 (*bar(17, 175), 175),
                 *[(*menu(17, 175, 5643, i, d), d)

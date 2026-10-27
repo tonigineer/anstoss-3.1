@@ -1066,15 +1066,35 @@ impl Cooperation {
 
 /// The reporter (dialog 493 `CReporterAnfrage`, KONTAKTE.md §7.3): a
 /// friend at the paper writes for the manager once a season, if the media
-/// like him enough. Making his release clause public (item 0) is not
-/// built.
+/// like him enough, and he may have his release clause made public.
 #[derive(Default)]
-pub struct Reporter;
+pub struct Reporter {
+    /// Whether the interview stands open; its close makes the clause
+    /// public and costs the manager.
+    clause_open: bool,
+}
 
 const REPORTER_DIALOG: u16 = 493;
 const REPORTER_ITEMS: u16 = 6214;
 /// Making the clause public; the three articles.
 const CLAUSE: usize = 0;
+/// The interview that says it (dialog 66 `CFreigabeklauselReporter`) and
+/// its animated reporter; the clause and its bits in the manager record:
+/// +0x179 bit 0 once public, bit 1 the "already known" test — which
+/// nothing ever sets, so item 0 stays ready and each use costs again.
+const CLAUSE_DIALOG: u16 = 66;
+const CLAUSE_ANI: u16 = 1336;
+const CLAUSE_AT: usize = 0x178;
+const CLAUSE_FLAG_AT: usize = 0x179;
+const CLAUSE_PUBLIC: u8 = 1;
+const CLAUSE_KNOWN: u8 = 2;
+/// "Ihre Ausstiegsklausel ist bereits bekannt."; what the interview
+/// costs: five points with the fans (popularity's second) and ten of the
+/// board's confidence.
+const CLAUSE_ALERT: u16 = 3207;
+const FANS: usize = 1;
+const FANS_LOSS: i32 = 5;
+const CONFIDENCE_LOSS: i32 = 10;
 /// The press was used this season; the media do not like him enough; the
 /// article was written.
 const PRESS_USED: u16 = 4288;
@@ -1093,18 +1113,22 @@ impl Screen for Reporter {
         &[REPORTER_DIALOG]
     }
 
-    /// `0x537870`: the clause's item is off while the manager has none or
-    /// it is public already.
+    /// `0x537870`: the clause's item is off while the manager has none;
+    /// once made public it stays ready, since nothing sets the "known"
+    /// bit its test reads.
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        self.clause_open = false;
         let dialog = cx.dialog;
+        let has_clause =
+            super::kalkulation::own_manager(cx).is_some_and(|m| m.get::<u8>(CLAUSE_AT) != 0);
         if let Some(c) = control(dialog, REPORTER_ITEMS) {
             if let Some(options) = view.options_mut(c) {
+                options.dimmed = (0..4).map(|i| i == CLAUSE && !has_clause).collect();
                 options.actions = true;
-                options.dimmed = (0..4).map(|i| i == CLAUSE).collect();
             }
             view.set_chosen(c, NONE);
         }
-        let works = |t: Target| !matches!(t, Target::Option { item: CLAUSE, .. });
+        let works = |t: Target| has_clause || !matches!(t, Target::Option { item: CLAUSE, .. });
         mark_inert(view, dialog, works);
     }
 
@@ -1119,10 +1143,75 @@ impl Screen for Reporter {
             {
                 view.set_chosen(c, NONE);
                 if item == CLAUSE {
-                    return Outcome::Stay;
+                    // Off while he has no clause; a known one only answers
+                    // itself; else the interview starts (§7.3).
+                    let Some(manager) = super::kalkulation::own_manager(cx) else {
+                        return Outcome::Stay;
+                    };
+                    if manager.get::<u8>(CLAUSE_AT) == 0 {
+                        return Outcome::Stay;
+                    }
+                    if manager.get::<u8>(CLAUSE_FLAG_AT) & CLAUSE_KNOWN != 0 {
+                        let args = Args::Text(CLAUSE_ALERT);
+                        return Outcome::Popup(Request::with(NOTICE, args));
+                    }
+                    self.clause_open = true;
+                    return Outcome::Popup(Request::new(CLAUSE_DIALOG));
                 }
                 Outcome::Popup(Request::with(NOTICE, Args::Text(write_article(cx))))
             }
+            _ => Outcome::Stay,
+        }
+    }
+
+    /// The interview's end: the clause stands in the paper now, and the
+    /// talk costs five points with the fans and ten of the board's
+    /// confidence (`0x41849a`).
+    fn answer(&mut self, cx: &mut Cx, _: &mut View, _: Reply) -> Outcome {
+        if !std::mem::take(&mut self.clause_open) {
+            return Outcome::Stay;
+        }
+        let current = cx.state.season.as_ref().map(|s| s.current);
+        if let Some(records) = cx.state.records.as_mut()
+            && let Some(slot) = current.and_then(|c| records.human_slot(c))
+            && let Some(manager) = records.managers.get_mut(slot)
+        {
+            let flags = manager.get::<u8>(CLAUSE_FLAG_AT) | CLAUSE_PUBLIC;
+            manager.put(CLAUSE_FLAG_AT, flags);
+            let mut popularity = manager.popularity();
+            popularity[FANS] = (i32::from(popularity[FANS]) - FANS_LOSS).clamp(0, 100) as u8;
+            manager.set_popularity(popularity);
+            let confidence = (i32::from(manager.confidence()) - CONFIDENCE_LOSS).clamp(0, 100);
+            manager.set_confidence(i16::try_from(confidence).unwrap_or(0));
+        }
+        Outcome::Stay
+    }
+}
+
+/// The interview that makes the release clause public (dialog 66
+/// `CFreigabeklauselReporter`, KONTAKTE.md §7.3): the sentence stands in
+/// its file, the reporter's picture turns, and the one button ends it.
+#[derive(Default)]
+pub struct ReporterClause;
+
+impl Screen for ReporterClause {
+    fn ids(&self) -> &[u16] {
+        &[CLAUSE_DIALOG]
+    }
+
+    /// `0x4a9414`: the reporter's pictures `fv1…fv9`, up and down, a new
+    /// frame every 200 ms.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        if let Some(ball) = control(cx.dialog, CLAUSE_ANI).and_then(|b| view.anim_mut(b)) {
+            ball.frames = (1745u16..=1753).chain((1746..=1752).rev()).collect();
+            ball.playing = true;
+        }
+    }
+
+    /// The one button, drawn with the cancel face; it ends the dialog.
+    fn input(&mut self, _: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(_) => Outcome::Close(Reply::Cancel),
             _ => Outcome::Stay,
         }
     }
