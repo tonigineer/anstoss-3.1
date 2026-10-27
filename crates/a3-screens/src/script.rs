@@ -3224,6 +3224,26 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn neues_spiel_lights_its_entry_until_answered() {
+        let game = game();
+        // The dressing room's view, under the question or alone.
+        let lit = |runner: &Runner| {
+            let entries = crate::screens::control(&game.dialogs[&302], 4035).unwrap();
+            let room = runner.host.views().find(|v| v.id == 302).unwrap();
+            room.chosen(entries)
+        };
+        // Lit under its question, as the original's pressed entry is.
+        let ask = "now click bar 17\nuntil dialog 302\nnow choose 4035 3\nuntil dialog 384";
+        let Some(runner) = on_save(&game, "Probe1", ask) else { return };
+        assert_eq!(lit(&runner), 3);
+        // No keeps the dressing room, the entry dark again.
+        let no = format!("{ask}\nnow press 4739\nuntil dialog 302");
+        let Some(runner) = on_save(&game, "Probe1", &no) else { return };
+        assert_eq!(lit(&runner), crate::controls::options::NONE);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_dragged_player_goes_with_the_pointer() {
         let game = game();
         let Some(runner) = on_save(&game, "Probe1", "") else { return };
