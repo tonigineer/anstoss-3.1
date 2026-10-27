@@ -1362,6 +1362,80 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_strip_writes_reads_and_puts_back_the_training_weeks() {
+        let game = game();
+        // Probe1: the strip's first item asks (241) and then writes the
+        // manager's 18 week templates to `plan\*.Woc`, the second asks (242)
+        // and reads them back from a file the select lists, the third asks
+        // (243) and puts the game's own weeks in without a select. Cancelled,
+        // nothing happens at all.
+        let opened = "now click bar 3\nuntil dialog 345";
+        let file = game.dir.join("plan/Nachtwache.Woc");
+        let kept = on_save(
+            &game,
+            "Probe1",
+            &format!("{opened}\nnow choose 5652 0\nuntil dialog 241\nnow cancel"),
+        )
+        .unwrap();
+        assert_eq!((seen(&kept, 241), seen(&kept, 506)), (1, 0), "{}", kept.log.join("\n"));
+        assert!(!file.exists(), "{}", kept.log.join("\n"));
+
+        // What the file holds is the block of templates as the manager keeps
+        // it; it is deleted again before the asserts, so the install stays
+        // clean either way.
+        let saved = format!(
+            "{opened}\nnow choose 5652 0\nuntil dialog 241\nnow ok\nuntil dialog 506\n\
+             now type 6361 Nachtwache\nnow ok\nuntil dialog 345"
+        );
+        let runner = on_save(&game, "Probe1", &saved).unwrap();
+        let block = std::fs::read(&file);
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!((seen(&runner, 241), seen(&runner, 506)), (1, 1), "{}", runner.log.join("\n"));
+        let templates = a3_core::training::week_templates(&block.unwrap());
+        let state = runner.host.state();
+        assert_eq!(templates, state.season.as_ref().unwrap().manager().unwrap().templates);
+
+        // Reading: the name comes from the list's row, and after the select
+        // closed the names stand in the strip again. The install's plan
+        // folder holds one file of weeks, "Stimmspaz V1.2.Woc".
+        let listed = crate::screens::popups::plan_files(&game.dir, game.text(3470));
+        if listed.first().is_none_or(|(name, _)| name != "Stimmspaz V1.2.Woc") {
+            eprintln!("no Stimmspaz V1.2.Woc in the plan folder; the oracle's copy has it");
+            return;
+        }
+        let load = format!(
+            "{opened}\nnow choose 5652 1\nuntil dialog 242\nnow ok\nuntil dialog 506\n\
+             now row 5261 0\nnow ok\nuntil dialog 345"
+        );
+        let runner = on_save(&game, "Probe1", &load).unwrap();
+        let want = a3_core::training::week_templates(
+            &std::fs::read(game.dir.join("plan/Stimmspaz V1.2.Woc")).unwrap(),
+        );
+        let names = want.iter().map(|t| t.name.as_str()).collect::<Vec<_>>();
+        let loaded = runner.host.state();
+        let manager = loaded.records.as_ref().unwrap().humans().next().unwrap();
+        let kept = manager.templates();
+        assert_eq!(kept.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), names);
+        let combo = crate::screens::control(&game.dialogs[&345], 5035).unwrap();
+        let labels = runner.host.view().options(combo).unwrap().labels.clone();
+        assert_eq!(labels.iter().map(String::as_str).collect::<Vec<_>>(), names);
+
+        // The game's own weeks, straight out of its program, with no select
+        // between the asking and the weeks.
+        let restore =
+            format!("{opened}\nnow choose 5652 2\nuntil dialog 243\nnow ok\nuntil dialog 345");
+        let runner = on_save(&game, "Probe1", &restore).unwrap();
+        let asked = (seen(&runner, 243), seen(&runner, 506));
+        assert_eq!(asked, (1, 0), "{}", runner.log.join("\n"));
+        let back = runner.host.state();
+        assert_eq!(
+            back.season.as_ref().unwrap().manager().unwrap().templates,
+            game.rules.training.originals
+        );
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_calendar_books_and_the_planner_shows() {
         let game = game();
         // September: the family day dragged onto the 10th, the club party

@@ -751,10 +751,12 @@ const LINE_UP_VIEW: u32 = 0xf;
 const TRAINING_PICTURES: u32 = 0x100;
 
 /// A manager's week templates: a name of 30 bytes and a week's sessions
-/// each (the manager object's +0x38a).
+/// each (the manager object's +0x38a). The block as it stands is what the
+/// training strip writes to and reads from a `plan\*.Woc` file, so its
+/// size is the file's size (see [`crate::training::week_file`]).
 const TEMPLATES_AT: usize = 0x4d6;
-const TEMPLATE_SIZE: usize = 0x33;
-const TEMPLATE_NAME: usize = 30;
+pub const TEMPLATE_SIZE: usize = 0x33;
+pub const TEMPLATE_NAME: usize = 30;
 pub const TEMPLATES: usize = 18;
 /// What he chose for each week of the game, counted from the first
 /// season's start (the manager object's +0x720): the template, 1 more
@@ -802,6 +804,16 @@ impl Manager {
                 (text(&self.0[at..], TEMPLATE_NAME), self.get(at + TEMPLATE_NAME))
             })
             .collect()
+    }
+
+    /// Keeps his week templates whole: the 18 of a `plan\*.Woc` file, or
+    /// the game's own ones the strip restores — it writes the block as it
+    /// read it (`FUN_0059fb37`).
+    pub fn set_templates(&mut self, block: &[u8]) {
+        let size = TEMPLATES * TEMPLATE_SIZE;
+        if block.len() == size {
+            self.0[TEMPLATES_AT..TEMPLATES_AT + size].copy_from_slice(block);
+        }
     }
 
     /// What he planned for a week of the season.

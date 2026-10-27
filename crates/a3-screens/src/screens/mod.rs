@@ -123,6 +123,8 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(jobs::Signed),
         Box::new(popups::Question),
         Box::new(popups::Notice),
+        Box::new(popups::Safe),
+        Box::new(popups::Files::default()),
         Box::new(calendar::Wait::default()),
         Box::new(calendar::Week::default()),
         Box::new(hub::MenuBar::default()),

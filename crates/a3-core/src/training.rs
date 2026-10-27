@@ -20,6 +20,8 @@ pub const WEEK: usize = DAYS * SESSIONS;
 pub const FREE: u8 = 11;
 /// The units, 0 to 38; the tables have a fortieth, empty.
 const UNIT_ENTRIES: usize = 40;
+/// The highest unit; a read file's byte above this comes down to it.
+pub const LAST_UNIT: u8 = 38;
 
 /// The bit of the team's passing word that keeps its training secret
 /// (team +0xd2): its opponents learn nothing of it.
@@ -71,6 +73,11 @@ const RULES: usize = 6;
 /// The co-trainer's odds of the manager's templates, a row of fourteen by
 /// the kind of training he plans: cumulative, out of 100.
 const CO_ODDS_AT: u32 = 0x8ab1f0;
+/// The game's own 18 week templates, which the strip's third item puts
+/// back (`DAT_008aad90`); the block of 18 templates a manager keeps and
+/// a `plan\*.Woc` file holds.
+const ORIGINAL_WEEKS_AT: u32 = 0x8aad90;
+const BLOCK: usize = crate::records::TEMPLATES * crate::records::TEMPLATE_SIZE;
 const CO_KINDS: usize = 7;
 const CO_TEMPLATES: usize = 14;
 /// Above the odds the co-trainer takes this template.
@@ -181,6 +188,62 @@ pub struct Template {
     pub week: [u8; WEEK],
 }
 
+/// The manager's own weeks as the training strip writes them to
+/// `plan\*.Woc`: all 18 templates as his record holds them, each a name
+/// of 30 bytes and 21 units — the block of `records::Manager` and the
+/// file are the same 918 bytes (`FUN_0059f989`).
+pub fn week_file(templates: &[Template]) -> Vec<u8> {
+    use crate::records::{TEMPLATES, TEMPLATE_NAME, TEMPLATE_SIZE};
+    let mut block = vec![0; TEMPLATES * TEMPLATE_SIZE];
+    for (t, template) in templates.iter().take(TEMPLATES).enumerate() {
+        let at = t * TEMPLATE_SIZE;
+        let name: Vec<u8> = template
+            .name
+            .chars()
+            .map(|c| a3_files::bitmap_font::to_cp1252(c).unwrap_or(b'?'))
+            .collect();
+        let n = name.len().min(TEMPLATE_NAME - 1);
+        block[at..at + TEMPLATE_NAME][..n].copy_from_slice(&name[..n]);
+        block[at + TEMPLATE_NAME..at + TEMPLATE_SIZE].copy_from_slice(&template.week);
+    }
+    block
+}
+
+/// A `plan\*.Woc` read in: nothing if it is not one whole block of 18
+/// templates, and with every unit above [`LAST_UNIT`] brought down to it,
+/// as the game does after its `fread` (`FUN_0059fb37`). The block is what
+/// his record keeps, [`week_templates`] what his screens show.
+pub fn read_week_file(bytes: &[u8]) -> Option<Vec<u8>> {
+    use crate::records::{TEMPLATES, TEMPLATE_NAME, TEMPLATE_SIZE};
+    (bytes.len() == TEMPLATES * TEMPLATE_SIZE).then(|| {
+        bytes
+            .iter()
+            .enumerate()
+            .map(|(i, &unit)| {
+                if i % TEMPLATE_SIZE >= TEMPLATE_NAME { unit.min(LAST_UNIT) } else { unit }
+            })
+            .collect()
+    })
+}
+
+/// The templates of such a block, clamped or not: names and sessions.
+pub fn week_templates(block: &[u8]) -> Vec<Template> {
+    use crate::records::{TEMPLATES, TEMPLATE_NAME, TEMPLATE_SIZE};
+    (0..TEMPLATES)
+        .filter_map(|t| {
+            let at = t * TEMPLATE_SIZE;
+            let entry = block.get(at..at + TEMPLATE_SIZE)?;
+            let name = &entry[..TEMPLATE_NAME];
+            Some(Template {
+                name: a3_files::sav::cp1252(
+                    &name[..name.iter().position(|&b| b == 0).unwrap_or(TEMPLATE_NAME)],
+                ),
+                week: entry[TEMPLATE_NAME..].try_into().ok()?,
+            })
+        })
+        .collect()
+}
+
 /// What a team can, 0 to 5 each (7 shows as unknown), in the order of
 /// [`TRICKS`] …: from its record's pressing, anti-offside and set-piece
 /// bits (`FUN_006989c4`, `FUN_00698b3d`, `FUN_00698598`, `FUN_006987a6`,
@@ -221,6 +284,9 @@ pub struct TrainingTables {
     pub categories: Vec<Category>,
     /// The rules for the week's player in individual training.
     pub rule_texts: Vec<u16>,
+    /// The game's own 18 week templates, which the training strip's third
+    /// item puts back.
+    pub originals: Vec<Template>,
     co_odds: Vec<u8>,
 }
 
@@ -259,6 +325,7 @@ impl TrainingTables {
             knowledge: exe.bytes(KNOWLEDGE_AT, (MOST_LEVEL + 1) * KNOWLEDGE_ROW)?.to_vec(),
             categories,
             rule_texts: u16s(RULE_TEXTS_AT, RULES)?,
+            originals: week_templates(exe.bytes(ORIGINAL_WEEKS_AT, BLOCK)?),
             co_odds: exe.bytes(CO_ODDS_AT, CO_KINDS * CO_TEMPLATES)?.to_vec(),
         })
     }
@@ -327,6 +394,48 @@ mod tests {
         assert_eq!((training.unit(1, 0), training.unit(6, 2)), (16, 16));
         assert!(training.planned());
         assert!(!Training::default().planned());
+    }
+
+    #[test]
+    fn a_week_file_holds_the_managers_templates_whole() {
+        use crate::records::{TEMPLATES, TEMPLATE_NAME, TEMPLATE_SIZE};
+        let templates = vec![
+            Template { name: "gemischte Woche".to_owned(), week: [11; WEEK] },
+            Template { name: "Ausdauer".to_owned(), week: [1; WEEK] },
+        ];
+        let block = week_file(&templates);
+        assert_eq!(block.len(), TEMPLATES * TEMPLATE_SIZE);
+        assert_eq!(read_week_file(&block).as_deref(), Some(block.as_slice()));
+        let back = week_templates(&block);
+        assert_eq!(back.len(), TEMPLATES);
+        assert_eq!(&back[0], &templates[0]);
+        assert_eq!(&back[1], &templates[1]);
+        assert_eq!((back[2].name.as_str(), back[2].week), ("", [0; WEEK]));
+
+        // A file's unit above the last one comes down to it; a short file
+        // is no file at all.
+        let mut rough = block.clone();
+        rough[TEMPLATE_NAME] = 60;
+        assert_eq!(week_templates(&read_week_file(&rough).unwrap())[0].week[0], LAST_UNIT);
+        assert!(read_week_file(&block[..BLOCK - 1]).is_none());
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_games_own_weeks_stand_in_the_program() {
+        let dir = std::path::PathBuf::from(std::env::var_os("ANSTOSS3_DIR").expect("ANSTOSS3_DIR"));
+        let exe = Exe::open(&dir.join("anstoss3.exe")).unwrap();
+        let tables = TrainingTables::load(&exe).unwrap();
+        assert_eq!(tables.originals.len(), crate::records::TEMPLATES);
+        assert_eq!(tables.originals[0].name, "gemischte Woche");
+        assert_eq!(
+            tables.originals[0].week,
+            [11, 11, 11, 15, 33, 11, 17, 27, 11, 10, 16, 11, 5, 26, 11, 18, 33, 11, 11, 11, 11]
+        );
+        // The block's 17th says just "Frei", though the texts call it
+        // "Frei 1" — the strip copies the block, not the texts.
+        assert_eq!(tables.originals[16].name, "Frei");
+        assert!(tables.originals[17].week.iter().all(|&unit| unit == FREE));
     }
 
     #[test]

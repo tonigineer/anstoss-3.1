@@ -131,6 +131,12 @@ pub mod dialogs {
     pub const NO_CREDIT: u16 = 24;
     pub const TRAINING_PICTURES: u16 = 513;
     pub const UNIT_CHOICE: u16 = 362;
+    /// "Sind Sie sicher?" before the training strip writes, reads or
+    /// restores its weeks and its plan; and the file select it opens.
+    pub const SAFE_SAVE: u16 = 241;
+    pub const SAFE_LOAD: u16 = 242;
+    pub const SAFE_ORIGINAL: u16 = 243;
+    pub const PLAN_FILES: u16 = 506;
     pub const WEEKS: [u16; 5] = [1000, 1001, 1002, 1003, 1004];
     /// A talk with a player, on the day it was booked for.
     pub const TALK: u16 = 461;
@@ -330,6 +336,18 @@ pub enum Args {
     /// The list view's question whether one of the current manager's
     /// formations is to keep the eleven's spots, in its own words.
     KeepFormation(usize),
+    /// The training strip's "Sind Sie sicher?": whether it speaks of the
+    /// season's plan, which changes dialog 242's words, or of the
+    /// manager's own training weeks.
+    PlanSafe {
+        plan: bool,
+    },
+    /// The training strip's file select, saving or reading a file of the
+    /// manager's own training weeks (`plan\*.Woc`); the select writes and
+    /// reads it itself, as the game's `CFileSelect` does.
+    PlanFiles {
+        save: bool,
+    },
     /// What changed of a player's contentment with the trainer, told with a
     /// text with his name.
     Change {

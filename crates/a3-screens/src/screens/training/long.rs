@@ -6,14 +6,15 @@
 //! nobody is chosen, a double click on a week asking which player to watch
 //! (dialog 281), who the detective watches, a training camp's food,
 //! going out and control, secret training, the co-trainer planning the
-//! empty weeks, and the last item of the file strip clearing the plan of
-//! the weeks ahead, after asking.
+//! empty weeks, and the file strip saving, reading and putting back the
+//! manager's training weeks and clearing the plan of the weeks ahead, each
+//! after asking.
 
 use std::collections::HashMap;
 
 use a3_core::lineup;
 use a3_core::season::{ClubState, Rules};
-use a3_core::training::{CAMP_WEEK, DAYS, SECRET, Week};
+use a3_core::training::{self, CAMP_WEEK, DAYS, SECRET, Week};
 use a3_files::rch::Dialog;
 
 use super::super::duties::short_name;
@@ -25,7 +26,9 @@ use super::change_week;
 use crate::controls::options::NONE;
 use crate::pointer::{Grip, Target};
 use crate::view::View;
-use a3_core::cycle::dialogs::{NOTICE, QUESTION};
+use a3_core::cycle::dialogs::{
+    NOTICE, PLAN_FILES, QUESTION, SAFE_LOAD, SAFE_ORIGINAL, SAFE_SAVE,
+};
 
 /// Controls by their ids in the dialog file.
 const WEEKS: u16 = 4407;
@@ -39,8 +42,8 @@ const SECRET_BUTTON: u16 = 5344;
 const CO_PLAN: u16 = 6465;
 /// Saving, loading and restoring the templates and the plan.
 const FILES: u16 = 5652;
-/// Its last item, "Trainingsplan löschen"; its five others read and write
-/// files, which the replica does not have yet.
+/// Its last item, "Trainingsplan löschen"; its third and fourth save and
+/// load the season's plan, files the replica does not have yet.
 const PLAN_ITEM: usize = 5;
 /// The OK, whose place the bar takes.
 const OK: u16 = 1;
@@ -87,6 +90,15 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     hub::add_bar(dialog, rules);
 }
 
+/// What the file strip's first three items asked for: the weeks to a file,
+/// weeks from one, the game's own weeks put back.
+#[derive(Clone, Copy, PartialEq)]
+enum Strip {
+    Save,
+    Load,
+    Restore,
+}
+
 #[derive(Default)]
 pub struct LongTraining {
     /// The page shown, the week selected.
@@ -100,6 +112,9 @@ pub struct LongTraining {
     pick: Option<usize>,
     /// Whether the strip's last item asked about clearing the plan.
     clearing: bool,
+    /// The strip's first three items, while they ask and select: what they
+    /// asked for, and whether the asking is over and the select is up.
+    strip: Option<(Strip, bool)>,
 }
 
 impl Screen for LongTraining {
@@ -135,11 +150,7 @@ impl Screen for LongTraining {
             list.selection = Some(SELECTION);
         }
         if let Some(c) = control(dialog, TEMPLATES) {
-            if let Some(options) = view.options_mut(c) {
-                for (i, label) in options.labels.iter_mut().enumerate() {
-                    *label = manager.templates.get(i).map_or_else(String::new, |t| t.name.clone());
-                }
-            }
+            self.labels(cx, view);
             view.set_chosen(c, NONE);
         }
         if let Some(c) = control(dialog, FILES) {
@@ -164,6 +175,11 @@ impl Screen for LongTraining {
             }
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(TEMPLATES) => true,
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(PAGES) => true,
+            // Of the file strip only the season's plan in a file stays
+            // behind: its two items are the ones not marked.
+            Target::Option { control: c, item } if dialog.controls[c].id == Some(FILES) => {
+                !matches!(item, 3 | 4)
+            }
             _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
         };
         mark_inert(view, dialog, works);
@@ -205,14 +221,29 @@ impl Screen for LongTraining {
                 return self.choose(cx, view, item);
             }
             // The strip's last item asks whether the plan may really go; its
-            // choice falls back to none either way. Its five others save and
-            // load to files, which the replica does not read yet.
+            // first three ask before they write, read or put back the
+            // manager's training weeks, and the first two then select a file.
+            // Its choice falls back to none either way. Its third and fourth
+            // speak of the season's plan in a file the replica has not yet.
             Target::Option { control: c, item } if id(c) == FILES => {
                 view.set_chosen(c, NONE);
-                if item == PLAN_ITEM {
-                    self.clearing = true;
-                    return Outcome::Popup(Request::with(QUESTION, Args::Text(PLAN_DELETE)));
-                }
+                let kind = match item {
+                    0 => Strip::Save,
+                    1 => Strip::Load,
+                    2 => Strip::Restore,
+                    PLAN_ITEM => {
+                        self.clearing = true;
+                        return Outcome::Popup(Request::with(QUESTION, Args::Text(PLAN_DELETE)));
+                    }
+                    _ => return Outcome::Stay,
+                };
+                self.strip = Some((kind, false));
+                let ask = match kind {
+                    Strip::Save => SAFE_SAVE,
+                    Strip::Load => SAFE_LOAD,
+                    Strip::Restore => SAFE_ORIGINAL,
+                };
+                return Outcome::Popup(Request::with(ask, Args::PlanSafe { plan: false }));
             }
             Target::Row { control: c, .. } if id(c) == RULE => {
                 let rule = view.combo(c).and_then(|combo| combo.selected).unwrap_or(0) as u8;
@@ -244,13 +275,32 @@ impl Screen for LongTraining {
     /// week's player — "keiner" as 0 — and the weeks are filled again; a
     /// cancellation leaves the week as it was. The strip's question clears
     /// the templates of the weeks ahead of the current one, which keeps its
-    /// own and every week's player (`FUN_0059ffc1`).
+    /// own and every week's player (`FUN_0059ffc1`). The strip's three other
+    /// questions go on to the file select, and after the select wrote or read
+    /// a file — or after 243's yes — the weeks and the template names stand
+    /// again; putting the game's own weeks back is what 243's yes alone does,
+    /// without a select (`FUN_0059f8f0`).
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if let Some(week) = self.pick.take() {
             if let Reply::Choice(player) = reply {
                 change_week(cx, week, |w| w.player = u16::try_from(player).unwrap_or(0));
                 self.fill(cx, view);
             }
+            return Outcome::Stay;
+        }
+        if let Some((kind, asked)) = self.strip.take() {
+            if reply != Reply::Ok {
+                return Outcome::Stay;
+            }
+            if kind == Strip::Restore {
+                self.original_weeks(cx);
+            } else if !asked {
+                self.strip = Some((kind, true));
+                let save = kind == Strip::Save;
+                return Outcome::Popup(Request::with(PLAN_FILES, Args::PlanFiles { save }));
+            }
+            self.fill(cx, view);
+            self.labels(cx, view);
             return Outcome::Stay;
         }
         if std::mem::take(&mut self.clearing) && reply == Reply::Ok {
@@ -352,6 +402,36 @@ impl LongTraining {
         list.inks = inks;
         list.keys = keys;
         self.select(view);
+    }
+
+    /// The strip's template names, which are the manager's weeks': listed
+    /// once when the screen opens, and again after a file wrote or read them
+    /// or the game's own went back in.
+    fn labels(&self, cx: &Cx, view: &mut View) {
+        let manager = cx.state.season.as_ref().and_then(|s| s.manager());
+        if let Some(options) = control(cx.dialog, TEMPLATES).and_then(|c| view.options_mut(c)) {
+            for (i, label) in options.labels.iter_mut().enumerate() {
+                *label = manager
+                    .and_then(|m| m.templates.get(i))
+                    .map_or_else(String::new, |t| t.name.clone());
+            }
+        }
+    }
+
+    /// The game's own training weeks put back into the manager, and his
+    /// record with it: the strip copies the whole block out of its program,
+    /// names and all (`FUN_0059f8f0`).
+    fn original_weeks(&self, cx: &mut Cx) {
+        let originals = cx.game.rules.training.originals.clone();
+        let block = training::week_file(&originals);
+        change_manager(cx, |m| m.templates = originals);
+        let current = cx.state.season.as_ref().map(|s| s.current);
+        if let (Some(current), Some(records)) = (current, cx.state.records.as_mut())
+            && let Some(slot) = records.human_slot(current)
+            && let Some(record) = records.managers.get_mut(slot)
+        {
+            record.set_templates(&block);
+        }
     }
 
     /// The selected week's row, on its own page.

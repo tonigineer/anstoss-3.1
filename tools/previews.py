@@ -81,7 +81,11 @@ AREAS = {
              # The double click of a week asks which player to watch (281).
              (*bar(4, 345, "now dbl row 4407 15", "until dialog 281"), 281),
              # The strip's last item asks whether the plan may go (384).
-             (*bar(4, 345, "now choose 5652 5", "until dialog 384"), 384)],
+             (*bar(4, 345, "now choose 5652 5", "until dialog 384"), 384),
+             # Saving the weeks asks first (241), then names the file (506).
+             (*bar(4, 345, "now choose 5652 0", "until dialog 241"), 241),
+             (*bar(4, 345, "now choose 5652 0", "until dialog 241", "now ok",
+                   "until dialog 506"), 506)],
     "short": [(*bar(5, 346), 346), (*bar(5, 346, "now choose 5035 4"), 346),
               (*bar(5, 346, "now choose 5035 4", "now click 4427", "now row 4427 3"), 346)],
     "individual": [(*bar(6, 347), 347), (*bar(6, 347, "now cell 3298 1 8"), 347)],
