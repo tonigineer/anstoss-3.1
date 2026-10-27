@@ -342,11 +342,13 @@ pub enum Args {
     PlanSafe {
         plan: bool,
     },
-    /// The training strip's file select, saving or reading a file of the
-    /// manager's own training weeks (`plan\*.Woc`); the select writes and
-    /// reads it itself, as the game's `CFileSelect` does.
+    /// The training strip's file select, saving or reading a file — of the
+    /// manager's own training weeks (`plan\*.Woc`) or of the season's plan
+    /// (`plan\*.pla`), which changes its extension; the select writes and
+    /// reads the file itself, as the game's `CFileSelect` does.
     PlanFiles {
         save: bool,
+        plan: bool,
     },
     /// What changed of a player's contentment with the trainer, told with a
     /// text with his name.

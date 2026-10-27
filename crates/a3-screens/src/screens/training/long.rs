@@ -43,7 +43,7 @@ const CO_PLAN: u16 = 6465;
 /// Saving, loading and restoring the templates and the plan.
 const FILES: u16 = 5652;
 /// Its last item, "Trainingsplan löschen"; its third and fourth save and
-/// load the season's plan, files the replica does not have yet.
+/// load the season's plan in a file.
 const PLAN_ITEM: usize = 5;
 /// The OK, whose place the bar takes.
 const OK: u16 = 1;
@@ -90,12 +90,14 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     hub::add_bar(dialog, rules);
 }
 
-/// What the file strip's first three items asked for: the weeks to a file,
-/// weeks from one, the game's own weeks put back.
+/// What the file strip's items asked for: the weeks or the season's plan to
+/// a file, weeks or the plan from one, the game's own weeks put back.
 #[derive(Clone, Copy, PartialEq)]
 enum Strip {
     Save,
     Load,
+    SavePlan,
+    LoadPlan,
     Restore,
 }
 
@@ -112,8 +114,8 @@ pub struct LongTraining {
     pick: Option<usize>,
     /// Whether the strip's last item asked about clearing the plan.
     clearing: bool,
-    /// The strip's first three items, while they ask and select: what they
-    /// asked for, and whether the asking is over and the select is up.
+    /// The strip's items, while they ask and select: what they asked for,
+    /// and whether the asking is over and the select is up.
     strip: Option<(Strip, bool)>,
 }
 
@@ -175,11 +177,9 @@ impl Screen for LongTraining {
             }
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(TEMPLATES) => true,
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(PAGES) => true,
-            // Of the file strip only the season's plan in a file stays
-            // behind: its two items are the ones not marked.
-            Target::Option { control: c, item } if dialog.controls[c].id == Some(FILES) => {
-                !matches!(item, 3 | 4)
-            }
+            // Every item of the file strip works: the weeks and the
+            // season's plan each go to a file and come back from one.
+            Target::Option { control: c, .. } if dialog.controls[c].id == Some(FILES) => true,
             _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
         };
         mark_inert(view, dialog, works);
@@ -221,16 +221,17 @@ impl Screen for LongTraining {
                 return self.choose(cx, view, item);
             }
             // The strip's last item asks whether the plan may really go; its
-            // first three ask before they write, read or put back the
-            // manager's training weeks, and the first two then select a file.
-            // Its choice falls back to none either way. Its third and fourth
-            // speak of the season's plan in a file the replica has not yet.
+            // others ask before they write, read or put back the manager's
+            // training weeks or the season's plan, and those that name a
+            // file then select one. Its choice falls back to none either way.
             Target::Option { control: c, item } if id(c) == FILES => {
                 view.set_chosen(c, NONE);
                 let kind = match item {
                     0 => Strip::Save,
                     1 => Strip::Load,
                     2 => Strip::Restore,
+                    3 => Strip::SavePlan,
+                    4 => Strip::LoadPlan,
                     PLAN_ITEM => {
                         self.clearing = true;
                         return Outcome::Popup(Request::with(QUESTION, Args::Text(PLAN_DELETE)));
@@ -238,12 +239,13 @@ impl Screen for LongTraining {
                     _ => return Outcome::Stay,
                 };
                 self.strip = Some((kind, false));
+                let plan = matches!(kind, Strip::SavePlan | Strip::LoadPlan);
                 let ask = match kind {
-                    Strip::Save => SAFE_SAVE,
-                    Strip::Load => SAFE_LOAD,
+                    Strip::Save | Strip::SavePlan => SAFE_SAVE,
+                    Strip::Load | Strip::LoadPlan => SAFE_LOAD,
                     Strip::Restore => SAFE_ORIGINAL,
                 };
-                return Outcome::Popup(Request::with(ask, Args::PlanSafe { plan: false }));
+                return Outcome::Popup(Request::with(ask, Args::PlanSafe { plan }));
             }
             Target::Row { control: c, .. } if id(c) == RULE => {
                 let rule = view.combo(c).and_then(|combo| combo.selected).unwrap_or(0) as u8;
@@ -275,11 +277,12 @@ impl Screen for LongTraining {
     /// week's player — "keiner" as 0 — and the weeks are filled again; a
     /// cancellation leaves the week as it was. The strip's question clears
     /// the templates of the weeks ahead of the current one, which keeps its
-    /// own and every week's player (`FUN_0059ffc1`). The strip's three other
-    /// questions go on to the file select, and after the select wrote or read
-    /// a file — or after 243's yes — the weeks and the template names stand
-    /// again; putting the game's own weeks back is what 243's yes alone does,
-    /// without a select (`FUN_0059f8f0`).
+    /// own and every week's player (`FUN_0059ffc1`). The strip's other
+    /// questions go on to the file select, which writes or reads the weeks
+    /// or the season's plan there; after that — or after 243's yes — the
+    /// weeks and the template names stand again, saving the plan alone only
+    /// the labels; putting the game's own weeks back is what 243's yes alone
+    /// does, without a select (`FUN_0059f8f0`).
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if let Some(week) = self.pick.take() {
             if let Reply::Choice(player) = reply {
@@ -296,10 +299,18 @@ impl Screen for LongTraining {
                 self.original_weeks(cx);
             } else if !asked {
                 self.strip = Some((kind, true));
-                let save = kind == Strip::Save;
-                return Outcome::Popup(Request::with(PLAN_FILES, Args::PlanFiles { save }));
+                let save = matches!(kind, Strip::Save | Strip::SavePlan);
+                let plan = matches!(kind, Strip::SavePlan | Strip::LoadPlan);
+                return Outcome::Popup(Request::with(
+                    PLAN_FILES,
+                    Args::PlanFiles { save, plan },
+                ));
             }
-            self.fill(cx, view);
+            // Saving the plan changes nothing of the weeks shown, so only
+            // the labels stand again.
+            if kind != Strip::SavePlan {
+                self.fill(cx, view);
+            }
             self.labels(cx, view);
             return Outcome::Stay;
         }

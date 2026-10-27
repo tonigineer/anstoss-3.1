@@ -247,6 +247,7 @@ pub fn compose(game: &mut Game) {
     training::compose(&mut game.dialogs, &game.data.rules);
     training::long::compose(&mut game.dialogs, &game.data.rules);
     training::individual::compose(&mut game.dialogs, &game.data.rules);
+    popups::compose(&mut game.dialogs);
     planner::compose(&mut game.dialogs, &game.data.rules);
     notepad::compose(&mut game.dialogs);
     year::compose(&mut game.dialogs, &game.data.rules);

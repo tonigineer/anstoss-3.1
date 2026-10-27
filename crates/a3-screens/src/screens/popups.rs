@@ -1,7 +1,8 @@
 //! The small popups the game asks and tells things in: a question to answer
 //! yes or no, a notice to take in, the training strip's "Sind Sie sicher?",
-//! and its select of a file of saved training weeks.
+//! and its select of a file of saved training weeks or of the season's plan.
 
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use chrono::{DateTime, Local};
@@ -15,7 +16,9 @@ use crate::screens::{
     Args, Cx, Outcome, Reply, Request, Screen, control, indices, ok_or_cancel, set,
 };
 use crate::view::View;
-use a3_files::rch::Kind;
+use a3_core::training::DAYS;
+use a3_files::rch::{Dialog, Kind};
+use super::training::{change, change_week};
 
 const QUESTION_TEXT: u16 = 4738;
 const BUILDER_OFFER: u16 = 4812;
@@ -31,14 +34,18 @@ const BALLS: [u16; 3] = [1336, 2116, 4732];
 const BALL_FRAMES: std::ops::RangeInclusive<u16> = 1762..=1773;
 /// The words of the strip's second "Sind Sie sicher?" (dialog 242).
 const SAFE_LOAD_TEXT: u16 = 3378;
-/// Reading the season's plan asks in other words; its other titles stand in
-/// the window title, which the replica does not draw.
+/// Reading the season's plan asks in other words.
 const PLAN_LOAD_ASK: u16 = 3669;
+/// The window titles of the strip's two plan asks, over the weeks' own.
+const PLAN_SAVE_TITLE: u16 = 3671;
+const PLAN_LOAD_TITLE: u16 = 3670;
 /// The file select's list, and the name typed or picked in it.
 const FILE_LIST: u16 = 5261;
 const FILE_NAME: u16 = 6361;
 /// The extension of a file of the manager's training weeks (".Woc").
 const WEEK_EXT: u16 = 3470;
+/// The extension of a file of the season's plan (".pla").
+const PLAN_EXT: u16 = 3468;
 /// The select's own notice when the file would not open: written to, read
 /// from ("Fehler beim Abspeichern/Einlesen der Daten!").
 const SAVE_FAILED: u16 = 3214;
@@ -154,6 +161,17 @@ impl Screen for Notice {
     }
 }
 
+/// The window title the original draws over each of the strip's three asks.
+pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
+    for id in [SAFE_SAVE, SAFE_LOAD, SAFE_ORIGINAL] {
+        if let Some(dialog) = dialogs.get_mut(&id) {
+            let text = dialog.title.clone();
+            let caption = super::caption(dialog.frame, super::discipline::CAPTION_ID, text);
+            dialog.controls.insert(0, caption);
+        }
+    }
+}
+
 /// The training strip's "Sind Sie sicher?", whether it writes, reads or puts
 /// back its weeks (dialogs 241 to 243): OK lets it happen, the other button
 /// leaves it be. Its ball plays the question's frames.
@@ -165,12 +183,19 @@ impl Screen for Safe {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
-        // Only reading the season's plan asks in other words; the manager's
-        // own weeks and plan keep what the dialog says (`FUN_0059ffc1`'s
-        // mode, which for 241 and 242 only changes the window title too).
-        if matches!(args, Args::PlanSafe { plan: true }) && view.id == SAFE_LOAD {
+        // Only reading the season's plan asks in other words; saving it and
+        // reading it take their own window title, the manager's own weeks
+        // and plan what the dialog says (`FUN_0059ffc1`'s mode).
+        let plan = matches!(args, Args::PlanSafe { plan: true });
+        if plan && view.id == SAFE_LOAD {
             set(view, cx.dialog, SAFE_LOAD_TEXT, cx.game.text(PLAN_LOAD_ASK).to_owned());
         }
+        let title = match (view.id, plan) {
+            (SAFE_SAVE, true) => cx.game.text(PLAN_SAVE_TITLE),
+            (SAFE_LOAD, true) => cx.game.text(PLAN_LOAD_TITLE),
+            _ => cx.dialog.title.as_str(),
+        };
+        set(view, cx.dialog, super::discipline::CAPTION_ID, title.to_owned());
         for ball in indices(cx.dialog, |k| matches!(k, Kind::Anim)) {
             if let Some(ball) = view.anim_mut(ball) {
                 ball.frames = question_frames();
@@ -191,10 +216,13 @@ impl Screen for Safe {
 
 /// The training strip's select of a file (`CFileSelect`, dialog 506): it
 /// lists the game's `plan` folder and writes or reads the file itself, as
-/// the game's does — the request that opens it only says whether to save.
+/// the game's does — the request that opens it says whether to save, and
+/// whether weeks or the season's plan are meant, which sets the extension
+/// it lists and appends.
 #[derive(Default)]
 pub struct Files {
     save: bool,
+    plan: bool,
 }
 
 impl Screen for Files {
@@ -203,10 +231,11 @@ impl Screen for Files {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
-        let Args::PlanFiles { save } = args else { return };
+        let Args::PlanFiles { save, plan } = args else { return };
         self.save = save;
+        self.plan = plan;
         let game = cx.game;
-        let rows: Vec<String> = plan_files(&game.dir, game.text(WEEK_EXT))
+        let rows: Vec<String> = plan_files(&game.dir, game.text(if plan { PLAN_EXT } else { WEEK_EXT }))
             .iter()
             .map(|(name, when)| {
                 let when = DateTime::<Local>::from(*when);
@@ -263,7 +292,7 @@ impl Files {
     /// select's own notice, and the select stays up for another try.
     fn take(&self, cx: &mut Cx, view: &mut View) -> Outcome {
         let game = cx.game;
-        let ext = game.text(WEEK_EXT);
+        let ext = game.text(if self.plan { PLAN_EXT } else { WEEK_EXT });
         let mut name = control(cx.dialog, FILE_NAME)
             .and_then(|c| view.controls[c].state.as_edit())
             .map_or(String::new(), |edit| edit.text.clone());
@@ -271,7 +300,12 @@ impl Files {
             name.push_str(ext);
         }
         let path = game.dir.join("plan").join(&name);
-        let done = if self.save { write_weeks(cx, &path) } else { read_weeks(cx, &path) };
+        let done = match (self.plan, self.save) {
+            (false, true) => write_weeks(cx, &path),
+            (false, false) => read_weeks(cx, &path),
+            (true, true) => write_plan(cx, &path),
+            (true, false) => read_plan(cx, &path),
+        };
         if done {
             return Outcome::Close(Reply::Ok);
         }
@@ -280,10 +314,10 @@ impl Files {
     }
 }
 
-/// The `plan` folder's files ending in the extension, by name: the select
-/// lists each with the date and time the directory gives it.
+/// The game folder's `plan` subfolder's files ending in the extension, by
+/// name: the select lists each with the date and time the directory gives it.
 pub(crate) fn plan_files(dir: &std::path::Path, ext: &str) -> Vec<(String, SystemTime)> {
-    let mut files: Vec<(String, SystemTime)> = std::fs::read_dir(dir)
+    let mut files: Vec<(String, SystemTime)> = std::fs::read_dir(&dir.join("plan"))
         .map(|entries| {
             entries
                 .flatten()
@@ -328,6 +362,53 @@ fn read_weeks(cx: &mut Cx, path: &std::path::Path) -> bool {
         && let Some(record) = records.managers.get_mut(slot)
     {
         record.set_templates(&block);
+    }
+    true
+}
+
+/// The season's plan to the file: the fifty entries as one block, kept as
+/// the game keeps them (`FUN_0059fe1e`).
+fn write_plan(cx: &mut Cx, path: &std::path::Path) -> bool {
+    let Some(weeks) =
+        cx.state.season.as_ref().and_then(|s| s.manager()).map(|m| m.weeks.clone())
+    else {
+        return false;
+    };
+    std::fs::write(path, a3_core::training::plan_file(&weeks)).is_ok()
+}
+
+/// The fifty entries of a `plan\*.pla` into the manager and his record with
+/// it: the game copies each from the current week on — that week itself only
+/// when the week has just begun — and leaves every entry's done flag and
+/// individual player out. The current week's plan goes into the club with
+/// it, taking the sessions of the template the stored number itself names —
+/// one past the chosen one, and none's own when no template was chosen, the
+/// original reading the stored number without the minus one it was written
+/// with (`FUN_005a01db`).
+fn read_plan(cx: &mut Cx, path: &std::path::Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else { return false };
+    let Some(entries) = a3_core::training::read_plan_file(&bytes) else { return false };
+    let Some(day) = cx.state.season.as_ref().map(|s| s.day) else { return false };
+    let (current, today) = (day / DAYS, day % DAYS);
+    for week in current + usize::from(today != 0)..a3_core::records::WEEKS {
+        change_week(cx, week, |w| {
+            *w = entries[week].clone();
+            w.done = false;
+            w.player = 0;
+        });
+    }
+    if today == 0 {
+        let stored = entries[current].template;
+        let sessions = cx
+            .state
+            .season
+            .as_ref()
+            .and_then(|s| s.manager())
+            .and_then(|m| usize::try_from(stored).ok().and_then(|v| m.templates.get(v)))
+            .map(|t| t.week);
+        if let Some(sessions) = sessions {
+            change(cx, |t| t.apply(0, &sessions, today));
+        }
     }
     true
 }

@@ -244,6 +244,62 @@ pub fn week_templates(block: &[u8]) -> Vec<Template> {
         .collect()
 }
 
+/// The season's plan as the training strip writes it to `plan\*.pla`: the
+/// fifty entries, each as his record keeps it — the block of
+/// `records::Manager` at +0x86c and the file are the same 2900 bytes
+/// (`FUN_0059fe1e`).
+pub fn plan_file(weeks: &[Week]) -> Vec<u8> {
+    use crate::records::{WEEKS, WEEK_SIZE};
+    let mut block = vec![0; WEEKS * WEEK_SIZE];
+    for (k, entry) in weeks.iter().take(WEEKS).enumerate() {
+        let at = k * WEEK_SIZE;
+        block[at] = u8::from(entry.done);
+        block[at + 1] = entry.kind;
+        block[at + 2] = entry.condition;
+        block[at + 3] = entry.freshness;
+        block[at + 4..at + 6].copy_from_slice(&entry.template.to_le_bytes());
+        block[at + 6..at + 8].copy_from_slice(&entry.player.to_le_bytes());
+        for (offset, len, name) in [(8, 30, &entry.template_name), (0x26, 20, &entry.player_name)]
+        {
+            let bytes: Vec<u8> =
+                name.chars().map(|c| a3_files::bitmap_font::to_cp1252(c).unwrap_or(b'?')).collect();
+            let n = bytes.len().min(len - 1);
+            block[at + offset..at + offset + len][..n].copy_from_slice(&bytes[..n]);
+        }
+    }
+    block
+}
+
+/// The fifty entries of a `plan\*.pla` read in, as the game copies them from
+/// its buffer, each week's own done flag and individual player aside
+/// (`FUN_005a01db`; what it does with the current week is the screen's).
+pub fn read_plan_file(bytes: &[u8]) -> Option<Vec<Week>> {
+    use crate::records::{WEEKS, WEEK_SIZE};
+    (bytes.len() >= WEEKS * WEEK_SIZE).then(|| {
+        (0..WEEKS)
+            .map(|k| {
+                let at = k * WEEK_SIZE;
+                let name = |offset: usize, len: usize| {
+                    let field = &bytes[at + offset..at + offset + len];
+                    a3_files::sav::cp1252(
+                        &field[..field.iter().position(|&b| b == 0).unwrap_or(len)],
+                    )
+                };
+                Week {
+                    done: bytes[at] != 0,
+                    kind: bytes[at + 1],
+                    condition: bytes[at + 2],
+                    freshness: bytes[at + 3],
+                    template: i16::from_le_bytes([bytes[at + 4], bytes[at + 5]]),
+                    player: u16::from_le_bytes([bytes[at + 6], bytes[at + 7]]),
+                    template_name: name(8, 30),
+                    player_name: name(0x26, 20),
+                }
+            })
+            .collect()
+    })
+}
+
 /// What a team can, 0 to 5 each (7 shows as unknown), in the order of
 /// [`TRICKS`] …: from its record's pressing, anti-offside and set-piece
 /// bits (`FUN_006989c4`, `FUN_00698b3d`, `FUN_00698598`, `FUN_006987a6`,

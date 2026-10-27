@@ -763,7 +763,9 @@ pub const TEMPLATES: usize = 18;
 /// than its number (0 none), and the player in individual training (0
 /// none).
 const WEEKS_AT: usize = 0x86c;
-const WEEK_SIZE: usize = 0x3a;
+/// One entry's size, and so a fifty-strong `plan\*.pla` block divided by
+/// fifty (see [`crate::training::plan_file`]).
+pub const WEEK_SIZE: usize = 0x3a;
 const WEEK_TEMPLATE: usize = 4;
 const WEEK_PLAYER: usize = 6;
 const WEEK_TEMPLATE_NAME: (usize, usize) = (8, 30);

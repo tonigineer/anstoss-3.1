@@ -1436,6 +1436,73 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_strip_writes_and_reads_the_season_plan() {
+        let game = game();
+        // Probe1: the strip's fourth item asks (241) and writes the season's
+        // fifty plan entries as one 2900-byte block to `plan\*.pla`, the
+        // fifth asks in the plan's own words (242) and reads them back from
+        // a file the select lists — from the current week on, and without
+        // their done flags and players. Cancelled, nothing happens.
+        let now = on_save(&game, "Probe1", "").unwrap();
+        let day = now.host.state().season.as_ref().unwrap().day;
+        let cur = day / 7;
+        if !crate::screens::popups::plan_files(&game.dir, game.text(3468)).is_empty() {
+            eprintln!("a .pla already lies in the plan folder; the oracle's copy has none");
+            return;
+        }
+        let opened = "now click bar 3\nuntil dialog 345";
+        let file = game.dir.join("plan/Nachtwache.pla");
+        let kept = on_save(
+            &game,
+            "Probe1",
+            &format!("{opened}\nnow choose 5652 3\nuntil dialog 241\nnow cancel"),
+        )
+        .unwrap();
+        assert_eq!((seen(&kept, 241), seen(&kept, 506)), (1, 0), "{}", kept.log.join("\n"));
+        assert!(!file.exists(), "{}", kept.log.join("\n"));
+
+        // The next three weeks take a template, so the file has an entry to
+        // find again, and then the save runs; the file goes before the
+        // asserts, so the install stays clean either way.
+        let saved = format!(
+            "{opened}\nnow choose 5035 2\nnow choose 5035 2\nnow choose 5035 2\n\
+             now choose 5652 3\nuntil dialog 241\nnow ok\nuntil dialog 506\n\
+             now type 6361 Nachtwache\nnow ok\nuntil dialog 345"
+        );
+        let runner = on_save(&game, "Probe1", &saved).unwrap();
+        let bytes = std::fs::read(&file).expect("the save wrote no .pla");
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!((seen(&runner, 241), seen(&runner, 506)), (1, 1), "{}", runner.log.join("\n"));
+        let entries = a3_core::training::read_plan_file(&bytes).unwrap();
+        assert_eq!((bytes.len(), entries.len()), (2900, 50));
+        // The block is the manager's weeks as they stand, entry for entry —
+        // a chosen week brings its number only, not the template's name, to
+        // its entry, which is what the original's choose does as well.
+        let state = runner.host.state();
+        let weeks = &state.season.as_ref().unwrap().manager().unwrap().weeks;
+        assert_eq!(&a3_core::training::plan_file(weeks), &bytes);
+        assert_eq!((entries[cur + 2].template, entries[cur + 1].template), (3, 3));
+
+        // Reading it back: the week took another template and a watched
+        // player first; the file's entry comes over both, minus the player.
+        let (page, row) = ((cur + 2) / 25, (cur + 2) % 25);
+        let load = format!(
+            "{opened}\nnow choose 4403 {page}\nnow row 4407 {row}\nnow choose 5035 5\n\
+             now dbl row 4407 {row}\nuntil dialog 281\nnow row 3827 2\nuntil dialog 345\n\
+             now choose 5652 4\nuntil dialog 242\nnow ok\nuntil dialog 506\n\
+             now row 5261 0\nnow ok\nuntil dialog 345"
+        );
+        std::fs::write(&file, &bytes).unwrap();
+        let runner = on_save(&game, "Probe1", &load).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!((seen(&runner, 242), seen(&runner, 506)), (1, 1), "{}", runner.log.join("\n"));
+        let state = runner.host.state();
+        let entry = state.records.as_ref().unwrap().humans().next().unwrap().week(cur + 2);
+        assert_eq!((entry.template, entry.player, entry.done), (3, 0, false), "{}", runner.log.join("\n"));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_calendar_books_and_the_planner_shows() {
         let game = game();
         // September: the family day dragged onto the 10th, the club party
