@@ -44,13 +44,19 @@ const RANK_PICTURES: u16 = 1376;
 /// The public's word about the club (`FUN_0047efdd`), by the image
 /// byte's steps, and the five cases of ill repute before it: 3072
 /// "Scheiß Millionäre", 3073 "Treterpack", 3074 "Mitleid", 3075
-/// "Armenhaus", 3076 "Schirilieblinge". Of those the records tell only
-/// the second — the club among its league's first three after enough
-/// matchdays; the rest want the club's money and a run of games
-/// without a win, which no save block keeps.
+/// "Armenhaus", 3076 "Schirilieblinge". Of those the records tell
+/// three: the rich club far under its season's goal, the club among
+/// its league's first three after enough matchdays, and the club
+/// whose last defeat lies back of five matchdays. The pauper's case
+/// wants the licence check's flag (a feature of its own, not built
+/// yet) and the referees' one the officials' counts no save keeps.
 const IMAGE_STEPS: [u8; 4] = [44, 34, 24, 14];
 const IMAGE_TEXTS: u16 = 1500;
+const MILLIONAIRES: u16 = 3072;
 const TRETERPACK: u16 = 3073;
+const PITY: u16 = 3074;
+/// The pay of a squad player that marks the millionaire club.
+const PAID: usize = 600;
 /// The association's word, 1505 "verzockt" to 1509 "ausgezeichnet".
 const ASSOCIATION_TEXTS: u16 = 1504;
 /// The manager's record: the public's and the fans' percent, and the
@@ -195,19 +201,69 @@ fn players_rating(records: &Records, team: Option<&Team>) -> i32 {
     (sum * 3 / i32::try_from(squad.len()).unwrap_or(1) + 95).clamp(0, 100)
 }
 
-/// What the public says of the club (`FUN_0047efdd`): ill repute for a
-/// club past its first games and sitting in the league's first three,
-/// else the word its image byte reaches. The money and form cases
-/// (`FUN_0047eb1f`, `0x47ec75`, `0x47eccd`) are not read from the save.
+/// What the public says of the club (`FUN_0047efdd`): the first of the
+/// five cases of ill repute that holds, else the word its image byte
+/// reaches.
 fn public_word(game: &Game, records: &Records, team: &Team) -> String {
     let played = a3_core::league::matchdays(records, team);
+    if millionaires(game, records, team, played) {
+        return game.text(MILLIONAIRES).to_owned();
+    }
     let place = a3_core::league::place(team);
     if played >= 3 && (1..=3).contains(&place) {
         return game.text(TRETERPACK).to_owned();
     }
+    if played >= 10 && long_since_defeat(records, team, played) {
+        return game.text(PITY).to_owned();
+    }
     let v = team.public_image();
     let steps = IMAGE_STEPS.iter().take_while(|&&step| v <= step).count();
     game.text(IMAGE_TEXTS + steps as u16).to_owned()
+}
+
+/// "Scheiß Millionäre" (`FUN_0047eb1f`): ten matchdays in, two places
+/// short of the season's goal or worse (`FUN_00775fa0` under −2: the
+/// goal, team `+0x136`, not reached and more than two places beyond
+/// it), and more than two squad players paid over 600 (their `+0x88`).
+fn millionaires(game: &Game, records: &Records, team: &Team, played: usize) -> bool {
+    if played < 10 {
+        return false;
+    }
+    let tables = &game.rules.league;
+    if a3_core::league::goal_reached(records, tables, team) > 0 {
+        return false;
+    }
+    if a3_core::league::goal_missing(records, tables, team) <= 2 {
+        return false;
+    }
+    let over = team
+        .players()
+        .iter()
+        .filter_map(|&id| records.player(id))
+        .filter(|p| usize::from(p.salary()) > PAID)
+        .count();
+    over > 2
+}
+
+/// "Mitleid" (`FUN_0047ec75`, `FUN_00660cda`): five matchdays or more
+/// since the club's last defeat — the league's results walked back
+/// from the last one played, the club by its place in the league's
+/// team list (`+0x106`); the whole season without a defeat counts.
+fn long_since_defeat(records: &Records, team: &Team, played: usize) -> bool {
+    let Some(league) =
+        a3_core::opponent::League::of(records, team.country().into(), team.level())
+    else {
+        return false;
+    };
+    let place = usize::from(team.league_place());
+    for matchday in (1..=played).rev() {
+        let Some((home, _, Some((a, b)))) = league.result(matchday, place) else { continue };
+        let (own, theirs) = if home == place { (a, b) } else { (b, a) };
+        if own < theirs {
+            return played - matchday >= 5;
+        }
+    }
+    true
 }
 
 /// The association's word (`0x87f8c4`): the club's manners byte, with

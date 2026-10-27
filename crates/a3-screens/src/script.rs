@@ -3207,6 +3207,71 @@ mod tests {
         assert_eq!(runner.host.view().id, 175);
     }
 
+    /// The three cases of ill repute the records tell (`FUN_0047efdd`),
+    /// on copies of A.an3: its twelve matchdays played — the saves kept
+    /// hold only three — its third millionaire, and its second place.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_public_words_ill_of_the_own_club() {
+        /// Open the popularity page on the patched copy and read the
+        /// public's word for it.
+        fn word(dir: &std::path::Path, out: &str, patch: impl FnOnce(&mut a3_core::records::Records)) {
+            let open = "now click bar 16\nuntil dialog 175\nnow choose 5643 5\nuntil dialog 26";
+            let root = patched(dir, "A", out, patch);
+            let mut game = Game::load(&root).unwrap();
+            compose(&mut game);
+            let Some(runner) = on_save(&game, out, open) else {
+                panic!("the popularity page never opened on {out}");
+            };
+            let dialog = &game.dialogs[&26];
+            let shown = runner.host.view().text(control(dialog, 1327).unwrap()).to_owned();
+            let want = format!("\\t{}", game.text(match out {
+                // Seven places short of the season's goal and three
+                // squad players paid over 600 (`FUN_0047eb1f`).
+                "public-millionaires" => 3072,
+                // Second of its league three matchdays in (`FUN_0047ebde`).
+                "public-treterpack" => 3073,
+                // Twelve matchdays played, its last defeat back of five
+                // of them (`FUN_0047ec75`, `FUN_00660cda`).
+                _ => 3074,
+            }));
+            assert!(shown.ends_with(&want), "{out}: {shown}");
+        }
+
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        // Mark twelve of the own league's matchdays played.
+        let twelve = |records: &mut a3_core::records::Records| {
+            let index = records.human_slot(0).unwrap();
+            let (country, number) =
+                (records.managers[index].country(), records.managers[index].team());
+            let level = records.team(country, number).unwrap().level();
+            let league =
+                i32::from(records.countries.first_league(usize::from(country))) + i32::from(level);
+            records.block_mut(&format!("{:#x}[{league}]", 0x1a09d48)).unwrap()[0x46..0x48]
+                .copy_from_slice(&12i16.to_le_bytes());
+        };
+        let own = |records: &mut a3_core::records::Records| {
+            let index = records.human_slot(0).unwrap();
+            (records.managers[index].country(), records.managers[index].team())
+        };
+        word(&dir, "public-millionaires", |records| {
+            twelve(records);
+            let (country, number) = own(records);
+            let squad = records.team(country, number).unwrap().players();
+            let id = squad
+                .iter()
+                .copied()
+                .find(|&id| usize::from(records.players[usize::from(id)].salary()) <= 600)
+                .unwrap();
+            records.players[usize::from(id)].set_salary(650);
+        });
+        word(&dir, "public-treterpack", |records| {
+            let (country, number) = own(records);
+            records.team_mut(country, number).unwrap().set_table_place(2);
+        });
+        word(&dir, "public-pity", |records| twelve(records));
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_start_menu_leads_where_the_game_does() {
