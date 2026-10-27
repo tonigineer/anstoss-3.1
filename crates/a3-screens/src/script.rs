@@ -3359,6 +3359,56 @@ mod tests {
         assert_eq!(runner.host.view().id, 413);
     }
 
+    fn notice_text(game: &Game, runner: &Runner) -> String {
+        runner.host.view().text(control(&game.dialogs[&380], 4730).unwrap()).to_owned()
+    }
+
+    /// Doping (dialog 394) on Probe1, as the original shows it: Ortag
+    /// ready, Schmitt not; "Kondition steigern" doses Ortag at once — doped,
+    /// his condition ten up, the dose on the medical bill — and a second
+    /// dose is refused; Schmitt will not even go on the list.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn doping_doses_who_is_ready() {
+        let game = game();
+        let open = "now choose 5266 6\nuntil dialog 151\nnow press 4929\nuntil dialog 394";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let dialog = &game.dialogs[&394];
+        let list = control(dialog, 4926).unwrap();
+        let rows = runner.host.view().list(list).unwrap().rows.clone();
+        assert!(rows[0].starts_with("Schmitt, M.") && rows[0].ends_with("\tNein"), "{}", rows[0]);
+        assert!(rows[1].starts_with("Ortag, C.") && rows[1].ends_with("\tJa"), "{}", rows[1]);
+        let ortag = runner.host.view().list(list).unwrap().keys[1] as u16;
+        let before = {
+            let state = runner.host.state();
+            let r = state.records.as_ref().unwrap().player(ortag).unwrap();
+            (r.condition(), r.doping())
+        };
+        drop(runner);
+        let dose = format!("{open}\nnow choose 4928 1\nnow cell 4926 1 0\nuntil dialog 380");
+        let Some(runner) = on_save(&game, "Probe1", &dose) else { return };
+        let notice = notice_text(&game, &runner);
+        assert_eq!(notice, game.text(4071).replacen("%s", "Christian Ortag", 1));
+        let state = runner.host.state();
+        let r = state.records.as_ref().unwrap().player(ortag).unwrap();
+        assert_eq!(r.condition(), before.0 + 1000);
+        assert!(a3_core::doping::doped(r));
+        assert_eq!(r.doping() >> 2 & 3, 2);
+        assert_eq!(before.1 & 3, 0);
+        drop(state);
+        let again = format!(
+            "{dose}\nnow press 4731\nuntil dialog 394\n\
+             now cell 4926 1 0\nuntil dialog 380"
+        );
+        let Some(runner) = on_save(&game, "Probe1", &again) else { return };
+        let notice = notice_text(&game, &runner);
+        assert_eq!(notice, game.text(4070).replacen("%s", "Christian Ortag", 1));
+        let list_schmitt = format!("{open}\nnow cell 4926 0 6\nuntil dialog 380");
+        let Some(runner) = on_save(&game, "Probe1", &list_schmitt) else { return };
+        let notice = notice_text(&game, &runner);
+        assert!(notice.starts_with("Ihr Spieler") && notice.contains("Dopingliste"), "{notice}");
+    }
+
     /// The template editor (dialog 350) from a right click on the short
     /// training's first template: a unit clicked fills Sunday's first
     /// session and moves on; switching to the second template on the

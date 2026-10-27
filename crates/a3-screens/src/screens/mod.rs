@@ -11,6 +11,7 @@ pub mod calendar;
 pub mod comparison;
 pub mod contacts;
 pub mod discipline;
+pub mod doping;
 pub mod duties;
 pub mod finances;
 pub mod formations;
@@ -157,6 +158,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(announcement::Announcement),
         Box::new(nutzung::Nutzung::default()),
         Box::new(youth_tables::YouthTables::default()),
+        Box::new(doping::Doping),
         Box::new(year::YearCalendar::default()),
         Box::new(finances::Balance::default()),
         Box::new(finances::Finances::default()),
@@ -277,6 +279,7 @@ pub fn compose(game: &mut Game) {
     announcement::compose(&mut game.dialogs);
     nutzung::compose(&mut game.dialogs);
     youth_tables::compose(&mut game.dialogs);
+    doping::compose(&mut game.dialogs);
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);

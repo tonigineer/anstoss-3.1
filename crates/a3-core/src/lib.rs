@@ -9,6 +9,7 @@ pub mod cards;
 pub mod cohesion;
 pub mod contract;
 pub mod cycle;
+pub mod doping;
 pub mod data;
 pub mod discipline;
 pub mod duties;

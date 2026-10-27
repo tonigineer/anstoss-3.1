@@ -83,7 +83,9 @@ AREAS = {
              (*bar(8, 413), 413)],
     "lineup": [(*on_a("until dialog 147"), 147),
                *[(*on_a(f"now choose 5266 {i}", f"until dialog {d}"), d)
-                 for i, d in [(0, 429), (1, 244), (3, 418), (6, 151), (7, 83)]]],
+                 for i, d in [(0, 429), (1, 244), (3, 418), (6, 151), (7, 83)]],
+               (*on_a("now choose 5266 6", "until dialog 151", "now press 4929",
+                      "until dialog 394"), 394)],
     "players": [(*on_a(f"now rclick 2510; choose 9950 {i}", f"until dialog {d}"), d)
                 for i, d in [(0, 399), (1, 412), (3, 195), (4, 85)]],
     "comparison": [(*bar(2, 78), 78), (*bar(2, 78, "now choose 5618 1"), 78),

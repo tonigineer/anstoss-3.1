@@ -377,6 +377,9 @@ pub enum Args {
     AgeGroup(usize),
     /// One of the manager's week templates, by its place.
     Template(usize),
+    /// A text by its id with a player's name for its `%s`, and the alert's
+    /// style, which picks its ball (`FUN_0043e4c2`: 3 and 4 the doping's).
+    StyledFor(u16, u16, u8),
 }
 
 /// How a screen was left.

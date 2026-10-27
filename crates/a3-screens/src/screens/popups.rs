@@ -32,6 +32,8 @@ const QUESTION_BALL_FRAMES: std::ops::RangeInclusive<u16> = 1745..=1753;
 /// The ball of the other small popups, looping.
 const BALLS: [u16; 3] = [1336, 2116, 4732];
 const BALL_FRAMES: std::ops::RangeInclusive<u16> = 1762..=1773;
+/// The balls of the alert's styles 3 and 4 (`0x89fd10`, `0x89fd20`).
+const STYLE_FRAMES: [&[u16]; 2] = [&[1611, 1612, 1613], &[1614, 1615, 1616, 1617]];
 /// The words of the strip's second "Sind Sie sicher?" (dialog 242).
 const SAFE_LOAD_TEXT: u16 = 3378;
 /// Reading the season's plan asks in other words.
@@ -129,6 +131,18 @@ impl Screen for Notice {
             Args::Text(text) => cx.game.text(text).to_owned(),
             Args::Message(at) => cx.game.rules.messages.get(&at).cloned().unwrap_or_default(),
             Args::TextFor(text, player) => {
+                let name = cx.state.records.as_ref().and_then(|r| r.known_as(player));
+                cx.game.text(text).replacen("%s", &name.unwrap_or_default(), 1)
+            }
+            Args::StyledFor(text, player, style) => {
+                let frames = style.checked_sub(3).and_then(|s| STYLE_FRAMES.get(usize::from(s)));
+                for id in BALLS {
+                    if let (Some(frames), Some(ball)) =
+                        (frames, control(cx.dialog, id).and_then(|b| view.anim_mut(b)))
+                    {
+                        ball.frames = frames.to_vec();
+                    }
+                }
                 let name = cx.state.records.as_ref().and_then(|r| r.known_as(player));
                 cx.game.text(text).replacen("%s", &name.unwrap_or_default(), 1)
             }

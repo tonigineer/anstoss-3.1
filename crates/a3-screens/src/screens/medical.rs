@@ -82,8 +82,7 @@ impl Screen for Medical {
             list.by_column = true;
             self.tabs.clone_from(&list.tabs);
         }
-        let doping = |t| matches!(t, Target::Button(b) if dialog.controls[b].id == Some(DOPING));
-        mark_inert(view, dialog, |t| !doping(t));
+        mark_inert(view, dialog, |_| true);
         self.fill(cx, view);
         notes(cx, view);
     }
@@ -92,6 +91,10 @@ impl Screen for Medical {
         if ok_or_cancel(cx.dialog, target).0 {
             operate(cx);
             return Outcome::Close(Reply::Ok);
+        }
+        // The doping department (`0x518c02`); nothing refreshed after it.
+        if matches!(target, Target::Button(b) if cx.dialog.controls[b].id == Some(DOPING)) {
+            return Outcome::Popup(Request::new(super::doping::DOPING));
         }
         let (c, row, column) = match target {
             Target::Cell { control, row, column } => (control, row, Some(column)),
