@@ -3216,6 +3216,10 @@ mod tests {
         // The dressing room closes after its question, and the game cycle
         // with it: the start menu is next.
         assert_eq!(screens[screens.len() - 4..], ["302", "384", "302", "9"]);
+        // The game was loaded by the second entry; the menu opens on the
+        // first again, as the original's does.
+        let entries = crate::screens::control(&game.dialogs[&9], 4771).unwrap();
+        assert_eq!(runner.host.view().chosen(entries), 0);
     }
 
     #[test]

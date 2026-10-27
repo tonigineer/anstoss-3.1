@@ -35,11 +35,11 @@ const SAVE_INFO: u16 = 5146;
 const SAVE_TABS: [f32; 3] = [0.0, 225.0, 318.0];
 const INFO_TABS: [f32; 2] = [0.0, 95.0];
 
-/// The start menu, which remembers the entry last chosen.
+/// The start menu, its first entry chosen whenever it opens: the main
+/// loop hands it a zero before every call (`FUN_00788115`), after the
+/// high scores and after a game alike.
 #[derive(Default)]
-pub struct StartMenu {
-    choice: usize,
-}
+pub struct StartMenu;
 
 impl Screen for StartMenu {
     fn ids(&self) -> &[u16] {
@@ -47,15 +47,15 @@ impl Screen for StartMenu {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
-        set_chosen(view, cx.dialog, self.choice);
+        set_chosen(view, cx.dialog, 0);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, double: bool) -> Outcome {
         let (ok, cancel) = ok_or_cancel(cx.dialog, target);
         if ok || double && matches!(target, Target::Option { .. }) {
             let options = indices(cx.dialog, |k| matches!(k, Kind::Options { .. }));
-            self.choice = options.first().map_or(0, |&o| view.chosen(o));
-            return Outcome::Close(Reply::Choice(self.choice));
+            let choice = options.first().map_or(0, |&o| view.chosen(o));
+            return Outcome::Close(Reply::Choice(choice));
         }
         if cancel { Outcome::Close(Reply::Cancel) } else { Outcome::Stay }
     }
