@@ -41,6 +41,19 @@ pub struct GameState {
     /// What the stereo's OK set last — `musik.cfg`'s mode, sounds and
     /// pieces — until the music takes it over.
     pub music: Option<(u16, u16, u32)>,
+    /// Settings files of the game's folder the settings dialogs changed,
+    /// with their new bytes, to be written when the program ends — as the
+    /// game writes `musik.cfg` and `Konfig3D.cfg` on its way out
+    /// (`FUN_00431e01`).
+    pub settings_files: Vec<(&'static str, Vec<u8>)>,
+}
+
+impl GameState {
+    /// Keeps `bytes` as what `file` is to hold at the end.
+    pub fn keep_settings(&mut self, file: &'static str, bytes: Vec<u8>) {
+        self.settings_files.retain(|(f, _)| *f != file);
+        self.settings_files.push((file, bytes));
+    }
 }
 
 /// What the stadium screen hands the grounds (`FUN_0057eb54`): its three

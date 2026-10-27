@@ -40,7 +40,7 @@ use a3_screens::view::View;
 
 use crate::Game;
 use crate::look::{CANVAS, Look, SharpMaterial, canvas_rect, smooth_image, spawn_stage};
-use crate::{Fonts, Screen};
+use crate::{Fonts, GameDir, Screen};
 
 /// Animations move on to their next frame every 200 ms, as the game sets
 /// them up; in between they blend into it, which the game did not.
@@ -60,6 +60,7 @@ const POPUP_SHADOW: u32 = 28;
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, (load_sounds, start_game))
         .add_systems(Update, receive.run_if(not(in_state(Screen::Intro))))
+        .add_systems(Last, write_settings)
         .init_resource::<Pending>()
         .init_resource::<Caret>()
         .init_resource::<Frames>()
@@ -643,6 +644,20 @@ fn click(
         commands.spawn((AudioPlayer::new(sound.clone()), PlaybackSettings::DESPAWN));
     }
     pending.0.push((target, click.count));
+}
+
+/// On the way out, the settings files the settings dialogs changed, as the
+/// game writes them (`FUN_00431e01`).
+fn write_settings(mut exit: MessageReader<AppExit>, view: Res<OpenDialog>, dir: Res<GameDir>) {
+    if exit.read().next().is_none() {
+        return;
+    }
+    for (file, bytes) in &view.0.state().settings_files {
+        match std::fs::write(dir.0.join(file), bytes) {
+            Ok(()) => info!("{file} written"),
+            Err(err) => warn!("{file}: {err}"),
+        }
+    }
 }
 
 /// The click the game's bitmap buttons make when they are let go of, and

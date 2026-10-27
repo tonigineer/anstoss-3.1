@@ -27,6 +27,7 @@ const RESOLUTION: u16 = 6469;
 /// What the game holds without `Konfig3D.cfg`: 640x480, both qualities
 /// "Hoch", every effect on.
 const NO_FILE: [u32; 10] = [640, 480, 0, 2, 2, 1, 1, 1, 1, 1];
+const FILE: &str = "Konfig3D.cfg";
 
 /// The dialog keeps its title to itself; the caption bar takes it.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
@@ -39,6 +40,8 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
 #[derive(Default)]
 pub struct Konfig3d {
     read: bool,
+    /// The file's 44 bytes, or what the game holds without it.
+    file: Vec<u8>,
     resolution: String,
     figures: usize,
     textures: usize,
@@ -47,16 +50,18 @@ pub struct Konfig3d {
 
 /// `Konfig3D.cfg`: ten words — width, height, depth, the two qualities and
 /// the five effects — and two more the dialog does not show.
-fn settings(game: &crate::game::Game) -> [u32; 10] {
-    let mut words = NO_FILE;
-    if let Ok(cfg) = std::fs::read(game.dir.join("Konfig3D.cfg")) {
-        for (i, word) in words.iter_mut().enumerate() {
-            if let Some(b) = cfg.get(i * 4..i * 4 + 4) {
-                *word = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-            }
-        }
+fn settings(game: &crate::game::Game) -> Vec<u8> {
+    let mut file: Vec<u8> = NO_FILE.iter().flat_map(|w| w.to_le_bytes()).collect();
+    file.extend([0xff, 0x7f, 0xff, 0x7f]);
+    if let Ok(cfg) = std::fs::read(game.dir.join(FILE)) {
+        let n = cfg.len().min(file.len());
+        file[..n].copy_from_slice(&cfg[..n]);
     }
-    words
+    file
+}
+
+fn word(file: &[u8], i: usize) -> u32 {
+    file.get(i * 4..i * 4 + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 impl Screen for Konfig3d {
@@ -66,11 +71,12 @@ impl Screen for Konfig3d {
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         if !self.read {
-            let words = settings(cx.game);
-            self.resolution = format!("{}x{}", words[0], words[1]);
-            (self.figures, self.textures) = (words[3] as usize, words[4] as usize);
-            for (on, &word) in self.effects.iter_mut().zip(&words[5..]) {
-                *on = word != 0;
+            self.file = settings(cx.game);
+            let w = |i| word(&self.file, i);
+            self.resolution = format!("{}x{}", w(0), w(1));
+            (self.figures, self.textures) = (w(3) as usize, w(4) as usize);
+            for (i, on) in self.effects.iter_mut().enumerate() {
+                *on = w(5 + i) != 0;
             }
             self.read = true;
         }
@@ -117,6 +123,12 @@ impl Screen for Konfig3d {
                     *on = check.checked;
                 }
             }
+            let mut words = vec![self.figures as u32, self.textures as u32];
+            words.extend(self.effects.map(u32::from));
+            for (i, w) in words.into_iter().enumerate() {
+                self.file[(3 + i) * 4..(4 + i) * 4].copy_from_slice(&w.to_le_bytes());
+            }
+            cx.state.keep_settings(FILE, self.file.clone());
             return Outcome::Close(Reply::Ok);
         }
         Outcome::Stay

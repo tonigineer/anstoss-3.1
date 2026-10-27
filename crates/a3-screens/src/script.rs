@@ -3253,6 +3253,9 @@ mod tests {
         assert_eq!(shown(&runner), (14, 3, on));
         // What OK set waits there for the music: "1987" out, "Go West" too.
         assert_eq!(runner.host.state().music, Some((3, 1, 0x3ffb & !1)));
+        // And musik.cfg's bytes, for the end.
+        let kept = vec![("musik.cfg", vec![3, 0, 1, 0, 0xfa, 0x3f, 0, 0])];
+        assert_eq!(runner.host.state().settings_files, kept);
         let dropped = format!("{changed}\nnow press 2\n{again}");
         let Some(runner) = on_save(&game, "Probe1", &dropped) else { return };
         assert_eq!(shown(&runner), (14, 2, from_file.clone()));
@@ -3282,6 +3285,12 @@ mod tests {
         let kept = format!("{changed}\nnow press 1\n{again}");
         let Some(runner) = on_save(&game, "Probe1", &kept) else { return };
         assert_eq!(shown(&runner), (0, 2, vec![true, false, true, true, true]));
+        // Konfig3D.cfg's bytes for the end: the figures' quality (word 3)
+        // and Schatten (word 8) changed, the rest as the file has it.
+        let mut file = std::fs::read(game.dir.join("Konfig3D.cfg")).unwrap();
+        file[12..16].copy_from_slice(&0u32.to_le_bytes());
+        file[32..36].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(runner.host.state().settings_files, [("Konfig3D.cfg", file)]);
         let dropped = format!("{changed}\nnow press 2\n{again}");
         let Some(runner) = on_save(&game, "Probe1", &dropped) else { return };
         assert_eq!(shown(&runner), (2, 2, vec![true; 5]));

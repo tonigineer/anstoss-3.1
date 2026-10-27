@@ -151,7 +151,10 @@ impl Screen for Musik {
             if self.mode == CHOSEN_PIECES && self.pieces == 0 {
                 self.mode = 0;
             }
-            cx.state.music = Some((self.mode as u16, u16::from(self.sounds), self.pieces));
+            let (mode, sounds) = (self.mode as u16, u16::from(self.sounds));
+            cx.state.music = Some((mode, sounds, self.pieces));
+            let file = [&mode.to_le_bytes()[..], &sounds.to_le_bytes(), &self.pieces.to_le_bytes()];
+            cx.state.keep_settings("musik.cfg", file.concat());
             return Outcome::Close(Reply::Ok);
         }
         Outcome::Stay
