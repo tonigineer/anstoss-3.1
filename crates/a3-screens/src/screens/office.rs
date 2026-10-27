@@ -166,7 +166,8 @@ fn show_office(cx: &Cx, view: &mut View) {
         );
     set(view, dialog, OFFICE_PAIRING, pairing);
     if let Some(crest) = control(dialog, OFFICE_CREST_ID) {
-        let picture = manager.club.and_then(|c| game.rules.crest(&game.world, c));
+        let records = cx.state.records.as_ref();
+        let picture = manager.club.and_then(|c| game.rules.crest(&game.world, records, c));
         view.set_picture(crest, picture.map(Picture::file));
     }
 

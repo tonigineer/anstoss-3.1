@@ -476,6 +476,8 @@ record! {
     0x254 => next_number, set_next_number: i16;
     0x256 => next_venue, set_next_venue: i16;
     0x258 => next_kind, set_next_kind: u8;
+    /// A cup match's round (the club object's +0xb4d).
+    0x259 => next_round, set_next_round: u8;
     0x25a => referee, set_referee: i16;
     /// How the public sees the club, kept between 10 and 50, 30 at first
     /// (the club object's +0x10f; the popularity page reads it).
@@ -1306,6 +1308,21 @@ impl Countries {
         self.get(0xae61ae + country)
     }
 
+    /// Which of the country's crest files a club of it shows, from 0
+    /// (`FUN_00696161`): its clubs keep their crests as their numbers change
+    /// (`DAT_00ae6bb6` by the country's slot, `DAT_00ae670e` for a country
+    /// of the second kind).
+    pub fn crest(&self, country: usize, number: usize) -> Option<u8> {
+        if number >= usize::try_from(self.team_count(country)).unwrap_or(0) {
+            return None;
+        }
+        match self.kind(country) {
+            1 => Some(self.get(0xae6bb6 + number + usize::from(self.slot(country)) * 0x6c)),
+            2 if number < 8 => Some(self.get(0xae670e + country * 8 + number)),
+            _ => None,
+        }
+    }
+
     /// Whether a country has team records (`DAT_00ae5b38`).
     pub fn has_teams(&self, country: usize) -> bool {
         self.get::<u8>(0xae5b38 + country) > 0
@@ -1498,6 +1515,14 @@ impl Records {
         let slot = self.countries.slot(usize::from(country));
         let block = self.block(&format!("0x19f7fd0[{slot}]"))?;
         Some(text(block.get(AT + k * STEP..)?, LEN))
+    }
+
+    /// The name of a country's cup, "DFB-Pokal" (`0x19f7fd0[slot]`, the
+    /// first 0x20 bytes).
+    pub fn national_cup_name(&self, country: u8) -> Option<String> {
+        const LEN: usize = 0x20;
+        let slot = self.countries.slot(usize::from(country));
+        Some(text(self.block(&format!("0x19f7fd0[{slot}]"))?, LEN))
     }
 
     pub fn club_abroad_name(&self, country: u8, number: u16) -> Option<String> {

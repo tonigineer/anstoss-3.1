@@ -198,7 +198,9 @@ impl Screen for Talks {
             face.frame = face_frame(offer.anger);
         }
         if let Some(i) = control(cx.dialog, TALKS_CREST) {
-            view.set_picture(i, cx.game.rules.crest(&cx.game.world, offer.club).map(Picture::file));
+            let records = cx.state.records.as_ref();
+            let crest = cx.game.rules.crest(&cx.game.world, records, offer.club);
+            view.set_picture(i, crest.map(Picture::file));
         }
         show_talks(view, cx.dialog, cx.game, offer);
     }

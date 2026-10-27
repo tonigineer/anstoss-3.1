@@ -31,7 +31,7 @@ const PROMPT: u16 = 5037;
 const NOTEPAD: u16 = 5036;
 /// The button for the next match's announcement, which opens dialog 358
 /// for a league match or 201 for another when it falls within a week
-/// (`FUN_0058e33c`); 201 is not built.
+/// (`FUN_0058e33c`).
 const ANNOUNCEMENT: u16 = 6215;
 /// The hidden OK; a day chosen closes it.
 const OK: u16 = 1;
@@ -124,8 +124,8 @@ impl Screen for WeekPlanner {
         }
         let announces = super::announcement::button_works(cx);
         let works = |target: Target| match target {
-            // The notepad works; the next match's announcement unless it
-            // would open the cup's unbuilt dialog.
+            // The notepad works; the next match's announcement unless its
+            // kind is one the replica cannot announce.
             Target::Button(b) if dialog.controls[b].id == Some(ANNOUNCEMENT) => announces,
             Target::Button(_) => is_notepad(dialog, target),
             _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
@@ -137,11 +137,13 @@ impl Screen for WeekPlanner {
         if is_notepad(cx.dialog, target) {
             return Outcome::Popup(Request::new(notepad::NOTEPAD));
         }
-        // The next league match's announcement, when it is within a week;
-        // else nothing (`FUN_0058e33c`).
+        // The next match's announcement, when it is within a week; else
+        // nothing (`FUN_0058e33c`).
         if matches!(target, Target::Button(b) if cx.dialog.controls[b].id == Some(ANNOUNCEMENT)) {
-            if super::announcement::next_league_match(cx).is_some() {
-                return Outcome::Popup(Request::new(super::announcement::LEAGUE_ANNOUNCEMENT));
+            if super::announcement::button_works(cx)
+                && let Some(id) = super::announcement::dialog_for(cx)
+            {
+                return Outcome::Popup(Request::new(id));
             }
             return Outcome::Stay;
         }

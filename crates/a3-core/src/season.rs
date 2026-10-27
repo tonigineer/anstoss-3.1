@@ -183,13 +183,21 @@ impl Rules {
     }
 
     /// A club's crest, a file of the installation: by the letters of its
-    /// nation and its place in its country's file, counted from 1; the bonus
+    /// nation and its place in its country's file, counted from 1 — in a
+    /// game, the place the save's records keep for the club; the bonus
     /// country's start with `bw_`.
-    pub fn crest(&self, world: &World, (slot, club): (usize, usize)) -> Option<String> {
+    pub fn crest(
+        &self,
+        world: &World,
+        records: Option<&crate::records::Records>,
+        (slot, club): (usize, usize),
+    ) -> Option<String> {
         let nation = world.country(slot)?.nation;
         let code = self.crest_codes.get(usize::from(nation)).filter(|c| !c.is_empty())?;
         let prefix = if slot == crate::world::BONUS_SLOT { "bw" } else { "vw" };
-        Some(format!("Data.a3/Wappen/{prefix}_{code}{}.bmp", club + 1))
+        let kept = records.and_then(|r| r.countries.crest(usize::from(nation), club));
+        let file = kept.map_or(club, usize::from);
+        Some(format!("Data.a3/Wappen/{prefix}_{code}{}.bmp", file + 1))
     }
 
     /// How many season tickets a club of a country slot's league sells at

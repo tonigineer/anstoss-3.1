@@ -426,7 +426,8 @@ impl ShortTraining {
             show_skill(cx, view, id, value);
         }
         if let Some(c) = control(dialog, CREST) {
-            view.set_picture(c, game.rules.crest(&game.world, key).map(Picture::file));
+            let crest = game.rules.crest(&game.world, cx.state.records.as_ref(), key);
+            view.set_picture(c, crest.map(Picture::file));
         }
         if let Some(c) = control(dialog, OPPONENT) {
             view.set_clickable(c, self.opponents.len() > 1);

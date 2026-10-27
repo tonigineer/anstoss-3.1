@@ -7,7 +7,10 @@
 //! with both clubs marked.
 //!
 //! The planner opens it when the next match is a league match within a
-//! week of today (`FUN_0058e33c`).
+//! week of today (`FUN_0058e33c`), and for any other match the plainer
+//! announcement (dialog 201, `CSpielAnkuendigung`, `FUN_0054dc28`): the
+//! competition and its round, both clubs, the first leg of a national
+//! cup's tie, the strengths and the advance sales.
 
 use std::collections::HashMap;
 
@@ -24,6 +27,7 @@ use crate::pointer::Target;
 use crate::view::View;
 
 pub const LEAGUE_ANNOUNCEMENT: u16 = 358;
+pub const CUP_ANNOUNCEMENT: u16 = 201;
 /// The match's kind for the league (club +0xb4c).
 pub const LEAGUE_MATCH: u8 = 2;
 /// How far ahead the announcement shows a match, in days.
@@ -44,6 +48,7 @@ const GAMES: u16 = 4570;
 const GAME_TABS: [f32; 3] = [0.0, 150.0, 158.0];
 const SEASON_TEXT: u16 = 1852;
 const MATCHDAY_TEXT: u16 = 1529;
+const CAPTION_ID: u16 = 9935;
 /// The season tickets the home side's plan counts on (club +0x124, team
 /// +0x39c), which the sales add to.
 const SEASON_TICKETS: usize = 0x124 + a3_core::finances::CLUB_TO_TEAM;
@@ -63,8 +68,13 @@ const MARK_COLOURS: [u32; 2] = [0x0000ff, 0x00ff00];
 const MARK: i32 = 3;
 
 /// The map, its marks and the country's name are the game's own drawing,
-/// not the dialog file's.
+/// not the dialog file's; the cup's dialog gives its title to the caption
+/// bar.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
+    if let Some(dialog) = dialogs.get_mut(&CUP_ANNOUNCEMENT) {
+        let caption = super::caption(dialog.frame, CAPTION_ID, dialog.title.clone());
+        dialog.controls.insert(0, caption);
+    }
     let Some(dialog) = dialogs.get_mut(&LEAGUE_ANNOUNCEMENT) else { return };
     let [x0, y0, x1, y1] = MAP_RECT;
     let rect = Rect::new(x0, y0, x1, y1);
@@ -83,9 +93,9 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
     dialog.controls.push(control(Kind::Static, COUNTRY, name));
 }
 
-/// The manager's club's next match, if it is a league match within a week
-/// of today: his team and the other.
-pub(crate) fn next_league_match<'a>(cx: &'a Cx) -> Option<(&'a Team, &'a Team)> {
+/// The manager's club's next match, if it is within a week of today: his
+/// team and the other.
+pub(crate) fn next_match<'a>(cx: &'a Cx) -> Option<(&'a Team, &'a Team)> {
     let own = super::squad::own_team(cx)?;
     let records = cx.state.records.as_ref()?;
     let today = records.globals.day() as i16;
@@ -93,18 +103,27 @@ pub(crate) fn next_league_match<'a>(cx: &'a Cx) -> Option<(&'a Team, &'a Team)> 
         return None;
     }
     let other = records.team(own.next_country().into(), own.next_number() as u16)?;
-    (own.next_kind() == LEAGUE_MATCH).then_some((own, other))
+    Some((own, other))
+}
+
+/// The dialog announcing the next match within the week, if any.
+pub(crate) fn dialog_for(cx: &Cx) -> Option<u16> {
+    let (own, _) = next_match(cx)?;
+    Some(if own.next_kind() == LEAGUE_MATCH { LEAGUE_ANNOUNCEMENT } else { CUP_ANNOUNCEMENT })
 }
 
 /// Whether the announcement button does what the original's does: a game
-/// with its records, whose next match within the week, if any, is a
-/// league match (the cup's dialog 201 is not built).
+/// with its records, whose next match within the week, if any, is of a
+/// kind the replica can announce — not the first legs of the league
+/// cup's and the European ties (`FUN_006cc590`, `FUN_00420ce4`), nor the
+/// titles of the world cup's qualifiers and finals (`FUN_0067bb89`).
 pub(crate) fn button_works(cx: &Cx) -> bool {
-    let Some(own) = super::squad::own_team(cx) else { return false };
-    let Some(records) = cx.state.records.as_ref() else { return false };
-    let today = records.globals.day() as i16;
-    let due = own.next_country() != 0 && own.next_day() < today + AHEAD;
-    !due || own.next_kind() == LEAGUE_MATCH
+    if cx.state.records.is_none() || super::squad::own_team(cx).is_none() {
+        return false;
+    }
+    next_match(cx).is_none_or(|(own, _)| {
+        matches!(own.next_kind(), LEAGUE_MATCH | NATIONAL_CUP | 8..=11 | FRIENDLY)
+    })
 }
 
 /// "11." — a number with the game's ordinal suffix, which is "." for all
@@ -118,22 +137,31 @@ fn key(game: &Game, team: &Team) -> Option<(usize, usize)> {
     Some((game.world.slot_of(team.country().into())?, usize::from(team.number())))
 }
 
-fn crest(game: &Game, team: &Team) -> Option<Picture> {
-    game.rules.crest(&game.world, key(game, team)?).map(Picture::file)
+/// A club's crest, drawn whole: the announcements' bitmaps keep black
+/// (`FUN_00696161` into `FUN_007966ab`).
+fn crest(game: &Game, records: &Records, team: &Team) -> Option<Picture> {
+    let file = game.rules.crest(&game.world, Some(records), key(game, team)?)?;
+    Some(Picture { black_clear: false, ..Picture::file(file) })
 }
 
 /// What a team counts for, its four parts reckoned anew from its line-up
 /// as the game does first (`FUN_006a18c2`) and summed, in whole points:
-/// the manager's own club as he has set it, another as its record has it.
+/// a human's club as he has set it; a computer's club with the line-up its
+/// co-trainer puts up, free in its system (`FUN_0042c802`), which the
+/// original has it pick afresh before the match.
 fn strength(cx: &Cx, team: &Team) -> i32 {
     let (game, pitch) = (cx.game, &cx.game.rules.pitch);
-    let own = cx.state.season.as_ref().and_then(|s| s.manager()?.club);
+    let season = cx.state.season.as_ref();
     let parts = key(game, team).and_then(|key| {
-        if Some(key) == own {
-            let club = cx.state.season.as_ref()?.clubs.get(&key)?;
+        if season?.manager()?.club == Some(key) {
+            let club = season?.clubs.get(&key)?;
             return Some(pitch.parts(&club.lineup, &club.players, &club.fitness));
         }
-        let club = a3_core::load::club(cx.state.records.as_ref()?, &game.data, key)?;
+        let mut club = a3_core::load::club(cx.state.records.as_ref()?, &game.data, key)?;
+        if !season?.managers.iter().any(|m| m.club == Some(key)) {
+            let mode = a3_core::autolineup::FREE | a3_core::autolineup::FOREIGNERS;
+            a3_core::autolineup::co_trainer(pitch, &mut club, mode);
+        }
         Some(pitch.parts(&club.lineup, &club.players, &club.fitness))
     });
     let parts = parts.unwrap_or_else(|| team.strengths().map(i32::from));
@@ -150,7 +178,10 @@ impl Screen for Announcement {
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         let (game, dialog) = (cx.game, cx.dialog);
-        let Some((own, other)) = next_league_match(cx) else { return };
+        let Some((own, other)) = next_match(cx).filter(|(o, _)| o.next_kind() == LEAGUE_MATCH)
+        else {
+            return;
+        };
         let Some(records) = cx.state.records.as_ref() else { return };
         let own_home = own.next_venue() <= 0;
         let sides = if own_home { [own, other] } else { [other, own] };
@@ -185,7 +216,7 @@ impl Screen for Announcement {
         }
         for (team, id) in sides.into_iter().zip(CRESTS) {
             if let Some(c) = control(dialog, id) {
-                view.set_picture(c, crest(game, team));
+                view.set_picture(c, crest(game, records, team));
             }
         }
 
@@ -216,6 +247,130 @@ impl Screen for Announcement {
             }
         }
         show_map(game, records, own, other, view, dialog);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        let (ok, cancel) = ok_or_cancel(cx.dialog, target);
+        if ok || cancel { Outcome::Close(Reply::Ok) } else { Outcome::Stay }
+    }
+}
+
+/// The kinds of matches (club +0xb4c) with a rule of their own.
+const NATIONAL_CUP: u8 = 3;
+const SUPERCUP: u8 = 4;
+const CUP_WINNERS: u8 = 5;
+const RELEGATION: u8 = 11;
+const FRIENDLY: u8 = 13;
+/// What a kind of match is called (`DAT_008880b0`), from kind 3: a text,
+/// or the national cup's name (0) or a European cup's (1, 2).
+enum Called {
+    Text(u16),
+    Cup,
+    Europe(usize),
+}
+const CALLED: [Called; 13] = [
+    Called::Cup,
+    Called::Text(1854),
+    Called::Europe(0),
+    Called::Text(1862),
+    Called::Europe(1),
+    Called::Text(1872),
+    Called::Text(1855),
+    Called::Text(1857),
+    Called::Text(2209),
+    Called::Text(3508),
+    Called::Text(3510),
+    Called::Text(3511),
+    Called::Text(3512),
+];
+/// The rounds' names (`DAT_00888100`).
+const ROUNDS: [u16; 8] = [1864, 1865, 1866, 4296, 1867, 1868, 1869, 1870];
+/// "Ligapokal" for the supercup of the country 0xe, its "Vorrunde";
+/// the cup winners' group games; the finals; the relegation's
+/// "Finalrunde" in the country 0x3b.
+const LEAGUE_CUP: (u8, u16, u8, u16) = (0xe, 3610, 5, 3616);
+const GROUP_GAMES: (u8, u16) = (2, 1871);
+const FINAL: u16 = 1870;
+const FINAL_ROUND: (u8, u16) = (0x3b, 4295);
+
+/// "DFB-Pokal - 1. Runde": what the match is and its round
+/// (`FUN_0054d473`), joined with " - " when there is a round.
+fn cup_title(game: &Game, records: &Records, country: u8, kind: u8, round: u8) -> String {
+    let text = |id: u16| game.text(id).to_owned();
+    let mut title = match CALLED.get(usize::from(kind.wrapping_sub(NATIONAL_CUP))) {
+        Some(Called::Text(id)) => text(*id),
+        Some(Called::Cup) => records.national_cup_name(country).unwrap_or_default(),
+        Some(Called::Europe(cup)) => records.countries.cup_names()[*cup].clone(),
+        None => String::new(),
+    };
+    let named = |r: u8| ROUNDS.get(usize::from(r)).map(|&id| text(id)).unwrap_or_default();
+    if kind == SUPERCUP && country == LEAGUE_CUP.0 {
+        title = text(LEAGUE_CUP.1);
+    }
+    let round_name = match kind {
+        SUPERCUP if round == LEAGUE_CUP.2 => text(LEAGUE_CUP.3),
+        CUP_WINNERS if round == GROUP_GAMES.0 => text(GROUP_GAMES.1),
+        9 | 10 => text(FINAL),
+        RELEGATION => {
+            if country == FINAL_ROUND.0 {
+                title = text(FINAL_ROUND.1);
+            }
+            String::new()
+        }
+        FRIENDLY => String::new(),
+        _ => named(round),
+    };
+    if round_name.is_empty() { title } else { format!("{title} - {round_name}") }
+}
+
+/// The announcement of a match that is not the league's (dialog 201).
+#[derive(Default)]
+pub struct CupAnnouncement;
+
+impl Screen for CupAnnouncement {
+    fn ids(&self) -> &[u16] {
+        &[CUP_ANNOUNCEMENT]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some((own, other)) = next_match(cx) else { return };
+        let Some(records) = cx.state.records.as_ref() else { return };
+        set(view, dialog, CAPTION_ID, dialog.title.clone());
+        let sides = if own.next_venue() == 0 { [own, other] } else { [other, own] };
+        let [home, away] = sides;
+        let title = cup_title(game, records, own.country(), own.next_kind(), own.next_round());
+        set(view, dialog, TITLE, title);
+        set(view, dialog, MATCHDAY, String::new());
+        for (team, [name, form, place]) in sides.into_iter().zip(SIDES) {
+            set(view, dialog, name, team.name());
+            set(view, dialog, form, " ".to_owned());
+            set(view, dialog, place, " ".to_owned());
+        }
+        for (team, id) in sides.into_iter().zip(CRESTS) {
+            if let Some(c) = control(dialog, id) {
+                view.set_picture(c, crest(game, records, team));
+            }
+        }
+        // Only the national cup's second legs have a first (`FUN_0040dac1`).
+        let tickets = &game.rules.forecast.tickets;
+        let first = (own.next_kind() == NATIONAL_CUP)
+            .then(|| a3_core::tickets::cup_first_leg(records, own, other, tickets, &game.calendar))
+            .flatten();
+        let first = first.map_or_else(|| "-".to_owned(), |(h, a)| format!("{h}:{a}"));
+        set(view, dialog, FIRST_LEG, first);
+        set(view, dialog, LAST_YEAR, "-".to_owned());
+        set(view, dialog, TENDENCY, "-".to_owned());
+        let strengths = format!("{} : {}", strength(cx, home), strength(cx, away));
+        set(view, dialog, STRENGTHS, strengths);
+        let sale = a3_core::tickets::sale(
+            records,
+            (home.country(), i16::from(home.number())),
+            (away.country(), i16::from(away.number())),
+            own.next_day(),
+        );
+        let advance = sale.map(|s| count(s.sold));
+        set(view, dialog, ADVANCE, advance.unwrap_or_else(|| "-".to_owned()));
     }
 
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {

@@ -563,6 +563,39 @@ pub fn cup_ties(
     ties
 }
 
+/// The first leg's goals of a national cup's second leg on the club's next
+/// match day, the side at home now first (`FUN_0062ace5`, `FUN_0041a6ea`):
+/// the pairing of the round with the sides the other way round.
+pub fn cup_first_leg(
+    records: &Records,
+    own: &Team,
+    other: &Team,
+    tables: &TicketTables,
+    calendar: &Calendar,
+) -> Option<(u8, u8)> {
+    let club = Club { records, team: own, country: own.country(), number: own.number() };
+    let row = calendar.row(club.country.into(), 0)?;
+    let e = calendar.entry(row, usize::try_from(own.next_day()).ok()?);
+    if e & 0xff00_0000 != TURNED | NATIONAL_CUP {
+        return None;
+    }
+    let cup = club.cup()?;
+    let cup_type = usize::try_from(word(cup, CUP_TYPE_AT)).unwrap_or(0);
+    let (first, count) = tables.round(cup_type, (e & CUP_ROUND) as usize);
+    let (mut first_home, mut first_away) = (other, own);
+    if own.next_venue() != 0 {
+        (first_home, first_away) = (own, other);
+    }
+    let is = |t: &Team, c: u8, n: u16| c == t.country() && n == u16::from(t.number());
+    (first..first.saturating_add(count)).find_map(|q| {
+        let at = PAIRINGS + usize::try_from(q).unwrap_or(0) * PAIRING;
+        let side = |o: usize| (cup.get(at + o).copied().unwrap_or(0), word(cup, at + o + 2) as u16);
+        let ((hc, hn), (ac, an)) = (side(0), side(4));
+        let goals = |o: usize| cup.get(at + o).copied().unwrap_or(0);
+        (is(first_home, hc, hn) && is(first_away, ac, an)).then(|| (goals(9), goals(8)))
+    })
+}
+
 /// The ticket office's sales (`0x1c5c468`, thirty records of 0x24 bytes):
 /// the home side, the away side, the day, the tickets sold, whether either
 /// order of the sides matches, the four prices.

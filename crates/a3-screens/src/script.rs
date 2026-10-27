@@ -4466,4 +4466,53 @@ mod tests {
             if matches!(&actions[0], Action::Type(3121, text) if text == "Anna Alpha")));
         assert!(matches!(script.lines[1].1, Line::Repeat(7)));
     }
+
+    /// A cup tie two days ahead (Probe1 patched: the first round at home
+    /// against the 20th club of the country): the planner's announcement
+    /// is dialog 201, every line as the original shows it — the computer's
+    /// club counted with its co-trainer's line-up.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_planner_announces_a_cup_match() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "Probe1", "cup-tie", |records| {
+            let index = records.human_slot(0).unwrap();
+            let (country, number) =
+                (records.managers[index].country(), records.managers[index].team());
+            let today = records.globals.day() as i16;
+            let team = records.team_mut(country, number).unwrap();
+            team.set_next_day(today + 2);
+            team.set_next_country(country as u8);
+            team.set_next_number(20);
+            team.set_next_venue(0);
+            team.set_next_kind(3);
+            team.set_next_round(1);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let then = "now click bar 7\nuntil dialog 413\nnow press 6215\nuntil dialog 201";
+        let runner = on_save(&game, "cup-tie", then).unwrap();
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&201];
+        let text = |id| view.text(control(dialog, id).unwrap()).to_owned();
+        let shown: Vec<String> = (2973..=2985).map(text).collect();
+        assert_eq!(
+            shown,
+            [
+                "DFB-Pokal - 1. Runde",
+                "",
+                "SSV Ulm 1846",
+                " ",
+                "SV Waldhof Mannheim",
+                " ",
+                " ",
+                " ",
+                "-",
+                "-",
+                "-",
+                "61 : 64",
+                "-",
+            ]
+        );
+    }
 }

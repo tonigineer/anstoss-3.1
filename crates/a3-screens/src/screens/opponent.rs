@@ -107,7 +107,8 @@ impl Screen for Opponent {
         let name = game.world.country(slot).and_then(|c| c.clubs.get(club)).map(|c| c.name.clone());
         if let Some(&(_, crest, name_id)) = CRESTS.iter().find(|(id, ..)| *id == view.id) {
             if let Some(c) = control(dialog, crest) {
-                view.set_picture(c, game.rules.crest(&game.world, (slot, club)).map(Picture::file));
+                let crest = game.rules.crest(&game.world, cx.state.records.as_ref(), (slot, club));
+                view.set_picture(c, crest.map(Picture::file));
             }
             set(view, dialog, name_id, name.clone().unwrap_or_default());
         }

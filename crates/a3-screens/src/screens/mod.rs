@@ -156,6 +156,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(musik::Musik::default()),
         Box::new(optionen::Optionen::default()),
         Box::new(announcement::Announcement),
+        Box::new(announcement::CupAnnouncement),
         Box::new(nutzung::Nutzung::default()),
         Box::new(youth_tables::YouthTables::default()),
         Box::new(doping::Doping),

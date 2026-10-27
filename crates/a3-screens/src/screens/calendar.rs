@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use bevy_math::{Rect, Vec2};
 
+use a3_core::records::Records;
 use a3_core::season::Season;
 use a3_files::rch::{Align, Control, Dialog, Kind};
 
@@ -174,7 +175,7 @@ impl Screen for Week {
         self.timer = 0.0;
         let Some(season) = &cx.state.season else { return };
         self.start = season.day;
-        show_week(view, cx.dialog, cx.game, season);
+        show_week(view, cx.dialog, cx.game, season, cx.state.records.as_ref());
         // The week runs by itself; none of its buttons does anything yet.
         super::mark_inert(view, cx.dialog, |_| false);
     }
@@ -188,7 +189,7 @@ impl Screen for Week {
                 view.controls[tile].hidden = false;
             }
         }
-        show_panels(view, cx.dialog, cx.game, season);
+        show_panels(view, cx.dialog, cx.game, season, cx.state.records.as_ref());
         true
     }
 
@@ -207,7 +208,13 @@ impl Screen for Week {
 
 /// The week as it starts: a panel for every human club with its next match,
 /// its manager and the board's confidence, fair weather and no day done yet.
-fn show_week(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
+fn show_week(
+    view: &mut View,
+    dialog: &Dialog,
+    game: &Game,
+    season: &Season,
+    records: Option<&Records>,
+) {
     if let Some(weather) = control(dialog, WEEK_WEATHER) {
         view.set_picture(weather, Some(Picture::graphic(WEATHER + FAIR)));
     }
@@ -223,11 +230,17 @@ fn show_week(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
             view.controls[tile].hidden = true;
         }
     }
-    show_panels(view, dialog, game, season);
+    show_panels(view, dialog, game, season, records);
 }
 
 /// Every human club's panel, as the week has gone so far.
-fn show_panels(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
+fn show_panels(
+    view: &mut View,
+    dialog: &Dialog,
+    game: &Game,
+    season: &Season,
+    records: Option<&Records>,
+) {
     // Today's message: a talk or a visit the manager had booked.
     let message = season
         .planner_message
@@ -305,7 +318,7 @@ fn show_panels(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
             }
         }
         if let Some(i) = nth_control(dialog, PANEL_CREST, panel) {
-            view.set_picture(i, game.rules.crest(&game.world, own).map(Picture::file));
+            view.set_picture(i, game.rules.crest(&game.world, records, own).map(Picture::file));
         }
     }
 }
