@@ -147,8 +147,9 @@ impl OptionsState {
         let Some(font) = paint.font() else { return };
         let cell = font.height() as f32;
         for (item, (it, label)) in items.iter().zip(&self.labels).enumerate() {
-            // An option outside the group's window does not show.
-            if !inside(control, it) {
+            // An option outside the group's window does not show, nor one
+            // switched off.
+            if !inside(control, it) || self.off.get(item).copied().unwrap_or(false) {
                 continue;
             }
             let pointed = paint.pointed(Target::Option { control: paint.index, item });

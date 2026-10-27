@@ -42,6 +42,7 @@ pub mod talk;
 pub mod training;
 pub mod year;
 pub mod youth;
+pub mod youth_tables;
 
 use std::collections::HashMap;
 
@@ -155,6 +156,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(optionen::Optionen::default()),
         Box::new(announcement::Announcement),
         Box::new(nutzung::Nutzung::default()),
+        Box::new(youth_tables::YouthTables::default()),
         Box::new(year::YearCalendar::default()),
         Box::new(finances::Balance::default()),
         Box::new(finances::Finances::default()),
@@ -272,6 +274,7 @@ pub fn compose(game: &mut Game) {
     optionen::compose(&mut game.dialogs);
     announcement::compose(&mut game.dialogs);
     nutzung::compose(&mut game.dialogs);
+    youth_tables::compose(&mut game.dialogs);
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);

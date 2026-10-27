@@ -373,6 +373,8 @@ pub enum Args {
         before: i16,
         after: i16,
     },
+    /// A youth age group: 0 the A, 1 the B, 2 the C youth.
+    AgeGroup(usize),
 }
 
 /// How a screen was left.

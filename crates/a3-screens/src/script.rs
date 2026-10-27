@@ -3328,6 +3328,34 @@ mod tests {
         assert_eq!(runner.host.view().id, 413);
     }
 
+    /// The A youth's tables (dialog 430) on Probe1, before its first
+    /// matchday: the first row's pairings without results, every team at
+    /// nought in the order of its slot, the first yellow and the last three
+    /// purple, three league tabs and no fourth — as the original shows it.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_youth_tables_show_the_leagues() {
+        let game = game();
+        let then = "now click bar 10\nuntil dialog 218\nnow choose 5042 2\nuntil dialog 428\n\
+                    now choose 5271 0\nuntil dialog 430";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&430];
+        let results = view.list(control(dialog, 3728).unwrap()).unwrap();
+        assert_eq!(
+            results.rows[0],
+            "FC Bayern München\t- 1.FC Heidenheim\t\t\t\t\tSC Freiburg\t- TSG 1899 Hoffenheim"
+        );
+        let table = view.list(control(dialog, 3729).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        let zero = "0\t0\t0\t:\t0";
+        assert_eq!(table.rows[0], format!("1.\tFC Bayern München\t{zero}\t{zero}\t{zero}"));
+        assert_eq!(table.inks[0], Some([200, 200, 0]));
+        assert_eq!(table.inks[15..], [Some([128, 0, 128]); 3]);
+        let tabs = view.options(control(dialog, 3723).unwrap()).unwrap();
+        assert_eq!(tabs.off, [false, false, false, true]);
+    }
+
     /// "Wie oft & Wie lange" (dialog 158): the counts of the oracle's
     /// zeit.saq with this start counted in, its longest session, and the
     /// game's play time as Probe1 was saved with it, counting on.

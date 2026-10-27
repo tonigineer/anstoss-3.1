@@ -229,7 +229,7 @@ const FOCUS: u16 = 5270;
 const FOCUS_TEXTS: std::ops::RangeInclusive<u16> = 3446..=3452;
 /// The manager record's youth training focus.
 const FOCUS_AT: usize = 0x14a9;
-/// The age groups' league tables (430), not built.
+/// The age groups' league tables (430).
 const TABLES: u16 = 5271;
 const SUPPORT_COLUMN: usize = 7;
 /// Strong enough for his age group's national team ("JNS"), C to A.
@@ -290,8 +290,7 @@ impl Screen for Youths {
             }
         }
         fill_youths(cx, view);
-        let tables = |t| matches!(t, Target::Option { control: c, .. } if dialog.controls[c].id == Some(TABLES));
-        mark_inert(view, dialog, |t| !tables(t));
+        mark_inert(view, dialog, |_| true);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -300,6 +299,15 @@ impl Screen for Youths {
         match target {
             Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
                 Outcome::Close(Reply::Ok)
+            }
+            // The age group's league tables (`0x4d8f7e`); the button lets
+            // go of its choice.
+            Target::Option { control: c, item } if id(c) == Some(TABLES) => {
+                if let Some(tables) = view.options_mut(c) {
+                    tables.chosen = crate::controls::options::NONE;
+                }
+                let args = Args::AgeGroup(item);
+                Outcome::Popup(Request::with(super::youth_tables::YOUTH_TABLES, args))
             }
             Target::Row { control: c, .. } if id(c) == Some(FOCUS) => {
                 let chosen = view.combo(c).and_then(|combo| combo.selected);
@@ -397,7 +405,7 @@ impl Youths {
 
 /// The club whose youth the screen shows: the professionals' for an
 /// amateur department.
-fn youth_club(team: &Team) -> (u8, u16) {
+pub(crate) fn youth_club(team: &Team) -> (u8, u16) {
     let [professionals, _] = team.linked();
     let number = u16::try_from(professionals).unwrap_or(u16::from(team.number()));
     (team.country(), number)
