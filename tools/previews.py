@@ -76,7 +76,9 @@ AREAS = {
     "comparison": [(*bar(2, 78), 78), (*bar(2, 78, "now choose 5618 1"), 78),
                    (*bar(2, 78, "now choose 5618 1", "now click at 93 248"), 78),
                    # "Gegner" shows the opponent's own squad (476).
-                   (*bar(2, 78, "now press 5664", "until dialog 476"), 476)],
+                   (*bar(2, 78, "now press 5664", "until dialog 476"), 476),
+                   # A right click on his keeper shows his info (399).
+                   (*bar(2, 78, "now rclick 5631", "until dialog 399"), 399)],
     "tactics": [(*bar(3, 271), 271)],
     "long": [(*bar(4, 345), 345), (*bar(4, 345, "now choose 5035 2"), 345),
              (*bar(4, 345, "now choose 5035 2", "now click at 134 130"), 345),

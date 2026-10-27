@@ -1580,6 +1580,22 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_right_click_on_the_opponent_shows_his_info() {
+        let game = game();
+        // A right click on the opponent's keeper on the comparison (box
+        // 5631 of 78) puts up his info (399), as on one's own eleven.
+        let Some(run) = on_save(
+            &game,
+            "Toni",
+            "now click bar 1\nuntil dialog 78\nnow rclick 5631\nuntil dialog 399",
+        ) else {
+            return;
+        };
+        assert_eq!(seen(&run, 399), 1, "{}", run.log.join("\n"));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_calendar_books_and_the_planner_shows() {
         let game = game();
         // September: the family day dragged onto the 10th, the club party

@@ -15,8 +15,6 @@
 use std::collections::HashMap;
 
 use bevy_math::{Rect, Vec2};
-use tracing::info;
-
 use a3_core::lineup::{self, FIELD, PARTS};
 use a3_core::marking;
 use a3_core::records::{Records, Team};
@@ -344,14 +342,29 @@ impl Screen for Comparison {
             // A right click on one of the eleven: his info, paging through
             // the eleven.
             Target::Menu(Grip::Control(c)) => {
-                let Some(place) = own_box(c) else {
-                    info!("the opponent's player info: not built yet");
+                if let Some(place) = own_box(c) {
+                    let Some(club) = own(cx) else { return Outcome::Stay };
+                    let Some(player) = club.lineup.field[place] else { return Outcome::Stay };
+                    cx.state.paging = Some(club.lineup.field.iter().flatten().copied().collect());
+                    return Outcome::Popup(Request::with(
+                        playerinfo::CURRENT,
+                        Args::Player(player),
+                    ));
+                }
+                // The opponent's eleven likewise: the original hands over
+                // his eleven's record ids, so the paging stays with him
+                // (`OnRButtonUp`).
+                let Some(place) = id(c).checked_sub(THEIR_BOXES).map(usize::from).filter(|&i| i < FIELD) else {
                     return Outcome::Stay;
                 };
-                let Some(club) = own(cx) else { return Outcome::Stay };
-                let Some(player) = club.lineup.field[place] else { return Outcome::Stay };
-                cx.state.paging = Some(club.lineup.field.iter().flatten().copied().collect());
-                return Outcome::Popup(Request::with(playerinfo::CURRENT, Args::Player(player)));
+                let Some(side) = &self.theirs else { return Outcome::Stay };
+                let record = side.ids[place].0;
+                if record == 0 {
+                    return Outcome::Stay;
+                }
+                cx.state.paging_ids =
+                    Some(side.ids.iter().map(|&(id, _)| id).filter(|&id| id != 0).collect());
+                return Outcome::Popup(Request::with(playerinfo::CURRENT, Args::Record(record)));
             }
             Target::Row { control: c, .. } if id(c) == SET_PIECE => {
                 let row = view.combo(c).and_then(|combo| combo.selected).unwrap_or(0);
