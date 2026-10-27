@@ -3277,6 +3277,57 @@ mod tests {
         assert_eq!(runner.host.state().listen, None);
     }
 
+    /// The week planner's announcement (dialog 358) on Toni.an3, whose
+    /// league match at Wolfsburg is within the week: every line as the
+    /// original shows it.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_planner_announces_the_next_league_match() {
+        let game = game();
+        let then = "now click bar 7\nuntil dialog 413\nnow press 6215\nuntil dialog 358";
+        let Some(runner) = on_save(&game, "Toni", then) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&358];
+        let text = |id| view.text(control(dialog, id).unwrap()).to_owned();
+        let shown: Vec<String> =
+            [2973, 2974, 2975, 2976, 2978, 2977, 2980, 2979, 2981, 2982, 2983, 2984, 2985]
+                .into_iter()
+                .map(text)
+                .collect();
+        assert_eq!(
+            shown,
+            [
+                "1. Bundesliga 2025/26",
+                "3. Spieltag",
+                "VfL Wolfsburg",
+                "sN",
+                "(9.)",
+                "1.FC Union Berlin",
+                "Sn",
+                "(6.)",
+                "-",
+                "-",
+                "0:0:0",
+                "98 : 97",
+                "24.524",
+            ]
+        );
+        let rows = &view.list(control(dialog, 4570).unwrap()).unwrap().rows;
+        assert_eq!(rows.len(), 9);
+        assert_eq!(rows[0], "Bayer 04 Leverkusen (7.)\t-\t1.FSV Mainz 05 (3.)");
+    }
+
+    /// With the next match more than a week away (Probe1) the button does
+    /// nothing, as the original's.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_announcement_waits_for_the_week_of_the_match() {
+        let game = game();
+        let then = "now click bar 7\nuntil dialog 413\nnow press 6215";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        assert_eq!(runner.host.view().id, 413);
+    }
+
     /// "Optionen" (dialog 503): OK writes the switches into the globals'
     /// block, the start screen into the manager and the difficulty once,
     /// locked from then on; cancel writes nothing.

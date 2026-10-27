@@ -109,7 +109,7 @@ AREAS = {
               (*bar(5, 346, "now choose 5035 4", "now click 4427", "now row 4427 3"), 346)],
     "individual": [(*bar(6, 347), 347), (*bar(6, 347, "now cell 3298 1 8"), 347)],
     "calendar": [(*bar(7, 348), 348), (*bar(7, 348, "now drag at 544 355 to 244 180"), 348)],
-    "planner": [(*bar(8, 413), 413),
+    "planner": [(*bar(8, 413), 413), (*bar(8, 413, "now press 6215", "until dialog 358"), 358),
                 (*bar(8, 413, "now press 5036", "until dialog 397"), 397),
                 (*bar(8, 413, "now press 5036", "until dialog 397",
                       "now type 5414 Abstieg knapp; ok", "until dialog 413",

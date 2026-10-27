@@ -219,6 +219,14 @@ impl<'a> League<'a> {
         )
     }
 
+    /// The pairs of a row of the schedule, by places: home, away.
+    pub fn pairs(&self, row: usize) -> Vec<(usize, usize)> {
+        let at = SCHEDULE + row * MATCHDAY_PAIRS;
+        (0..self.teams() / 2)
+            .map(|k| (usize::from(self.byte(at + 2 * k)), usize::from(self.byte(at + 2 * k + 1))))
+            .collect()
+    }
+
     /// A place's match of a matchday from 1, and its result if played
     /// (`FUN_006907da`).
     pub fn result(&self, matchday: usize, place: usize) -> Option<Match> {
@@ -481,6 +489,23 @@ pub fn home_record(records: &Records, calendar: &Calendar, a: &Team, b: &Team) -
         }
     }
     record
+}
+
+/// The last league meeting of two clubs this season that was played, by
+/// a's fixtures (`FUN_0040d972`): a's goals first.
+pub fn first_leg(records: &Records, calendar: &Calendar, a: &Team, b: &Team) -> Option<(u8, u8)> {
+    let league = League::of(records, a.country().into(), a.level())?;
+    let place = usize::from(a.league_place());
+    let mut found = None;
+    for (i, &(other, home)) in fixtures(records, calendar, a).iter().enumerate() {
+        if other != i16::from(b.number()) {
+            continue;
+        }
+        if let Some((_, _, Some((g1, g2)))) = league.result(i + 1, place) {
+            found = Some(if home { (g1, g2) } else { (g2, g1) });
+        }
+    }
+    found
 }
 
 /// A club's titles (`FUN_0063499e` …): league, cup, European cup, and the

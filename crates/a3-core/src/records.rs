@@ -412,6 +412,9 @@ record! {
     /// tenths, as the game last reckoned it (the club object's +0x94 …
     /// +0x9a): the line-up's comparison shows the opponent's.
     0xb8 => strengths, set_strengths: [i16; 4];
+    /// Where the club lies on its country's map, as the match announcement
+    /// marks it (the club object's +0x11da, +0x11dc; `FUN_0063b75a`).
+    0x30e => map_at, set_map_at: [i16; 2];
     0x112 => player_count, set_player_count: u16;
     /// Its number among its country's teams.
     0x129 => number, set_number: u8;
@@ -468,6 +471,7 @@ record! {
     /// 0 none, and number there; where it is played, 0 or less at home; its
     /// kind (2 the league, 3 and 4 the cup, 5 to 10 the European cups); and
     /// its referee, 0 none.
+    0x250 => next_day, set_next_day: i16;
     0x252 => next_country, set_next_country: u8;
     0x254 => next_number, set_next_number: i16;
     0x256 => next_venue, set_next_venue: i16;

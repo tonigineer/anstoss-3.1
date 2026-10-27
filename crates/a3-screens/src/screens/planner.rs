@@ -29,8 +29,8 @@ const PROMPT: u16 = 5037;
 /// The notepad in the corner of the planner's picture.
 const NOTEPAD: u16 = 5036;
 /// The button for the next match's announcement, which opens dialog 358
-/// or 201 when the match falls within a week (`FUN_0058e33c`); those two
-/// are not built, so it stays crossed out.
+/// for a league match or 201 for another when it falls within a week
+/// (`FUN_0058e33c`); 201 is not built.
 const ANNOUNCEMENT: u16 = 6215;
 /// The hidden OK; a day chosen closes it.
 const OK: u16 = 1;
@@ -121,12 +121,12 @@ impl Screen for WeekPlanner {
             }
             view.set_chosen(rows, super::super::controls::options::NONE);
         }
+        let announces = super::announcement::button_works(cx);
         let works = |target: Target| match target {
-            // The notepad works; the next match's announcement waits for
-            // its unbuilt dialog.
-            Target::Button(b) => {
-                dialog.controls[b].id != Some(ANNOUNCEMENT) && is_notepad(dialog, target)
-            }
+            // The notepad works; the next match's announcement unless it
+            // would open the cup's unbuilt dialog.
+            Target::Button(b) if dialog.controls[b].id == Some(ANNOUNCEMENT) => announces,
+            Target::Button(_) => is_notepad(dialog, target),
             _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
         };
         super::mark_inert(view, dialog, works);
@@ -135,6 +135,14 @@ impl Screen for WeekPlanner {
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
         if is_notepad(cx.dialog, target) {
             return Outcome::Popup(Request::new(notepad::NOTEPAD));
+        }
+        // The next league match's announcement, when it is within a week;
+        // else nothing (`FUN_0058e33c`).
+        if matches!(target, Target::Button(b) if cx.dialog.controls[b].id == Some(ANNOUNCEMENT)) {
+            if super::announcement::next_league_match(cx).is_some() {
+                return Outcome::Popup(Request::new(super::announcement::LEAGUE_ANNOUNCEMENT));
+            }
+            return Outcome::Stay;
         }
         if let Some(item) = hub::on_bar(cx.dialog, target) {
             let outcome = hub::bar_click(cx, view, item, WEEK_PLANNER_SYMBOL);
