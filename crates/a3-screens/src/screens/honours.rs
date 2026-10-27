@@ -29,6 +29,7 @@ pub mod privates;
 pub mod scores;
 pub mod season_records;
 pub mod trainer_erfolge;
+pub mod vergleich;
 
 const CAPTION_ID: u16 = 9935;
 /// "ANSTOSS 3 - Persönliche Erfolge", with the manager, his club and the
@@ -80,7 +81,7 @@ const PAGE_DIALOGS: [Option<u16>; 9] = [
     None,
     Some(pay::PAY_DIALOG),
     Some(beliebtheit::BELIEBT_DIALOG),
-    None,
+    Some(vergleich::VERGLEICH_DIALOG),
     Some(season_records::SEASON_RECORDS_DIALOG),
     Some(scores::SCORES_DIALOG),
 ];

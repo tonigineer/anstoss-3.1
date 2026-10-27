@@ -51,7 +51,7 @@ impl LeagueTables {
 
 /// How many teams play in this league (`FUN_00635a35`); the six with a
 /// size of their own and any league not played take eighteen.
-fn teams(records: &Records, country: u8, level: u8) -> i32 {
+pub(crate) fn teams(records: &Records, country: u8, level: u8) -> i32 {
     if level >= OWN_SIZE {
         return TEAMS;
     }

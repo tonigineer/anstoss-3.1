@@ -227,7 +227,7 @@ fn player(records: &Records, record: &records::Player) -> Player {
     }
 }
 
-fn fitness(record: &records::Player) -> Fitness {
+pub(crate) fn fitness(record: &records::Player) -> Fitness {
     Fitness {
         condition: record.condition().into(),
         freshness: record.freshness().map(i32::from),

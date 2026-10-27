@@ -669,6 +669,9 @@ record! {
     /// A human manager (0x2158 bytes at `DAT_00a62598` + slot × 0x2158;
     /// the save holds the record from there).
     Manager, 0x2158 - HEADER, base 0;
+    /// His number among the humans, 1 to 4: his career record and his
+    /// portfolio of shares stand at `0x8dc6e0[human − 1]`.
+    0x1a => human, set_human: u16;
     /// The club: its country and its number there.
     0x1e => country, set_country: u16;
     0x20 => team, set_team: u16;
@@ -703,6 +706,29 @@ record! {
     /// The years left of the manager's contract, which next season's squad
     /// shows him by (KADER-NAECHSTE-VERLIEHEN.md §2.5).
     0x172 => contract_years, set_contract_years: i16;
+    /// The contract's pay: a fixed part and one on top for every point
+    /// the season brings. The manager object's +0x50 and +0x54, where
+    /// `FUN_006ddc1b` reads them for dialog 211's Vertrag (`FUN_006a426b`).
+    0x15c => pay_fixed, set_pay_fixed: i32;
+    0x160 => pay_point, set_pay_point: i32;
+    /// What the game counts as his money, the first mark of the
+    /// comparison with the other managers: the manager object's +0x98
+    /// (`FUN_006dda52`; ERFOLGE.md §A.6).
+    0x118 => cash, set_cash: i32;
+    /// The five marks the season's calculation writes, and what the team
+    /// was worth when he came: the comparison screen's parts 3 to 7, at
+    /// the manager object's +0xc4 to +0xd8 (`FUN_006dda52`, `FUN_006a426b`).
+    0x1f8 => team_start, set_team_start: i32;
+    0x1fc => youth_marks, set_youth_marks: i32;
+    0x200 => service_marks, set_service_marks: i32;
+    0x204 => season_marks, set_season_marks: i32;
+    0x208 => honour_marks, set_honour_marks: i32;
+    /// What his level's history adds to the last mark of the comparison:
+    /// the manager object's +0xd8 (`FUN_006dda52`).
+    0x20c => standing_marks, set_standing_marks: i32;
+    /// The game's difficulty, in the low seven bits: it pulls every mark
+    /// of the comparison this way or that (`FUN_006a64c7`).
+    0x114 => difficulty, set_difficulty: u16;
     0x1f6e => market_filter, set_market_filter: i16;
     0x1f70 => market_show, set_market_show: i16;
     /// How the week's player in individual training is chosen when nobody

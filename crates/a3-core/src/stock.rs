@@ -22,6 +22,11 @@ const PORT_USED: usize = 0;
 const PORT_ENTRY: usize = 0x34;
 const PORT_SHARES: usize = 0x3c;
 const PORT_STEP: usize = 0x10;
+/// The weeks of prices an entry keeps: the current one stands at
+/// `0x38 + week % 52 * 4`, the week itself at `0x24` (`FUN_00407520`).
+const PRICES: usize = 52;
+const PRICES_AT: usize = 0x38;
+const CLUB_WEEK: usize = 0x24;
 
 fn word(b: &[u8], at: usize) -> i16 {
     match (b.get(at), b.get(at + 1)) {
@@ -82,6 +87,39 @@ pub struct Split {
 /// stands at `0x8dc6e0[place − 1]`.
 pub fn place(records: &Records, index: usize) -> i16 {
     records.globals.slots().get(index).copied().unwrap_or(0)
+}
+
+/// What all of this human's holdings come to (`FUN_006ddc73`): his
+/// shares in every club still on the market, each at that club's current
+/// price, all summed.
+pub fn portfolio_value(records: &Records, human: i16) -> i64 {
+    let Some(port) = records.block(&format!("{PORT_AT:#x}[{}]", human - 1)) else {
+        return 0;
+    };
+    let Some(market) = records.block(&format!("{MARKET_AT:#x}")) else {
+        return 0;
+    };
+    (0..PORT_SLOTS).fold(0, |sum, k| {
+        if port.get(PORT_USED + k).is_none_or(|&used| used == 0) {
+            return sum;
+        }
+        let at = PORT_ENTRY + k * PORT_STEP;
+        let Ok(place) = usize::try_from(long(port, at)) else { return sum };
+        let Some(entry) = market.get(MARKET_FIRST + place * MARKET_ENTRY..) else {
+            return sum;
+        };
+        if word(entry, CLUB_COUNTRY) == 0 {
+            return sum;
+        }
+        let Ok(ring) = usize::try_from(word(entry, CLUB_WEEK)) else { return sum };
+        let Some(four) = entry.get(PRICES_AT + ring % PRICES * 4..PRICES_AT + ring % PRICES * 4 + 4)
+        else {
+            return sum;
+        };
+        let price = f32::from_le_bytes(four.try_into().unwrap());
+        let shares = long(port, at + (PORT_SHARES - PORT_ENTRY)) as f32;
+        sum + (shares * price).round() as i64
+    })
 }
 
 /// The club's shares among the humans (`FUN_005b548f`'s reading): the

@@ -3308,6 +3308,57 @@ mod tests {
         assert_eq!(runner.host.view().id, 175);
     }
 
+    /// The comparison of the humans (dialog 211) on "Probe1": both of
+    /// them marked nine ways, and only the sums move when a question is
+    /// clicked out.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_comparison_marks_the_humans_nine_ways() {
+        let game = game();
+        let then = "now click bar 16\nuntil dialog 175\nnow choose 5643 6\nuntil dialog 211";
+        let Some(mut runner) = on_save(&game, "Probe1", then) else { return };
+        let dialog = &game.dialogs[&211];
+        let id = |id: u16| control(dialog, id).unwrap();
+        let column = |view: &crate::view::View, name: &str| {
+            (0..4usize).find(|&c| view.text(id(3070 + 12 * c as u16)) == name).unwrap()
+        };
+        let row = |view: &crate::view::View, c: usize| -> Vec<String> {
+            (0..9).map(|k| view.text(id(3070 + (12 * c + 2 + k) as u16)).to_owned()).collect()
+        };
+        // The two humans among the managers; the spare columns stay
+        // blank. Probe1's first has no club, so only his standing (2)
+        // marks him; the second, at difficulty 2 and with SSV Ulm, gets
+        // his money, his pay, his team, the youth and the season.
+        let (anna, bert);
+        {
+            let view = runner.host.view();
+            anna = column(view, "Anna");
+            bert = column(view, "Bert");
+            assert_eq!(row(view, anna), ["0", "0", "0", "0", "0", "0", "0", "0", "-20 (2)"]);
+            assert_eq!(row(view, bert), ["4", "12", "0", "20", "4", "0", "0", "0", "0 (2)"]);
+            assert_eq!(view.text(id(3070 + (12 * anna + 11) as u16)), "-20");
+            assert_eq!(view.text(id(3070 + (12 * bert + 11) as u16)), "40");
+            assert_eq!(view.text(id(3070 + 24)), "");
+            assert_eq!(view.text(id(3070 + 36 + 11)), "");
+        }
+        // Seven questions out: what stays lit is the money and the
+        // standing; the marks themselves keep their figures.
+        for q in 3062..=3068 {
+            let target = crate::pointer::Target::Option { control: id(q), item: 0 };
+            runner.host.input(&game, target, false);
+        }
+        {
+            let view = runner.host.view();
+            assert_eq!(row(view, anna), ["0", "0", "0", "0", "0", "0", "0", "0", "-20 (2)"]);
+            assert_eq!(view.text(id(3070 + (12 * anna + 11) as u16)), "-20");
+            assert_eq!(view.text(id(3070 + (12 * bert + 11) as u16)), "4");
+        }
+        // OK goes back to the honours page.
+        let ok = control(dialog, 1).unwrap();
+        runner.host.input(&game, crate::pointer::Target::Button(ok), false);
+        assert_eq!(runner.host.view().id, 175);
+    }
+
     /// The three cases of ill repute the records tell (`FUN_0047efdd`),
     /// on copies of A.an3: its twelve matchdays played — the saves kept
     /// hold only three — its third millionaire, and its second place.

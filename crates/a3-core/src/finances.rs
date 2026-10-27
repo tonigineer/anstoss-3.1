@@ -826,12 +826,12 @@ const EUROPE_BONUS: usize = 0x5cc;
 const STAYING_UP_BONUS: usize = 0x5d0;
 const CUP_BONUS: usize = 0x5d4;
 /// The season's target (club +0x10c), in the team record.
-const TARGET: usize = 0x135;
+pub(crate) const TARGET: usize = 0x135;
 /// The points bonuses' band by the target, and the points a season brings
 /// by the target: a base and so much a team over ten (0x8911f8,
 /// 0x8a532c).
 const TARGET_BANDS: [usize; 12] = [0, 1, 1, 1, 2, 2, 3, 3, 3, 3, 4, 4];
-const TARGET_POINTS: [(i32, i32); 12] = [
+pub(crate) const TARGET_POINTS: [(i32, i32); 12] = [
     (66, 5),
     (60, 4),
     (60, 4),

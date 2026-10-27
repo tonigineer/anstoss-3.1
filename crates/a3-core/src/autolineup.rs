@@ -224,7 +224,7 @@ fn exchange_sort<T>(rows: &mut [T], before: impl Fn(&T, &T) -> bool) {
 }
 
 /// How old a player is on a day, as the game counts it (`FUN_0067582a`).
-fn age(birthday: Option<NaiveDate>, today: NaiveDate) -> i32 {
+pub(crate) fn age(birthday: Option<NaiveDate>, today: NaiveDate) -> i32 {
     let Some(born) = birthday else { return 0 };
     let (day, month) = (born.day(), born.month());
     let had_birthday = month < today.month() || month == today.month() && day <= today.day();

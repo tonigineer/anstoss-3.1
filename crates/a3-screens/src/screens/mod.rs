@@ -179,6 +179,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(honours::trainer_erfolge::TrainerErfolge),
         Box::new(honours::privates::Privates::default()),
         Box::new(honours::beliebtheit::Beliebt),
+        Box::new(honours::vergleich::Vergleich::default()),
         Box::new(contacts::Lawyers::default()),
         Box::new(contacts::AliensOffice::default()),
         Box::new(contacts::Referees::default()),

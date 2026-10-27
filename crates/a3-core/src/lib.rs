@@ -12,6 +12,7 @@ pub mod cycle;
 pub mod data;
 pub mod discipline;
 pub mod duties;
+pub mod evaluation;
 pub mod finances;
 pub mod forecast;
 pub mod grounds;
