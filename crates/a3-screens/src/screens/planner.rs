@@ -17,7 +17,8 @@ use a3_core::transfers;
 use a3_files::rch::Dialog;
 
 use super::hub::{self, WEEK_PLANNER, WEEK_PLANNER_SYMBOL};
-use super::{Args, Cx, Outcome, Reply, Screen, control, ok_or_cancel, set};
+use super::notepad;
+use super::{Args, Cx, Outcome, Reply, Request, Screen, control, ok_or_cancel, set};
 use crate::pointer::Target;
 use crate::view::View;
 
@@ -72,8 +73,8 @@ const MISSING: &str = " Fehlt !!!! ";
 
 /// The week planner of the menu bar (dialog 413, `CTerminplanerNormal`;
 /// TERMINPLANER.md in the RE repo): the bar takes the OK's place.
-/// Its button for the next match's announcement and its notepad lead to
-/// screens not built yet.
+/// Its notepad opens the manager's note page; the button for the next
+/// match's announcement leads to a screen not built yet.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     let Some(dialog) = dialogs.get_mut(&WEEK_PLANNER) else { return };
     dialog.controls.retain(|c| c.id != Some(OK));
@@ -116,14 +117,18 @@ impl Screen for WeekPlanner {
             }
             view.set_chosen(rows, super::super::controls::options::NONE);
         }
-        let works = |target: Target| {
-            hub::on_bar(dialog, target).is_none_or(hub::bar_works)
-                && !matches!(target, Target::Button(_))
+        let works = |target: Target| match target {
+            // The notepad works; the next match's announcement does not.
+            Target::Button(_) => is_notepad(dialog, target),
+            _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
         };
         super::mark_inert(view, dialog, works);
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        if is_notepad(cx.dialog, target) {
+            return Outcome::Popup(Request::new(notepad::NOTEPAD));
+        }
         if let Some(item) = hub::on_bar(cx.dialog, target) {
             let outcome = hub::bar_click(cx, view, item, WEEK_PLANNER_SYMBOL);
             self.whistle = matches!(outcome, Outcome::Popup(_));
@@ -201,6 +206,12 @@ pub struct Planner {
     club: i16,
 }
 
+/// Whether a target is the notepad in the corner of the picture, which
+/// both planners show (`OnClicked_IDC_TERMINPL_NOTIZBLOCK`).
+fn is_notepad(dialog: &Dialog, target: Target) -> bool {
+    matches!(target, Target::Button(b) if dialog.controls[b].id == Some(NOTEPAD))
+}
+
 /// The human manager's slot and his week: its first day and today.
 fn week(cx: &Cx) -> Option<(usize, usize, usize)> {
     let season = cx.state.season.as_ref()?;
@@ -270,9 +281,8 @@ impl Screen for Planner {
         if let Some(prompt) = prompt {
             set(view, dialog, PROMPT, prompt);
         }
-        // The notepad does nothing yet.
-        let notepad = |t| matches!(t, Target::Button(b) if dialog.controls[b].id == Some(NOTEPAD));
-        super::mark_inert(view, dialog, |t| !notepad(t));
+        // Everything here answers, the notepad in the picture included.
+        super::mark_inert(view, dialog, |_| true);
         self.free = show_week(cx, view);
         // With the day fixed no row answers; OK joins.
         if fixed.is_some() {
@@ -281,6 +291,9 @@ impl Screen for Planner {
     }
 
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        if is_notepad(cx.dialog, target) {
+            return Outcome::Popup(Request::new(notepad::NOTEPAD));
+        }
         let (ok, cancel) = ok_or_cancel(cx.dialog, target);
         if cancel {
             return Outcome::Close(Reply::Cancel);

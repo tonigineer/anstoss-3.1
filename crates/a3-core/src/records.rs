@@ -994,6 +994,38 @@ impl Planner {
     }
 }
 
+/// The human managers' notepads, one page to a human (`CDatenNotizen`?).
+const NOTE_AT: u32 = 0x8ed3e0;
+/// A page: the text at `0x8ed3e0` + human × 0x420, which the game calls
+/// `DAT_008ed400`.
+pub const NOTE_LEN: usize = 0x400;
+/// What the notepad writes back at most (`FUN_00528dfd`): a page less
+/// the NUL it puts after the text.
+pub const NOTE_MAX: usize = NOTE_LEN - 1;
+
+record! {
+    /// A human manager's notepad page, as the planner's notepad
+    /// (`CDiNotizen`, dialog 397) shows and rewrites it.
+    Note, NOTE_LEN, base HEADER;
+}
+
+impl Note {
+    /// The text on the page, Windows-1252 up to its NUL.
+    pub fn text(&self) -> String {
+        text(&self.0, NOTE_MAX)
+    }
+
+    /// What OK writes (`FUN_00528dfd`): the text cut to a page less its
+    /// NUL, the rest of the page cleared.
+    pub fn set_text(&mut self, value: &str) {
+        let bytes: Vec<u8> =
+            value.chars().map(|c| a3_files::bitmap_font::to_cp1252(c).unwrap_or(b'?')).collect();
+        let taken = bytes.len().min(NOTE_MAX);
+        self.0[..taken].copy_from_slice(&bytes[..taken]);
+        self.0[taken..].fill(0);
+    }
+}
+
 /// The human clubs' individual training, by slot (`0xa50028` + slot ×
 /// 0x7a0): forty players' choices ([`crate::individual::Entry`]).
 const INDIVIDUAL_AT: u32 = 0xa50028;
@@ -1287,6 +1319,8 @@ pub struct Records {
     pub planners: Vec<Planner>,
     pub calendars: Vec<Planner>,
     pub individual: Vec<IndividualStore>,
+    /// The human managers' notepad pages, by slot.
+    pub notes: Vec<Note>,
     pub luck: Luck,
     /// The pool of names the players' names point into.
     pub names: Vec<String>,
@@ -1330,6 +1364,9 @@ impl Records {
         let individual = (0..MANAGERS)
             .map(|n| IndividualStore::new(block(format!("{INDIVIDUAL_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
+        let notes = (0..MANAGERS)
+            .map(|n| Note::new(block(format!("{NOTE_AT:#x}[{n}]"))?))
+            .collect::<io::Result<_>>()?;
         let globals = Globals::new(block(format!("{GLOBALS_AT:#x}"))?)?;
         let luck = Luck::new(block(format!("{LUCK_AT:#x}"))?)?;
         let countries = Countries::new(block(format!("{COUNTRIES_AT:#x}"))?)?;
@@ -1356,6 +1393,7 @@ impl Records {
             planners,
             calendars,
             individual,
+            notes,
             luck,
             names,
             persons,
@@ -1392,6 +1430,9 @@ impl Records {
         }
         for (n, store) in self.individual.iter().enumerate() {
             put(format!("{INDIVIDUAL_AT:#x}[{n}]"), 0, store.bytes());
+        }
+        for (n, note) in self.notes.iter().enumerate() {
+            put(format!("{NOTE_AT:#x}[{n}]"), 0, note.bytes());
         }
         put(format!("{GLOBALS_AT:#x}"), 0, self.globals.bytes());
         put(format!("{LUCK_AT:#x}"), 0, self.luck.bytes());
@@ -1616,6 +1657,16 @@ mod tests {
         team.set_formation(3);
         assert_eq!(team.bytes()[0x1f0 - HEADER], 3);
         assert!(Team::new(&bytes[1..]).is_err());
+    }
+
+    #[test]
+    fn a_note_page_holds_a_page_less_its_nul() {
+        let mut note = Note::new(&vec![0; NOTE_LEN]).unwrap();
+        note.set_text(&"x".repeat(NOTE_LEN + 7));
+        assert_eq!(note.text().len(), NOTE_MAX);
+        note.set_text("Toni übt");
+        assert_eq!(note.text(), "Toni übt");
+        assert_eq!(note.bytes()[10..], vec![0; NOTE_LEN - 10]);
     }
 
     #[test]

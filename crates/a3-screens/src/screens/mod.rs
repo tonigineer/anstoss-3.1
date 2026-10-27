@@ -20,6 +20,7 @@ pub mod jobs;
 pub mod kalkulation;
 pub mod market;
 pub mod medical;
+pub mod notepad;
 pub mod office;
 pub mod opponent;
 pub mod planner;
@@ -140,6 +141,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(discipline::Change),
         Box::new(planner::Planner::default()),
         Box::new(planner::WeekPlanner::default()),
+        Box::new(notepad::Notepad),
         Box::new(year::YearCalendar::default()),
         Box::new(finances::Balance::default()),
         Box::new(finances::Finances::default()),
@@ -245,6 +247,7 @@ pub fn compose(game: &mut Game) {
     training::long::compose(&mut game.dialogs, &game.data.rules);
     training::individual::compose(&mut game.dialogs, &game.data.rules);
     planner::compose(&mut game.dialogs, &game.data.rules);
+    notepad::compose(&mut game.dialogs);
     year::compose(&mut game.dialogs, &game.data.rules);
     finances::compose(&mut game.dialogs, &game.data.rules);
     bank::compose(&mut game.dialogs);

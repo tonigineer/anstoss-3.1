@@ -3448,6 +3448,43 @@ mod tests {
         assert_eq!(screens, ["9", "95", "9", "424", "9", "474", "9"]);
     }
 
+    /// The notepad of the week planner (`CDiNotizen`, dialog 397): what
+    /// the manager types stays on his own page, which he sees again when
+    /// he opens it; löschen empties the edit, and OK keeps it that way.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_notepad_keeps_what_the_manager_types() {
+        let game = game();
+        let open = "now click bar 7\nuntil dialog 413\nnow press 5036\nuntil dialog 397";
+        let Some(runner) = on_save(&game, "Toni", open) else { return };
+        let edit = control(&game.dialogs[&397], 5414).unwrap();
+        let page = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            records.notes[records.human_slot(0).unwrap()].text()
+        };
+        assert_eq!(runner.host.view().text(edit), "");
+        assert_eq!(page(&runner), "");
+        // Typed and kept: reopening the notepad shows the page again.
+        let then =
+            format!("{open}\nnow type 5414 Abstieg knapp; ok\nuntil dialog 413\nnow press 5036");
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        assert_eq!(runner.host.view().text(edit), "Abstieg knapp");
+        assert_eq!(page(&runner), "Abstieg knapp");
+        // The edit of the dialog itself takes twenty keys at most, as the
+        // original's resource says (`edit 20`).
+        let then = format!("{open}\nnow type 5414 {}; ok\nuntil dialog 413", "x".repeat(1100));
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        assert_eq!(page(&runner).len(), 20);
+        // löschen clears the edit only; without OK the page keeps its text.
+        let then = format!("{open}\nnow press 5416");
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        assert_eq!(runner.host.view().text(edit), "");
+        let then = format!("{open}\nnow press 5416; ok\nuntil dialog 413");
+        let runner = on_save(&game, "Toni", &then).unwrap();
+        assert_eq!(page(&runner), "");
+    }
+
     #[test]
     fn scripts_say_what_is_wrong_with_them() {
         assert_eq!(
