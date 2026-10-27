@@ -28,6 +28,10 @@ const DAYS: u16 = 5034;
 const PROMPT: u16 = 5037;
 /// The notepad in the corner of the planner's picture.
 const NOTEPAD: u16 = 5036;
+/// The button for the next match's announcement, which opens dialog 358
+/// or 201 when the match falls within a week (`FUN_0058e33c`); those two
+/// are not built, so it stays crossed out.
+const ANNOUNCEMENT: u16 = 6215;
 /// The hidden OK; a day chosen closes it.
 const OK: u16 = 1;
 const WEEK: usize = 7;
@@ -118,8 +122,11 @@ impl Screen for WeekPlanner {
             view.set_chosen(rows, super::super::controls::options::NONE);
         }
         let works = |target: Target| match target {
-            // The notepad works; the next match's announcement does not.
-            Target::Button(_) => is_notepad(dialog, target),
+            // The notepad works; the next match's announcement waits for
+            // its unbuilt dialog.
+            Target::Button(b) => {
+                dialog.controls[b].id != Some(ANNOUNCEMENT) && is_notepad(dialog, target)
+            }
             _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
         };
         super::mark_inert(view, dialog, works);
