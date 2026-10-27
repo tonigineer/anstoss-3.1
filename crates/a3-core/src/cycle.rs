@@ -51,6 +51,9 @@ pub mod dialogs {
     pub const OFFICE: u16 = 483;
     /// The grand office of the grandest clubs.
     pub const GRAND_OFFICE: u16 = 504;
+    /// The text menu of a manager who chose it.  Dialog 502, the national
+    /// team's smaller variant, is not built yet.
+    pub const TEXT_MENU: u16 = 501;
     pub const LINEUP: u16 = 147;
     /// The line-up as a list, for a manager who switched to it.
     pub const LINEUP_LIST: u16 = 429;
@@ -158,6 +161,8 @@ const NO_ONE_LEFT: u16 = 5053;
 const GRAND_CLASS: i64 = 5;
 /// The manager's choice of the office over the menu bar.
 const OFFICE_MENU: u8 = 1;
+/// The manager's choice of the text menu over the menu bar.
+const TEXT_MENU_CHOICE: u8 = 2;
 const WEEK_DAYS: usize = 7;
 /// A talk booked in the week planner, and the talk itself.
 const TALK: u8 = 0x19;
@@ -746,10 +751,14 @@ impl Cycle {
     }
 
     /// Where a manager's turn opens: the office for one who chose it — the
-    /// grand one for the grandest clubs — else the line-up, or the dressing
-    /// room for a manager without a club.
+    /// grand one for the grandest clubs — the text menu for one who chose
+    /// that, else the line-up, or the dressing room for a manager without
+    /// a club.
     fn turn_screen(&self, season: &Season) -> u16 {
         let Some(manager) = season.manager() else { return DRESSING_ROOM };
+        if manager.menu == TEXT_MENU_CHOICE {
+            return TEXT_MENU;
+        }
         if manager.menu == OFFICE_MENU {
             let club =
                 manager.club.and_then(|(slot, c)| self.data.world.country(slot)?.clubs.get(c));

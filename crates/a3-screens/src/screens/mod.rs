@@ -20,6 +20,7 @@ pub mod jobs;
 pub mod kalkulation;
 pub mod market;
 pub mod medical;
+pub mod menu_text;
 pub mod notepad;
 pub mod office;
 pub mod opponent;
@@ -136,6 +137,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(opponent::Opponent),
         Box::new(playerinfo::PlayerInfo::default()),
         Box::new(office::Office),
+        Box::new(menu_text::MenuText),
         Box::new(discipline::Bonus::default()),
         Box::new(discipline::Fine::default()),
         Box::new(discipline::FineReply),

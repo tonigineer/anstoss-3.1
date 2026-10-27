@@ -48,6 +48,12 @@ def on_a(*lines):
     return ("A.an3", list(lines))
 
 
+def on_menu(*lines):
+    """A frame on Menu.an3: Toni's save with the text menu chosen, which
+    the load script then leaves it on instead of the line-up."""
+    return ("Menu.an3", list(lines))
+
+
 def new_game(dialog):
     return (None, [f"until dialog {dialog}"])
 
@@ -67,7 +73,9 @@ AREAS = {
     "start": [(*new_game(d), d) for d in (9, 140, 209, 212, 374, 99, 103)] + [
         # The fifth entry's high scores, captioned like every window.
         (None, ["now choose 4771 5; ok", "until dialog 95"], 95)],
-    "week": [(*new_game(2), 2), (*bar(8, 413), 413)],
+    "week": [(*new_game(2), 2), (*on_menu(), 501),
+             (*on_menu("now choose 6302 0", "until dialog 147"), 147),
+             (*bar(8, 413), 413)],
     "lineup": [(*on_a("until dialog 147"), 147),
                *[(*on_a(f"now choose 5266 {i}", f"until dialog {d}"), d)
                  for i, d in [(0, 429), (1, 244), (3, 418), (6, 151), (7, 83)]]],
@@ -143,7 +151,10 @@ def game_dir(tmp, save):
 
 def shoot(tmp, save, lines, want, out):
     script = tmp / "frame.txt"
-    script.write_text((LOAD if save else NEW_GAME) + "\n".join(lines) + "\n")
+    load = LOAD if save else NEW_GAME
+    if save == "Menu.an3":  # a text-menu save opens on the menu, not the line-up
+        load = load.replace("until dialog 147", "until dialog 501")
+    script.write_text(load + "\n".join(lines) + "\n")
     run = subprocess.run([REPLICA, game_dir(tmp, save), "--script", script, "--shot", out],
                          capture_output=True, text=True)
     screens = re.findall(r"^screen (\d+)", run.stdout, re.M)

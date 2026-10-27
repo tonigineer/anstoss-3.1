@@ -192,7 +192,7 @@ fn pairing(game: &Game, own: (usize, usize), m: &Match) -> String {
 }
 
 /// One side of a pairing: "Name (H)", or "Name (H, 3.)" with its position.
-fn side(game: &Game, name: &str, home: bool, position: Option<usize>) -> String {
+pub(crate) fn side(game: &Game, name: &str, home: bool, position: Option<usize>) -> String {
     match position {
         Some(position) => game
             .text(if home { HOME_RANKED } else { AWAY_RANKED })
