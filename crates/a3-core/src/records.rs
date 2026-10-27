@@ -870,6 +870,12 @@ impl Manager {
         (self.options() >> 6 & 3) as u8
     }
 
+    /// Choosing that screen, as the dressing room's options do.
+    pub fn set_menu_view(&mut self, view: u8) {
+        let bits = u32::from(view & 3) << 6;
+        self.set_options(self.options() & !(3 << 6) | bits);
+    }
+
     /// Whether his line-up shows as a list (`FUN_006a5ba7`).
     pub fn list_view(&self) -> bool {
         self.options() & LINE_UP_VIEW != 0

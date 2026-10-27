@@ -667,6 +667,30 @@ mod tests {
     /// Loads the newest save and stops on the line-up.
     const LOAD: &str = include_str!("../scripts/load.txt");
 
+    /// The start view a save chose for its manager opens at the turn:
+    /// the office 483 and the text menu 501, each in place of the
+    /// line-up.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_chosen_start_view_opens() {
+        use a3_core::cycle::dialogs;
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        for (view, screen) in [(1u8, dialogs::OFFICE), (2, dialogs::TEXT_MENU)] {
+            let name = format!("view{view}");
+            let root = patched(&dir, "Toni", &name, |records| {
+                for m in &mut records.managers {
+                    m.set_menu_view(view);
+                }
+            });
+            let mut game = Game::load(&root).unwrap();
+            compose(&mut game);
+            let load = LOAD.replace("until dialog 147", &format!("until dialog {screen}"));
+            let (runner, result) = Runner::play(&game, &Script::parse(&load).unwrap());
+            result.unwrap_or_else(|err| panic!("{name}: {err}\n{}", runner.log.join("\n")));
+            assert_eq!(runner.host.view().id, screen, "{name}");
+        }
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn every_save_opens_on_its_line_up() {
