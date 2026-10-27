@@ -74,13 +74,29 @@ struct Jukebox {
     loading: Option<Task<io::Result<Vec<u8>>>>,
 }
 
+/// Whether the game makes its sounds — clicks, whistle, ambience: the
+/// switch of `musik.cfg`, which the stereo sets; every player of effects
+/// asks it first (`FUN_006ecd14`, `FUN_006ecd52`).
+#[derive(Resource)]
+pub(crate) struct SoundEffects(pub(crate) bool);
+
+impl SoundEffects {
+    pub(crate) fn on(effects: Option<Res<Self>>) -> bool {
+        effects.is_none_or(|e| e.0)
+    }
+}
+
 /// The playing track; it despawns when the track ends.
 #[derive(Component)]
 struct Playing;
 
 fn setup(mut commands: Commands, dir: Res<GameDir>) {
-    let mode = settings(&dir.0.join("musik.cfg"));
+    let cfg = dir.0.join("musik.cfg");
+    let mode = settings(&cfg);
     info!("music: {mode:?}");
+    // Without the file the sounds stay on, as the music follows the mood.
+    let switch = std::fs::read(&cfg).ok().and_then(|c| c.get(2..4).map(|b| b != [0, 0]));
+    commands.insert_resource(SoundEffects(switch.unwrap_or(true)));
     let seed = SystemTime::now().duration_since(UNIX_EPOCH).map_or(1, |t| t.as_nanos() as u64);
     commands.insert_resource(Jukebox {
         archive: dir.0.join("Data/music.cpr"),
@@ -120,11 +136,13 @@ fn follow_stereo(
     mut commands: Commands,
     dialog: Option<Res<crate::dialog::OpenDialog>>,
     mut jukebox: ResMut<Jukebox>,
+    mut effects: ResMut<SoundEffects>,
     playing: Query<Entity, With<Playing>>,
 ) {
     let Some(dialog) = dialog else { return };
-    let Some((mode, _, ticked)) = dialog.0.state().music.take() else { return };
+    let Some((mode, sounds, ticked)) = dialog.0.state().music.take() else { return };
     jukebox.mode = mode_of(mode, ticked);
+    effects.0 = sounds != 0;
     info!("music: {:?}", jukebox.mode);
     if matches!(jukebox.mode, Mode::Off) {
         for track in &playing {

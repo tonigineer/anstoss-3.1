@@ -32,6 +32,8 @@ use a3_screens::classic::PLAIN;
 use a3_screens::controls::button::{cancel_button, ok_button};
 use a3_screens::controls::slider;
 use a3_screens::host::{Change, Host};
+
+use crate::music::SoundEffects;
 use a3_screens::pointer::{Grip, Target, targets};
 use a3_screens::screens::hub;
 use a3_screens::view::View;
@@ -529,6 +531,7 @@ fn press(
     hotspots: Query<&Hotspot>,
     game: Res<Game>,
     sounds: Res<Sounds>,
+    effects: Option<Res<SoundEffects>>,
     mut commands: Commands,
     mut view: ResMut<OpenDialog>,
     mut held: ResMut<Held>,
@@ -574,7 +577,7 @@ fn press(
             held.drag = Some((control, left, zoom));
         }
         Target::Option { control, item } if is_bar(&game, view.id, control) => {
-            if view.bar(control).is_some_and(|b| b.item_on(item)) {
+            if view.bar(control).is_some_and(|b| b.item_on(item)) && SoundEffects::on(effects) {
                 let sound = if item == hub::WHISTLE { &sounds.whistle } else { &sounds.click };
                 if let Some(sound) = sound {
                     commands.spawn((AudioPlayer::new(sound.clone()), PlaybackSettings::DESPAWN));
@@ -621,6 +624,7 @@ fn click(
     hotspots: Query<&Hotspot>,
     view: Res<OpenDialog>,
     sounds: Res<Sounds>,
+    effects: Option<Res<SoundEffects>>,
     mut commands: Commands,
     mut pending: ResMut<Pending>,
 ) {
@@ -635,7 +639,7 @@ fn click(
     if dialog != view.id || view.disabled(button) {
         return;
     }
-    if let Some(sound) = &sounds.click {
+    if let Some(sound) = sounds.click.as_ref().filter(|_| SoundEffects::on(effects)) {
         commands.spawn((AudioPlayer::new(sound.clone()), PlaybackSettings::DESPAWN));
     }
     pending.0.push((target, click.count));

@@ -22,11 +22,14 @@ pub(super) fn play(
     mut audio: ResMut<Assets<AudioSource>>,
     mut playing: Query<(Entity, &Ambience, Option<&mut AudioSink>)>,
     mut loaded: Local<HashMap<&'static str, Option<Handle<AudioSource>>>>,
+    effects: Option<Res<crate::music::SoundEffects>>,
 ) {
     let volume = |v: u8| Volume::Linear(f32::from(v) / 100.0);
+    // With the sounds switched off the screen asks for none.
+    let wanted = if crate::music::SoundEffects::on(effects) { &view.ambience[..] } else { &[] };
     let mut started = Vec::new();
     for (entity, sound, sink) in &mut playing {
-        match view.ambience.iter().find(|(file, _)| *file == sound.0) {
+        match wanted.iter().find(|(file, _)| *file == sound.0) {
             Some(&(_, v)) => {
                 if let Some(mut sink) = sink {
                     sink.set_volume(volume(v));
@@ -36,7 +39,7 @@ pub(super) fn play(
             None => commands.entity(entity).despawn(),
         }
     }
-    for &(file, v) in view.ambience.iter().filter(|(file, _)| !started.contains(file)) {
+    for &(file, v) in wanted.iter().filter(|(file, _)| !started.contains(file)) {
         let handle = loaded.entry(file).or_insert_with(|| match game.file(file) {
             Ok(bytes) => Some(audio.add(AudioSource { bytes: bytes.into() })),
             Err(err) => {
