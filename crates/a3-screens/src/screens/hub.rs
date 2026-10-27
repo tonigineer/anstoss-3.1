@@ -49,7 +49,7 @@ const BAR: Rect = Rect { min: Vec2::new(0.0, 448.0), max: Vec2::new(640.0, 480.0
 const SYMBOL: f32 = 32.0;
 /// The bar's symbols by number: the line-up, the training the game keeps
 /// shut on Saturdays, the national team, the dressing room and the whistle.
-const LINEUP_SYMBOL: usize = 0;
+pub(crate) const LINEUP_SYMBOL: usize = 0;
 pub(crate) const COMPARISON_SYMBOL: usize = 1;
 pub(crate) const TACTICS_SYMBOL: usize = 2;
 pub(crate) const LONG_TRAINING_SYMBOL: usize = 3;
@@ -68,8 +68,8 @@ const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 /// What the turn before a match closes: the money, the club, the national
 /// team (the table at 0x8a35b0).
 const BEFORE_MATCH_CLOSED: [usize; 7] = [8, 9, 10, 11, 12, 13, 15];
-const NATIONAL_SYMBOL: usize = 15;
-const DRESSING_SYMBOL: usize = 17;
+pub(crate) const NATIONAL_SYMBOL: usize = 15;
+pub(crate) const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
 const BAR_SCREENS: [(usize, u16); 16] = [
@@ -366,25 +366,27 @@ pub(crate) fn add_bar(dialog: &mut Dialog, rules: &Rules) {
 /// Saturdays, the national team without one —, the tips.
 pub(crate) fn open_bar(cx: &Cx, view: &mut View, own: usize) {
     let game = cx.game;
-    let Some(season) = &cx.state.season else { return };
-    let Some(manager) = season.manager() else { return };
     let Some(state) = control(cx.dialog, BAR_ID).and_then(|b| view.bar_mut(b)) else { return };
     state.chosen = own;
-    state.off = if manager.club.is_none() {
-        game.rules.bar_without_club.clone()
-    } else {
-        vec![false; BAR_SYMBOLS]
-    };
-    if season.day % WEEK_DAYS == SATURDAY {
-        SATURDAY_CLOSED.iter().for_each(|&s| state.off[s] = true);
-    }
-    if season.before_match {
-        BEFORE_MATCH_CLOSED.iter().for_each(|&s| state.off[s] = true);
-    }
-    if manager.national_team.is_none() {
-        state.off[NATIONAL_SYMBOL] = true;
-    }
+    state.off = (0..BAR_SYMBOLS).map(|symbol| bar_closed(cx, symbol)).collect();
     state.tips = game.rules.bar_tips.iter().map(|&t| game.text(t as u16).to_owned()).collect();
+}
+
+/// Whether a symbol of the bar is switched off today: all but a few
+/// without a club, the training on Saturdays, the money before a match,
+/// the national team without one.
+pub(crate) fn bar_closed(cx: &Cx, symbol: usize) -> bool {
+    let Some(season) = &cx.state.season else { return true };
+    let Some(manager) = season.manager() else { return true };
+    (manager.club.is_none() && cx.game.rules.bar_without_club[symbol])
+        || (season.day % WEEK_DAYS == SATURDAY && SATURDAY_CLOSED.contains(&symbol))
+        || (season.before_match && BEFORE_MATCH_CLOSED.contains(&symbol))
+        || (manager.national_team.is_none() && symbol == NATIONAL_SYMBOL)
+}
+
+/// The screen a symbol of the bar leads to, as far as it is built.
+pub(crate) fn bar_screen(symbol: usize) -> Option<u16> {
+    BAR_SCREENS.iter().find(|&&(s, _)| s == symbol).map(|&(_, screen)| screen)
 }
 
 /// Whether today is the week's last day, which closes some of the bar's
@@ -413,7 +415,7 @@ pub(crate) fn on_bar(dialog: &Dialog, target: Target) -> Option<usize> {
 
 /// Whether a symbol of the bar does something yet.
 pub(crate) fn bar_works(item: usize) -> bool {
-    item == WHISTLE || BAR_SCREENS.iter().any(|&(symbol, _)| symbol == item)
+    item == WHISTLE || bar_screen(item).is_some()
 }
 
 /// A symbol of the bar clicked: the screen it leads to, unless it is the
@@ -425,7 +427,7 @@ pub(crate) fn bar_click(cx: &Cx, view: &View, item: usize, own: usize) -> Outcom
     if item == own {
         return Outcome::Stay;
     }
-    if let Some(&(_, screen)) = BAR_SCREENS.iter().find(|&&(symbol, _)| symbol == item) {
+    if let Some(screen) = bar_screen(item) {
         return Outcome::Close(Reply::Goto(screen));
     }
     let bar = control(cx.dialog, BAR_ID).and_then(|b| view.bar(b));

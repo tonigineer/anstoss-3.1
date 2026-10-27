@@ -5,14 +5,15 @@
 use std::collections::HashMap;
 
 use bevy_math::Vec2;
+use tracing::info;
 
-use a3_core::season::{Match, Season};
+use a3_core::season::Match;
 use a3_files::rch::{Dialog, Kind};
 
 use a3_core::cycle::dialogs::{GRAND_OFFICE, OFFICE};
 
-use super::calendar::{WEEK_DAYS, bitmap};
-use super::{Args, Cx, Outcome, Reply, Screen, control, indices, set};
+use super::calendar::bitmap;
+use super::{Args, Cx, Outcome, Reply, Screen, control, hub, indices, set};
 use crate::controls::bitmap::Picture;
 use crate::game::Game;
 use crate::pointer::Target;
@@ -22,12 +23,33 @@ use crate::view::View;
 const OFFICE_TITLE: u16 = 6353;
 const OFFICE_PAIRING: u16 = 6354;
 const OFFICE_DOOR: u16 = 6131;
-/// The national-team trophy and the remote control: the only objects a
-/// manager without a club can use, besides the door.
-const OFFICE_NATIONAL: u16 = 6315;
-const OFFICE_REMOTE: u16 = 6121;
-/// The long-term and individual training boards, closed on Saturdays.
-const OFFICE_SATURDAY_CLOSED: [u16; 2] = [6127, 6129];
+/// The objects in the room and the symbols of the bar they stand for, as
+/// the game's table at 0x87fc38 pairs them (by its actions divided by
+/// 100); the jacket on the door ends the turn.  The grand office shares
+/// this table; a third office, dialog 484, shuffles some ids around.
+const OBJECTS: [(u16, usize); 18] = [
+    (6116, hub::LINEUP_SYMBOL),
+    (6117, hub::COMPARISON_SYMBOL),
+    (6124, hub::TACTICS_SYMBOL),
+    (6127, hub::LONG_TRAINING_SYMBOL),
+    (6128, hub::SHORT_TRAINING_SYMBOL),
+    (6129, hub::INDIVIDUAL_TRAINING_SYMBOL),
+    (6118, hub::YEAR_CALENDAR_SYMBOL),
+    (6123, hub::WEEK_PLANNER_SYMBOL),
+    (6126, hub::BALANCE_SYMBOL),
+    (6125, hub::FINANCES_SYMBOL),
+    (6120, hub::SQUAD_SYMBOL),
+    (5777, hub::STADIUM_SYMBOL),
+    (6130, hub::CONTACTS_SYMBOL),
+    (6122, hub::BOARD_SYMBOL),
+    // The fourteenth object, behind the table on the wall: the bar's
+    // fourteenth symbol, which leads nowhere built yet.
+    (6115, 14),
+    (6315, hub::NATIONAL_SYMBOL),
+    (6119, hub::HONOURS_SYMBOL),
+    // The remote control: the dressing room and the game's options.
+    (6121, hub::DRESSING_SYMBOL),
+];
 /// The crest on the office pennant, which the game draws itself, under an
 /// id of its own.
 const OFFICE_CREST_ID: u16 = 9910;
@@ -35,8 +57,6 @@ const OFFICE_PENNANT: u16 = 6130;
 const OFFICE_CREST: Vec2 = Vec2::new(11.0, 27.0);
 const GRAND_OFFICE_CREST: Vec2 = Vec2::new(9.0, 22.0);
 const CREST_SIZE: f32 = 32.0;
-/// What the game takes for Saturday.
-const SATURDAY: usize = 6;
 
 /// Texts by id.
 const DATE: u16 = 1997;
@@ -64,21 +84,44 @@ impl Screen for Office {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
-        if let Some(season) = &cx.state.season {
-            show_office(view, cx.dialog, cx.game, season);
-        }
-        // Only the door leads anywhere yet.
+        show_office(cx, view);
         let dialog = cx.dialog;
-        let works = |t: Target| matches!(t, Target::Button(b) if dialog.controls[b].id == Some(OFFICE_DOOR));
+        // The door always leads somewhere; an object does when its
+        // screen stands.
+        let works = |t: Target| {
+            let Target::Button(b) = t else { return false };
+            match dialog.controls[b].id.unwrap_or(0) {
+                OFFICE_DOOR => true,
+                id => OBJECTS
+                    .iter()
+                    .find(|&&(object, _)| object == id)
+                    .is_some_and(|&(_, symbol)| hub::bar_screen(symbol).is_some()),
+            }
+        };
         super::mark_inert(view, dialog, works);
     }
 
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
         let Target::Button(button) = target else { return Outcome::Stay };
-        if cx.dialog.controls[button].id == Some(OFFICE_DOOR) {
-            return super::hub::whistle(cx);
+        let id = cx.dialog.controls[button].id.unwrap_or(0);
+        if id == OFFICE_DOOR {
+            return hub::whistle(cx);
         }
-        Outcome::Stay
+        // An object leads to the same screen as its symbol on the bar,
+        // and stands or falls with it.
+        let Some(&(_, symbol)) = OBJECTS.iter().find(|&&(object, _)| object == id) else {
+            return Outcome::Stay;
+        };
+        if hub::bar_closed(cx, symbol) {
+            return Outcome::Stay;
+        }
+        match hub::bar_screen(symbol) {
+            Some(screen) => Outcome::Close(Reply::Goto(screen)),
+            None => {
+                info!("the object {id}: not built yet");
+                Outcome::Stay
+            }
+        }
     }
 
     /// Yes to ending the turn without training set.
@@ -92,7 +135,9 @@ impl Screen for Office {
 
 /// The office: who sits in it and when, the next match, and the objects a
 /// manager can use today.
-fn show_office(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
+fn show_office(cx: &Cx, view: &mut View) {
+    let (dialog, game) = (cx.dialog, cx.game);
+    let Some(season) = &cx.state.season else { return };
     let Some(manager) = season.manager() else { return };
     let date = season.date();
     let date = game
@@ -122,15 +167,14 @@ fn show_office(view: &mut View, dialog: &Dialog, game: &Game, season: &Season) {
         view.set_picture(crest, picture.map(Picture::file));
     }
 
-    let saturday = season.day % WEEK_DAYS == SATURDAY;
+    // An object stands or falls with its symbol on the bar.
     for button in indices(dialog, |k| matches!(k, Kind::Button { .. })) {
         let id = dialog.controls[button].id.unwrap_or(0);
-        let disabled = match id {
-            OFFICE_DOOR | OFFICE_REMOTE => false,
-            OFFICE_NATIONAL => manager.national_team.is_none(),
-            _ if manager.club.is_none() => true,
-            _ => saturday && OFFICE_SATURDAY_CLOSED.contains(&id),
-        };
+        let disabled = id != OFFICE_DOOR
+            && OBJECTS
+                .iter()
+                .find(|&&(object, _)| object == id)
+                .is_some_and(|&(_, symbol)| hub::bar_closed(cx, symbol));
         view.set_disabled(button, disabled);
     }
 }

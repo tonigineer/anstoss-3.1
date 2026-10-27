@@ -43,7 +43,7 @@ pub fn season(records: &Records, data: &Data, random: Random) -> Season {
                 negotiating: 0,
                 confidence: m.shown_confidence(),
                 offers: Vec::new(),
-                menu: 0,
+                menu: m.menu_view(),
                 list_view: m.list_view(),
                 formations: m.formations(),
                 templates: m

@@ -864,6 +864,12 @@ impl Manager {
         self.set_options(self.options() & !TRAINING_PICTURES | bit);
     }
 
+    /// The screen his turn starts on: 0 with the menu bar, 1 the office,
+    /// 2 the text menu, in bits 6 and 7 of his options (`FUN_006a5c3b`).
+    pub fn menu_view(&self) -> u8 {
+        (self.options() >> 6 & 3) as u8
+    }
+
     /// Whether his line-up shows as a list (`FUN_006a5ba7`).
     pub fn list_view(&self) -> bool {
         self.options() & LINE_UP_VIEW != 0
@@ -1671,6 +1677,15 @@ mod tests {
         team.set_formation(3);
         assert_eq!(team.bytes()[0x1f0 - HEADER], 3);
         assert!(Team::new(&bytes[1..]).is_err());
+    }
+
+    #[test]
+    fn the_options_name_the_screen_the_turn_starts_on() {
+        let mut manager = Manager::new(&vec![0; Manager::SIZE]).unwrap();
+        for (bits, view) in [(0, 0), (1, 1), (2, 2)] {
+            manager.set_options(0xb00 | bits << 6);
+            assert_eq!(manager.menu_view(), view);
+        }
     }
 
     #[test]
