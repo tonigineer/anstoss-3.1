@@ -51,7 +51,10 @@ pub mod dialogs {
     pub const OFFICE: u16 = 483;
     /// The national manager's office.  Its objects keep the club office's
     /// ids at other places and drop squad, money, trainings, nation and
-    /// honours; it is not reached by a manager's choice of start view.
+    /// honours.  SEASON.md: it is the national coach's office under the
+    /// same start-view bits as 483 and 504, as 502 is its text menu; the
+    /// club office's nation object 6315 (code 1600) answers only for
+    /// national coaches.
     pub const NATIONAL_OFFICE: u16 = 484;
     /// The grand office of the grandest clubs.
     pub const GRAND_OFFICE: u16 = 504;
