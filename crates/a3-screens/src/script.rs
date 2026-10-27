@@ -3438,6 +3438,40 @@ mod tests {
         assert_eq!(a3_core::transfers::listed_terms(state.records.as_ref().unwrap(), id), None);
     }
 
+    /// "Verleihen" on Probe1, as the original: Schmitt gets the loan's
+    /// conditions (292) at the fair prices — 340.000 € with an option of
+    /// 1.80 Mio €, 230.000 € without — and OK lists him with the option;
+    /// Ortag will not go.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_player_is_listed_for_a_loan() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 0\nuntil dialog 216\n\
+                    now choose 5657 2";
+        let ortag = format!("{open}\nnow row 3298 1\nuntil dialog 380");
+        let Some(runner) = on_save(&game, "Probe1", &ortag) else { return };
+        assert!(notice_text(&game, &runner).contains("nicht bereit, sich verleihen"));
+        drop(runner);
+        let schmitt = format!("{open}\nnow row 3298 0\nuntil dialog 292");
+        let Some(runner) = on_save(&game, "Probe1", &schmitt) else { return };
+        let dialog = &game.dialogs[&292];
+        let text = |id| runner.host.view().text(control(dialog, id).unwrap()).to_owned();
+        let shown = [text(3963), text(3967), text(3968)];
+        assert_eq!(shown, ["340.000 €", "1.80 Mio €", "230.000 €"]);
+        drop(runner);
+        let ok = format!("{schmitt}\nnow press 3969\nuntil dialog 216");
+        let Some(runner) = on_save(&game, "Probe1", &ok) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let season = state.season.as_ref().unwrap();
+        let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+        let list = control(&game.dialogs[&216], 3298).unwrap();
+        let id = club.status[runner.host.view().list(list).unwrap().keys[0]].id;
+        let listings = a3_core::transfers::listings(records);
+        let listing = listings.into_iter().find(|l| l.id == id).unwrap();
+        assert_eq!((listing.kind, listing.fee, listing.option), (3, 340_000, 1_800_000));
+    }
+
     /// Doping (dialog 394) on Probe1, as the original shows it: Ortag
     /// ready, Schmitt not; "Kondition steigern" doses Ortag at once — doped,
     /// his condition ten up, the dose on the medical bill — and a second

@@ -118,6 +118,8 @@ pub mod dialogs {
     /// A player under contract asked onto the transfer list: what he
     /// wants for it.
     pub const LISTING_DEMAND: u16 = 205;
+    /// A player's loan conditions, to put him on the list for a loan.
+    pub const LOAN_CONDITIONS: u16 = 292;
     /// Other clubs' youths to poach, and the pre-contract offered.
     pub const YOUTH_POACHING: u16 = 107;
     pub const PRE_CONTRACT: u16 = 325;

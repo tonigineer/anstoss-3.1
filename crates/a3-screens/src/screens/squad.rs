@@ -10,8 +10,8 @@ use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 use a3_core::cycle::dialogs::{
     AMATEUR_PLAYERS, APPOINTMENTS, CLUB_SEARCH, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT,
-    LISTING_DEMAND, MARKET_VALUES, NEXT_SQUAD, NO_DATE, NORACSA_REQUEST, NORACSA_SEARCH, RELATIONS,
-    TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
+    LISTING_DEMAND, LOAN_CONDITIONS, MARKET_VALUES, NEXT_SQUAD, NO_DATE, NORACSA_REQUEST,
+    NORACSA_SEARCH, RELATIONS, TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
 };
 use a3_core::records::Team;
 use a3_core::season::Rules;
@@ -321,6 +321,16 @@ const NOW_LISTED: u16 = 2513;
 /// it (L+0x98).
 const MOVES: usize = 0x161;
 const REGULAR_PLACE: u16 = a3_core::contract::REGULAR_PLACE;
+/// The loan's alerts (`FUN_00564703` steps 5–9) and its limits.
+const LIST_CLOSED: u16 = 3192;
+const CONTRACT_ENDING: u16 = 4179;
+const ALREADY_LISTED: u16 = 2216;
+const WONT_GO_ON_LOAN: u16 = 4180;
+const TOO_MANY_LOANS: u16 = 2358;
+const LOANS_MOST: usize = 5;
+const LUCKY: i16 = 6;
+/// R+0x255: the league matches he missed, as the loan reads them (L+0x56).
+const LEAGUE_LESS: usize = 0x255;
 /// 205's choices; R+0x1f0, the demand kept; his answers to being benched
 /// and what in his character (traits[0], traits[1]) leads to which.
 const AGREE: usize = 0;
@@ -377,7 +387,13 @@ impl Screen for CurrentSquad {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(MODE_BUTTONS) => {
                 matches!(
                     MODES.get(item),
-                    Some(Mode::Contract | Mode::TransferList | Mode::Bonus | Mode::Fine)
+                    Some(
+                        Mode::Contract
+                            | Mode::TransferList
+                            | Mode::Loan
+                            | Mode::Bonus
+                            | Mode::Fine
+                    )
                 )
             }
             _ => true,
@@ -509,6 +525,7 @@ fn act(cx: &mut Cx, mode: Mode, player: usize, pending: &mut Pending) -> Outcome
         Some(text) => notice(text),
         None if mode == Mode::Contract => contract_talk(cx, id, false, pending),
         None if mode == Mode::TransferList => listing(cx, id, pending),
+        None if mode == Mode::Loan => loan(cx, id, pending),
         None => {
             info!("{mode:?} ({id}): not built yet");
             Outcome::Stay
@@ -602,6 +619,57 @@ fn listing(cx: &mut Cx, id: u16, pending: &mut Pending) -> Outcome {
     }
     *pending = Pending::Refill;
     if list(cx, id, false) { notice(NOW_LISTED) } else { Outcome::Stay }
+}
+
+/// "Verleihen" past its first refusals (`FUN_00564703` steps 5–10): the
+/// list closed late in the season, a contract ending, already listed,
+/// unwilling, five out on loan already; else the loan's conditions (292).
+fn loan(cx: &Cx, id: u16, pending: &mut Pending) -> Outcome {
+    let notice = |args| Outcome::Popup(Request::with(NOTICE, args));
+    let (Some(records), Some(season)) = (cx.state.records.as_ref(), cx.state.season.as_ref())
+    else {
+        return Outcome::Stay;
+    };
+    let Some(r) = records.player(id) else { return Outcome::Stay };
+    if i32::try_from(season.day).unwrap_or(0) > LATE_DAY {
+        return notice(Args::Text(LIST_CLOSED));
+    }
+    if years_left(r, i32::from(records.globals.start_year())) <= 1 {
+        return notice(Args::Text(CONTRACT_ENDING));
+    }
+    if a3_core::transfers::listed_terms(records, id).is_some() {
+        return notice(Args::Text(ALREADY_LISTED));
+    }
+    if !lends_himself(cx, id) {
+        return notice(Args::TextFor(WONT_GO_ON_LOAN, id));
+    }
+    let out = agreed_lists(cx)[2].len()
+        + own_team(cx).map_or(0, |t| {
+            a3_core::transfers::loan_listings(records, (t.country(), i16::from(t.number())))
+        });
+    if out >= LOANS_MOST {
+        return notice(Args::TextForNumber(TOO_MANY_LOANS, LOANS_MOST as i32));
+    }
+    *pending = Pending::Refill;
+    Outcome::Popup(Request::with(LOAN_CONDITIONS, Args::Record(id)))
+}
+
+/// Whether he lets himself be loaned out (`FUN_00564ef4`): a move left,
+/// not played in most of the league's matchdays, under thirty and lucky.
+fn lends_himself(cx: &Cx, id: u16) -> bool {
+    let Some(records) = cx.state.records.as_ref() else { return false };
+    let Some(r) = records.player(id) else { return false };
+    if r.get::<u8>(MOVES) == 0 {
+        return false;
+    }
+    let played = own_team(cx).map_or(0, |t| a3_core::league::matchdays(records, t)) as i32;
+    let (matches, less) = (i32::from(r.league_matches()), i32::from(r.get::<u8>(LEAGUE_LESS)));
+    if played > 0 && (played / 2 < matches || played / 3 < matches && played / 6 < less) {
+        return false;
+    }
+    let today = cx.state.season.as_ref().map(|s| s.date());
+    let age = shown(cx, id).zip(today).map_or(0, |(s, d)| s.player.age(d));
+    age < 30 && records.luck.of(id) >= LUCKY
 }
 
 /// What 205's answer does (`FUN_00563f7b` step 7, [asm 0x5645de]):
@@ -1074,10 +1142,20 @@ const NEXT_CLUB_COUNTRY: usize = 0x14c;
 const INFO_ONLY: [hub::Command; 1] = [hub::Command::Info];
 
 pub(crate) fn compose_next(dialogs: &mut HashMap<u16, Dialog>) {
-    let ids = [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION, RELATIONS, NO_DATE, LISTING_DEMAND];
+    let ids = [
+        NEXT_SQUAD,
+        LOANED_OUT,
+        EXTENSIONS,
+        DRAW_OPTION,
+        RELATIONS,
+        NO_DATE,
+        LISTING_DEMAND,
+        LOAN_CONDITIONS,
+    ];
     for id in ids {
         if let Some(dialog) = dialogs.get_mut(&id) {
-            let kept = matches!(id, DRAW_OPTION | RELATIONS | NO_DATE | LISTING_DEMAND);
+            let kept =
+                matches!(id, DRAW_OPTION | RELATIONS | NO_DATE | LISTING_DEMAND | LOAN_CONDITIONS);
             let title = if kept { dialog.title.clone() } else { String::new() };
             dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
             if matches!(id, NEXT_SQUAD | EXTENSIONS) {
@@ -1724,6 +1802,130 @@ impl Screen for ListingDemand {
             }
             _ => Outcome::Stay,
         }
+    }
+}
+
+/// The loan's conditions (dialog 292, `CTransferlisteSetzenLeihe`): with
+/// an option to buy, the fee and the option's price; without one, the
+/// fee — each beside its fair price (`FUN_00622f7d`), set on a spinner
+/// from 85 to 115 per cent of it in the steps of `0x88be90`. OK lists him
+/// for the loan chosen (`FUN_0075b0da`).
+#[derive(Default)]
+pub struct LoanConditions {
+    player: u16,
+    without_option: bool,
+}
+
+const LOAN_TITLE: u16 = 3966;
+/// Each amount's fair text, shown amount and spinner: the fee with an
+/// option, the option, the fee without one.
+const LOAN_AMOUNTS: [(u16, u16, u16); 3] =
+    [(3962, 3963, 3971), (3964, 3967, 3972), (3965, 3968, 3973)];
+const WITH_OPTION: u16 = 3974;
+const WITHOUT_OPTION: u16 = 3975;
+const LOAN_OK: u16 = 3969;
+const LOAN_CANCEL: u16 = 3970;
+/// The spinners' steps in thousands: up to 50 by one, … beyond 10,000 by
+/// 200 (`0x88be90`).
+const LOAN_SCALE: [(i32, i32); 8] =
+    [(50, 1), (100, 2), (300, 5), (1000, 10), (3000, 20), (6000, 50), (10_000, 100), (-1, 200)];
+const THOUSAND: i32 = 1000;
+
+impl LoanConditions {
+    fn fair(cx: &Cx, id: u16) -> Option<[i32; 3]> {
+        let records = cx.state.records.as_ref()?;
+        let today = cx.state.season.as_ref()?.date();
+        let (player, _, status) = a3_core::load::any_player(records, &cx.game.data, id)?;
+        let r = records.player(id)?;
+        let worth = super::playerinfo::worth(&player, r, records.globals.stars(), today);
+        let years = status.contract.unwrap_or(0);
+        let p = cx.game.rules.value.loan_prices(&worth, years, today.month());
+        Some([p.with_option, p.option, p.fee])
+    }
+
+    fn amount(view: &View, dialog: &Dialog, spin: u16) -> i32 {
+        let position = control(dialog, spin).and_then(|c| view.value(c)).map_or(0, |v| v.value);
+        a3_core::discipline::amount(&LOAN_SCALE, position) * THOUSAND
+    }
+
+    fn show(&self, cx: &Cx, view: &mut View) {
+        let dialog = cx.dialog;
+        for (_, shown, spin) in LOAN_AMOUNTS {
+            let amount = Self::amount(view, dialog, spin);
+            set(view, dialog, shown, money(cx.game, i64::from(amount)));
+        }
+        let chosen = [(WITH_OPTION, !self.without_option), (WITHOUT_OPTION, self.without_option)];
+        for (id, on) in chosen {
+            if let Some(c) = control(dialog, id) {
+                view.set_chosen(c, if on { 0 } else { NONE });
+            }
+        }
+    }
+}
+
+impl Screen for LoanConditions {
+    fn ids(&self) -> &[u16] {
+        &[LOAN_CONDITIONS]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Args::Record(id) = args else { return };
+        (self.player, self.without_option) = (id, false);
+        let name = cx.state.records.as_ref().and_then(|r| r.known_as(id)).unwrap_or_default();
+        let text = |c: u16| control(dialog, c).map(|i| dialog.controls[i].text.clone());
+        let title = text(LOAN_TITLE).unwrap_or_default().replacen("%s", &name, 1);
+        set(view, dialog, LOAN_TITLE, title);
+        let fair = Self::fair(cx, id).unwrap_or_default();
+        let place = |v: i32| a3_core::discipline::position(&LOAN_SCALE, v / THOUSAND);
+        for ((fair_text, _, spin), fair) in LOAN_AMOUNTS.into_iter().zip(fair) {
+            let line = text(fair_text).unwrap_or_default();
+            set(view, dialog, fair_text, line.replacen("%s", &money(game, i64::from(fair)), 1));
+            if let Some(value) = control(dialog, spin).and_then(|c| view.value_mut(c)) {
+                let unit = (fair as u32 / 100) as i32;
+                value.range = (place(unit * 85), place(unit * 115));
+                value.value = place(fair);
+            }
+        }
+        self.show(cx, view);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        let id = |c: usize| dialog.controls[c].id;
+        match target {
+            Target::Spin { .. } => self.show(cx, view),
+            Target::Option { control: c, .. } if id(c) == Some(WITH_OPTION) => {
+                self.without_option = false;
+                self.show(cx, view);
+            }
+            Target::Option { control: c, .. } if id(c) == Some(WITHOUT_OPTION) => {
+                self.without_option = true;
+                self.show(cx, view);
+            }
+            Target::Button(b) if id(b) == Some(LOAN_CANCEL) => {
+                return Outcome::Close(Reply::Cancel);
+            }
+            Target::Button(b) if id(b) == Some(LOAN_OK) => {
+                let [with_fee, option, fee] =
+                    LOAN_AMOUNTS.map(|(_, _, spin)| Self::amount(view, dialog, spin));
+                if let Some(records) = cx.state.records.as_mut() {
+                    let (fee, option) =
+                        if self.without_option { (fee, 0) } else { (with_fee, option) };
+                    a3_core::transfers::list_for_loan(
+                        records,
+                        self.player,
+                        !self.without_option,
+                        fee,
+                        option,
+                    );
+                }
+                return Outcome::Close(Reply::Ok);
+            }
+            _ => {}
+        }
+        Outcome::Stay
     }
 }
 

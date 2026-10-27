@@ -480,3 +480,38 @@ pub fn list_for_sale(records: &mut Records, id: u16, free: bool) -> bool {
     }
     true
 }
+
+/// Him onto the transfer list for a loan (`FUN_0075b0da` →
+/// `FUN_00758b34`): kind 2 for a fee, 3 with an option to buy at
+/// `option`, terms 1; as `list_for_sale` otherwise. The entry's +0x18,
+/// which the original reckons against the fair prices and no screen
+/// built reads, stays 0.
+pub fn list_for_loan(
+    records: &mut Records,
+    id: u16,
+    with_option: bool,
+    fee: i32,
+    option: i32,
+) -> bool {
+    if !list_for_sale(records, id, false) {
+        return false;
+    }
+    let Some(b) = records.block_mut(&list_name()) else { return false };
+    let count = usize::try_from(word(b, 0)).unwrap_or(0);
+    let e = LIST_FIRST + (count - 1) * LIST_ENTRY;
+    b[e + 0xc] = if with_option { LOAN_WITH_OPTION } else { LOAN };
+    b[e + 0xd] = FOR_A_FEE;
+    b[e + 0x10..e + 0x14].copy_from_slice(&fee.to_le_bytes());
+    let option = if with_option { option } else { 0 };
+    b[e + 0x14..e + 0x18].copy_from_slice(&option.to_le_bytes());
+    true
+}
+
+/// A club's players listed for a loan (`FUN_0075ab13`).
+pub fn loan_listings(records: &Records, (country, number): Side) -> usize {
+    listings(records)
+        .iter()
+        .filter(|l| matches!(l.kind, LOAN | LOAN_WITH_OPTION))
+        .filter(|l| l.country == country && l.number as i16 == number)
+        .count()
+}

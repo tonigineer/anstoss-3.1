@@ -92,7 +92,7 @@ impl DisciplineTables {
 
 /// The amount at a slider's position on a scale of (limit, step) pairs
 /// (`FUN_005c69c9`).
-pub(crate) fn amount(scale: &[(i32, i32)], mut position: i32) -> i32 {
+pub fn amount(scale: &[(i32, i32)], mut position: i32) -> i32 {
     let mut below = 0;
     for &(limit, step) in scale {
         if limit == -1 {
@@ -109,7 +109,7 @@ pub(crate) fn amount(scale: &[(i32, i32)], mut position: i32) -> i32 {
 }
 
 /// The position of an amount on such a scale (`FUN_005c690b`).
-pub(crate) fn position(scale: &[(i32, i32)], amount: i32) -> i32 {
+pub fn position(scale: &[(i32, i32)], amount: i32) -> i32 {
     let (mut below, mut steps) = (0, 0);
     for &(limit, step) in scale {
         if limit == -1 || amount <= limit {
