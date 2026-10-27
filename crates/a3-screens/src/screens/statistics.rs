@@ -9,8 +9,10 @@
 //! Of the pages, the league tables of `FUN_00444ec6` are drawn: the
 //! current one, at home, away, of either half of the season, of either
 //! half of the games, with two points a win; the forecast of the
-//! champion (`FUN_00445ded`); and the rounds of the national cups
-//! (`FUN_004469c0`). The others are crossed out.
+//! champion (`FUN_00445ded`); the rounds of the national cups
+//! (`FUN_004469c0`); and the Europa League's round (`FUN_004483c7`) with
+//! the European Supercup's single pairing (`FUN_0044858a`). The others
+//! are crossed out.
 
 use std::collections::HashMap;
 
@@ -159,6 +161,22 @@ const CUP_COLUMNS: [(u16, u16); 10] = [
 const NO_CLUB: u16 = 0xfef;
 const EXTRA_TIME: u16 = 0x761;
 const PENALTIES: u16 = 0x762;
+/// The European cups' rows' columns (`FUN_006df48b` with 0x879478 and
+/// 0x8794a0): the two clubs with their countries' letters, the legs'
+/// scores, and the note. The Supercup's header carries text 0xa4e.
+const EUROPA_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (140, 0),
+    (145, 0),
+    (R | 290, 15),
+    (307, 0),
+    (310, 0),
+    (R | 330, 15),
+    (347, 0),
+    (350, 0),
+    (365, 0),
+];
+const SUPERCUP_HEADER: u16 = 0xa4e;
 /// The own club's rows red, the others black (COLORREF 0xff).
 const OWN_INK: [u8; 3] = [255, 0, 0];
 const INK: [u8; 3] = [0, 0, 0];
@@ -437,6 +455,12 @@ impl Statistics {
                     .map(|r| text(statistics::CUP_ROUND_NAMES[r as usize]))
                     .collect()
             }
+            // The Europa League: as many round names as are played, the
+            // counter at 0xb5d166 one below the round being played.
+            k if k == statistics::UEFA_STRIP => {
+                let n = statistics::uefa_round_count(records);
+                statistics::UEFA_ROUND_NAMES[..n].iter().map(|&r| text(r)).collect()
+            }
             _ => return,
         };
         let n = self.strip.len();
@@ -483,6 +507,10 @@ impl Statistics {
                 if self.category == TABLES && statistics::LEAGUE_CUP_PAGES.contains(&code) =>
             {
                 self.cup_page(cx, view, true)
+            }
+            Some(statistics::UEFA_PAGE) if self.category == TABLES => self.uefa_page(cx, view),
+            Some(statistics::SUPERCUP_PAGE) if self.category == TABLES => {
+                self.supercup_page(cx, view)
             }
             _ => false,
         };
@@ -642,6 +670,114 @@ impl Statistics {
         }
         true
     }
+
+    /// The Europa League (`FUN_004483c7`): the round the strip stands on,
+    /// drawn as the European row builder makes its pairs, under the cup's
+    /// own name and blank columns. The qualification keeps 41 pairs even
+    /// though round 1's start stands at the 50th.
+    fn uefa_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let pages = &game.rules.statistics.categories[self.category];
+        let Some(page) = self.page.and_then(|e| pages.get(e)) else { return false };
+        set_header(view, dialog, cup_title(records, page), &[(0, 0)]);
+        let pairings = statistics::uefa_pairings(records, self.chosen);
+        let own = own_team(cx).map(|t| t.country());
+        let rows = europa_rows(game, records, own, &pairings);
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table =
+                TableState {
+                    columns: EUROPA_COLUMNS.to_vec(),
+                    rows,
+                    width: ROW_WIDTH,
+                    centred: -1,
+                    scroll: self.scrolled,
+                };
+        }
+        true
+    }
+
+    /// The European Supercup (`FUN_0044858a`): the two cups' winners as
+    /// one row, centred under the header's text 0xa4e — the pair often
+    /// still unplayed when the season has barely begun.
+    fn supercup_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        set_header(view, dialog, game.text(SUPERCUP_HEADER).to_owned(), &[(0, 0)]);
+        let own = own_team(cx).map(|t| t.country());
+        let rows = statistics::supercup_pairing(records)
+            .map(|p| europa_rows(game, records, own, &[p]))
+            .unwrap_or_default();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table =
+                TableState {
+                    columns: EUROPA_COLUMNS.to_vec(),
+                    rows,
+                    width: ROW_WIDTH,
+                    centred: 1,
+                    scroll: self.scrolled,
+                };
+        }
+        true
+    }
+}
+
+/// The name a cup page's entry carries: "Champions League" or the
+/// "UEFA Cup" (the Countries block's two, 65537 and 65538).
+fn cup_title(records: &Records, page: &Page) -> String {
+    let names = records.countries.cup_names();
+    names[if page.name & 0xf == 1 { 0 } else { 1 }].clone()
+}
+
+/// The pairs as the European row builder `FUN_00448aca` draws them: both
+/// clubs with their country's three letters (the table at `0xae5768`),
+/// the legs' scores where they were played, and the note as on the cup
+/// pages. Red stands on every pair whose home or away club plays in the
+/// own club's country — not only on the own club's own pair.
+fn europa_rows(
+    game: &Game,
+    records: &Records,
+    own: Option<u8>,
+    pairings: &[statistics::CupPairing],
+) -> Vec<TableRow> {
+    pairings
+        .iter()
+        .map(|p| {
+            let side = |country: u8, team: i16| {
+                let name = if country == 0 {
+                    game.text(NO_CLUB).to_owned()
+                } else {
+                    game.club_name(Some(records), country, team)
+                };
+                let letters =
+                    game.world.nation_codes.get(usize::from(country)).cloned().unwrap_or_default();
+                format!("{name} ({letters})")
+            };
+            let leg = |leg: Option<(u8, u8)>, empty: &str| {
+                leg.map_or_else(|| empty.to_owned(), |(a, b)| format!("\t{a}\t:\t{b}"))
+            };
+            let note = if p.penalties {
+                game.text(PENALTIES)
+            } else if p.extra_time {
+                game.text(EXTRA_TIME)
+            } else {
+                " "
+            };
+            let text = format!(
+                "{}\t-\t{}{}{}\t{note}",
+                side(p.home_country, p.home),
+                side(p.away_country, p.away),
+                leg(p.first, "\t\t\t"),
+                leg(p.second, "")
+            );
+            let ink = if own == Some(p.home_country) || own == Some(p.away_country) {
+                OWN_INK
+            } else {
+                INK
+            };
+            TableRow { text, ink, mark: None }
+        })
+        .collect()
 }
 
 impl Statistics {

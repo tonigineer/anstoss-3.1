@@ -4671,4 +4671,41 @@ mod tests {
             "FC Dagenham & Redb.\t-\tAFC Bradford\t\t\t\t "
         );
     }
+
+    /// The archive's European pages on A.an3 (bar symbol 15): the Europa
+    /// League's strip with its one played round, its qualification's 41
+    /// first legs under the cup's own name; and the European Supercup's
+    /// single unplayed pairing, Paris against Tottenham, centred.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_statistics_show_the_european_cups() {
+        let game = game();
+        let open = "now click bar 14\nuntil dialog 18";
+        let el = format!("{open}\nnow row 1284 16");
+        let Some(runner) = on_save(&game, "A", &el) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&18];
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Europa League");
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Qualifikation");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 41);
+        assert_eq!(
+            table.rows[0].text,
+            "Caernarfon Town (WAL)\t-\tBohemian FC Dublin (IRL)\t0\t:\t1\t "
+        );
+        assert_eq!(
+            table.rows[40].text,
+            "FK Radnik Bijeljina (BIH)\t-\tBreidablik Kópavog. (ISL)\t2\t:\t1\t "
+        );
+        let sc = format!("{open}\nnow row 1284 17");
+        let Some(runner) = on_save(&game, "A", &sc) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Europäischer Supercup");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 1);
+        assert_eq!(
+            table.rows[0].text,
+            "Paris Saint-Germain (FRA)\t-\tTottenham Hotspur (ENG)\t\t\t\t "
+        );
+    }
 }

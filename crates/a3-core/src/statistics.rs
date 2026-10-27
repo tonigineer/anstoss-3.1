@@ -554,15 +554,85 @@ fn pairings(cup: Option<&[u8]>, round: i16) -> Vec<CupPairing> {
     };
     (start..start + count)
         .filter_map(|q| cup.get(PAIRINGS + q * PAIRING..PAIRINGS + (q + 1) * PAIRING))
-        .map(|p| CupPairing {
-            home_country: p[0],
-            home: i16::from_le_bytes([p[2], p[3]]),
-            away_country: p[4],
-            away: i16::from_le_bytes([p[6], p[7]]),
-            first: (p[0xc] & 0x20 != 0).then_some((p[8], p[9])),
-            second: (p[0xc] & 0x10 != 0).then_some((p[0xa], p[0xb])),
-            penalties: p[0xc] & 0x40 != 0,
-            extra_time: p[0xc] & 0x80 != 0,
-        })
+        .map(pairing)
         .collect()
+}
+
+/// One pairing's 0xe bytes: the two clubs by country and number, the
+/// legs' goals where they were played, and how it was decided.
+fn pairing(p: &[u8]) -> CupPairing {
+    CupPairing {
+        home_country: p[0],
+        home: i16::from_le_bytes([p[2], p[3]]),
+        away_country: p[4],
+        away: i16::from_le_bytes([p[6], p[7]]),
+        first: (p[0xc] & 0x20 != 0).then_some((p[8], p[9])),
+        second: (p[0xc] & 0x10 != 0).then_some((p[0xa], p[0xb])),
+        penalties: p[0xc] & 0x40 != 0,
+        extra_time: p[0xc] & 0x80 != 0,
+    }
+}
+
+/// The Europa League's page (`FUN_004483c7`) and the European Supercup's
+/// (`FUN_0044858a`), and the EL's kind of strip (`FUN_004599d8`'s case 8;
+/// the Supercup asks for kind 2, none).
+pub const UEFA_PAGE: i16 = 0xf;
+pub const SUPERCUP_PAGE: i16 = 0x10;
+pub const UEFA_STRIP: i16 = 8;
+
+/// The EL rounds' names as the strip shows them (the table at
+/// `0x87ca80`; `0x87ca60` beside it counts the rounds played, one more
+/// than the round counter).
+pub const UEFA_ROUND_NAMES: [u16; 8] = [2118, 2119, 2120, 4287, 2121, 2122, 2123, 2124];
+
+/// Where the EL keeps its rounds' starts and its pairings (the object at
+/// `0x8e8940`, the data of `0x8e8960` and `0x8e8980`), and where the
+/// Supercup keeps its one pairing (`0x8e83a2`).
+const UEFA_AT: &str = "0x8e8940";
+const UEFA_PAIRINGS: usize = 0x20;
+const SUPERCUP_AT: &str = "0x8e7c88";
+const SUPERCUP_PAIRING: usize = 0x6fa;
+
+/// How many names the EL's strip has: as many rounds as are played, one
+/// more than the counter.
+pub fn uefa_round_count(records: &Records) -> usize {
+    usize::try_from(records.globals.uefa_round()).unwrap_or(0).min(7) + 1
+}
+
+/// The pairings the EL page shows for a strip entry (`FUN_004483c7`):
+/// `FUN_00448aca` rows of the round between the starts saved in the
+/// object at `0x8e8940`. The qualification shows the 41 pairs before
+/// round 1's start — 44 once the season runs past its first — and the
+/// last round its one pairing.
+pub fn uefa_pairings(records: &Records, entry: usize) -> Vec<CupPairing> {
+    let Some(uefa) = records.block(UEFA_AT) else { return Vec::new() };
+    let start = |i: usize| {
+        usize::try_from(
+            uefa.get(4 * i..4 * i + 4)
+                .map_or(0, |b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+        )
+        .unwrap_or(0)
+    };
+    let count = match entry {
+        0 => {
+            if records.globals.seasons() > 1 {
+                44
+            } else {
+                41
+            }
+        }
+        7 => 1,
+        i => start(i + 1).saturating_sub(start(i)),
+    };
+    (start(entry)..start(entry) + count)
+        .filter_map(|q| uefa.get(UEFA_PAIRINGS + q * PAIRING..UEFA_PAIRINGS + (q + 1) * PAIRING))
+        .map(pairing)
+        .collect()
+}
+
+/// The European Supercup's one pairing (`0x8e83a2`): the two cups'
+/// winners, met at the season's start.
+pub fn supercup_pairing(records: &Records) -> Option<CupPairing> {
+    let at = SUPERCUP_PAIRING;
+    records.block(SUPERCUP_AT)?.get(at..at + PAIRING).map(pairing)
 }
