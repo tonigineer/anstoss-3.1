@@ -3894,6 +3894,13 @@ mod tests {
         let mut game = Game::load(&noted).unwrap();
         compose(&mut game);
         let load = LOAD.replace("until dialog 147", "until dialog 397");
+        {
+            let (runner, result) = Runner::play(&game, &Script::parse(&load).unwrap());
+            result.unwrap_or_else(|err| panic!("text: {err}\n{}", runner.log.join("\n")));
+            let view = runner.host.view();
+            let edit = crate::screens::control(&game.dialogs[&397], 5414).unwrap();
+            assert_eq!(view.text(edit), "Abstieg knapp", "the page opened bare");
+        }
         let script = format!("{load}now press 1\nuntil dialog 483");
         let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
         result.unwrap_or_else(|err| panic!("noted: {err}\n{}", runner.log.join("\n")));
