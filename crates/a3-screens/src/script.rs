@@ -1930,6 +1930,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(runner.host.view().id, 15);
+        // With a standing of fifteen a next-season candidate at last
+        // welcomes him: dialog 14, then the week planner, and the talk's
+        // day stands booked (`FUN_006a8d67`) — asking there again only
+        // brings up the running talks.
+        let root = patched(&dir, "Probe1", "enquiry-warm", |records| {
+            let index = records.human_slot(0).unwrap();
+            records.managers[index].put(0x178, 42u8);
+            records.managers[index].put(0x23, 15u8);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let runner = on_save(
+            &game,
+            "enquiry-warm",
+            &format!(
+                "{ask}\nnow row 1261 0\nuntil dialog 14\nnow press 1\nuntil dialog 412\n\
+                 now choose 5034 6\nuntil dialog 15\nnow row 1261 0\nuntil dialog 380"
+            ),
+        )
+        .unwrap();
+        assert_eq!(runner.host.view().id, 380);
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let slot = records.human_slot(0).unwrap();
+        let day = (records.globals.week_start() + 6) as usize;
+        let booked = records.planners.get(slot).unwrap().day(day);
+        assert_eq!((booked.kind, booked.player), (0x14, records.globals.main_country() as u16));
     }
 
     #[test]

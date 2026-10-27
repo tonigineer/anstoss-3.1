@@ -1245,8 +1245,8 @@ fn write_article(cx: &mut Cx) -> u16 {
 /// The enquiry at another club (dialog 15 `CAnfrageVereinsauswahl`,
 /// KONTAKTE.md §8.2): the leagues with clubs looking for a manager, the
 /// candidates for next season and the clubs that would take one at once.
-/// A click on a club sends the enquiry there; its appointment booking and
-/// the run of form it weighs are not built.
+/// A click on a club sends the enquiry there; the run of form it weighs
+/// is not built.
 #[derive(Default)]
 pub struct Enquiry {
     /// The combo's leagues, by country and league there.
@@ -1254,6 +1254,9 @@ pub struct Enquiry {
     /// The chosen combo row and the club numbers its two lists show.
     chosen: usize,
     clubs: [Vec<u16>; 2],
+    /// The club that answered warmly: when its dialog 14 closes, the week
+    /// planner opens to fix the talk's day (`0x442560` then `0x58502a`).
+    welcomed: Option<(u8, i16)>,
 }
 
 const ENQUIRY_DIALOG: u16 = 15;
@@ -1332,7 +1335,7 @@ impl Screen for Enquiry {
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         let (game, dialog) = (cx.game, cx.dialog);
         self.leagues.clear();
-        (self.chosen, self.clubs) = (0, Default::default());
+        (self.chosen, self.clubs, self.welcomed) = (0, Default::default(), None);
         let Some(records) = cx.state.records.as_ref() else { return };
         let main = records.globals.main_country().max(0) as u16;
         let has = |country: u16, league: usize| {
@@ -1397,6 +1400,22 @@ impl Screen for Enquiry {
                 }
             }
             _ => Outcome::Stay,
+        }
+    }
+
+    /// Closing the warm answer sends the week planner to that club; its
+    /// day then goes into the talks' shared list (`FUN_006a8d67`).
+    fn answer(&mut self, _: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+        if reply != Reply::Ok {
+            self.welcomed = None;
+            return Outcome::Stay;
+        }
+        match self.welcomed.take() {
+            Some((country, number)) => {
+                let args = Args::WithClub(country, number);
+                Outcome::Popup(Request::with(super::planner::PLANNER, args))
+            }
+            None => Outcome::Stay,
         }
     }
 }
@@ -1485,8 +1504,9 @@ impl Enquiry {
         } else if i32::from(luck) >= p {
             ANSWER_FRIENDLY
         } else {
-            // Keen — but the appointment dialog 14 follows and books the
-            // talks (412, kind 0x14), and that booking is not built.
+            // Keen: the talk it asks for gets booked in the week
+            // planner (412, kind 0x14, `FUN_006a8d67`).
+            self.welcomed = Some(club);
             ANSWER_WELCOME
         };
         Outcome::Popup(Request::new(answer))

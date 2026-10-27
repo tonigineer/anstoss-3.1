@@ -23,7 +23,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use a3_files::rch::Kind;
-use bevy_math::Vec2;
+use bevy_math::{Rect, Vec2};
 
 use crate::controls::menu;
 use crate::game::Game;
@@ -310,6 +310,17 @@ impl<'a> Original<'a> {
                     }
                     Target::Cell { control, row, column } => {
                         crate::controls::list::cell_rect(&dialog.controls[control], row, column)
+                    }
+                    // An option of a `HighButton` group: its rect stands
+                    // inside the control's, as the classic renderer draws it.
+                    Target::Row { control, row } | Target::Option { control, item: row } => {
+                        let c = &dialog.controls[control];
+                        let Kind::Options { items, .. } = &c.kind else { return None };
+                        let it = items.get(row)?;
+                        Some(Rect::from_corners(
+                            c.rect.min + it.rect.min,
+                            (c.rect.min + it.rect.max).min(c.rect.max),
+                        ))
                     }
                     _ => None,
                 })
