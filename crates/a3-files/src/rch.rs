@@ -158,6 +158,8 @@ pub enum Kind {
     },
     /// A strip the screen paints bars into, the game's `CMyPaint`.
     Paint,
+    /// A table the screen fills row by row, the game's `CScrBalkWnd`.
+    Table,
     /// A slider, the game's `CMySchieber` (its kind 12): standing ones
     /// (second word 0) run their handle up and down, lying ones (word 1)
     /// from side to side; the picture of the handle.

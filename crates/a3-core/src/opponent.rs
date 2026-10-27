@@ -161,6 +161,12 @@ const RESULTS: usize = 0xe1a;
 const RESULT_ROW: usize = 0x60;
 /// A result not played yet.
 const UNPLAYED: u8 = 0xff;
+/// The table's boxes by place (G+0x1a08).
+const MARKS: usize = 0x1a08;
+/// The places held, matchday by matchday: L+0xd0, which is this far into
+/// the saved block, a row of 0x2e bytes for each team.
+const PLACES: usize = 0xd0 - 0x20;
+const PLACES_ROW: usize = 0x2e;
 
 impl<'a> League<'a> {
     pub fn of(records: &'a Records, country: u16, level: u8) -> Option<Self> {
@@ -189,6 +195,73 @@ impl<'a> League<'a> {
 
     pub fn teams(&self) -> usize {
         usize::try_from(self.i16_at(0)).unwrap_or(0)
+    }
+
+    /// Its matchdays in all (G+2).
+    pub fn matchdays(&self) -> usize {
+        self.rows()
+    }
+
+    /// Its country (G+4).
+    pub fn country(&self) -> u16 {
+        self.i16_at(4) as u16
+    }
+
+    /// The points a win brings at home and away (G+8, G+0xa).
+    pub fn win_points(&self) -> (i32, i32) {
+        (i32::from(self.i16_at(8)), i32::from(self.i16_at(0xa)))
+    }
+
+    /// Its rules' flags (G+0xc): 0x80 a point more for three goals or more
+    /// (`FUN_00691b5f`).
+    pub fn flags(&self) -> u32 {
+        let at = LEAGUE_FIELDS + 0xc;
+        self.data.get(at..at + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    /// How equal points are parted (G+0x14): 1 by the goals scored first,
+    /// else by the goal difference.
+    pub fn tie_break(&self) -> i16 {
+        self.i16_at(0x14)
+    }
+
+    /// The coloured box of each place of the table, by a code from 1
+    /// (G+0x1a08, written as the league is set up, `FUN_00691ba8`).
+    pub fn marks(&self) -> [i16; 24] {
+        std::array::from_fn(|i| self.i16_at(MARKS + 2 * i))
+    }
+
+    /// The place the team at `place` in the league held a matchday before
+    /// the last one played, 0 none (`FUN_00690fba`: the league's +0xd0, a
+    /// row of 0x2e bytes for each team, by matchdays played).
+    pub fn place_before(&self, place: usize) -> u8 {
+        let played = self.played();
+        if played <= 1 || played > self.rows() {
+            return 0;
+        }
+        self.data.get(PLACES + place * PLACES_ROW + played).copied().unwrap_or(0)
+    }
+
+    /// The pairs of a matchday from 0, by places, with their results as
+    /// played — the goals at the end and at half time — or none.
+    pub fn games(&self, matchday: usize) -> Vec<(usize, usize, Option<[u8; 4]>)> {
+        let n = self.teams();
+        let (mut row, mut offset) = (matchday, 0);
+        if self.four_rounds() && n >= 1 && row >= 2 * n - 2 {
+            row -= 2 * n - 2;
+            offset = n;
+        }
+        if row >= self.rows() {
+            return Vec::new();
+        }
+        self.pairs(row)
+            .into_iter()
+            .map(|(home, away)| {
+                let at = RESULTS + home * RESULT_ROW + (away + offset) * 4;
+                let result: [u8; 4] = std::array::from_fn(|k| self.byte(at + k));
+                (home, away, (result[0] != UNPLAYED).then_some(result))
+            })
+            .collect()
     }
 
     fn rows(&self) -> usize {

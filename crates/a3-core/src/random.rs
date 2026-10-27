@@ -17,6 +17,11 @@ impl Random {
         Self { s1, s2 }
     }
 
+    /// A generator whose state the game sets itself, both halves.
+    pub fn from_state(s1: i64, s2: i64) -> Self {
+        Self { s1, s2 }
+    }
+
     /// Original: FUN_0078a8f4, on the state at `DAT_0089dcc0`/`DAT_0089dcc4`.
     fn next(&mut self) -> i64 {
         self.s1 = 40_014 * self.s1 % M1;

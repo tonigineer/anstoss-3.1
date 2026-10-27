@@ -37,6 +37,9 @@ pub(crate) fn draw(frame: &mut RgbaImage, paint: &Paint) {
 pub struct Value {
     pub value: i32,
     pub range: (i32, i32),
+    /// A slider's handle as long as the screen sets it (`FUN_007ae43e`),
+    /// where it is not the usual twenty pixels.
+    pub handle: Option<i32>,
 }
 
 impl Value {

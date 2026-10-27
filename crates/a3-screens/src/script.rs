@@ -4572,4 +4572,37 @@ mod tests {
         let runner = announced(&game, "league-ahead", 358, "now press 1\nuntil dialog 147");
         assert_eq!(runner.host.view().id, 147);
     }
+
+    /// The statistics archive on A.an3 (bar symbol 14), as the original
+    /// shows it: eight categories, the tables' eighteen pages, the
+    /// Bundesliga's table with its boxes and letters, the own club red;
+    /// the 2. Bundesliga's champion forecast one step along the strip.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_statistics_show_the_league_tables() {
+        let game = game();
+        let open = "now click bar 14\nuntil dialog 18";
+        let Some(runner) = on_save(&game, "A", open) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&18];
+        let combo = view.combo(control(dialog, 1283).unwrap()).unwrap();
+        assert_eq!(combo.items.len(), 8);
+        let pages = &view.list(control(dialog, 1284).unwrap()).unwrap().rows;
+        assert_eq!(pages.len(), 18);
+        let named = (pages[0].as_str(), pages[8].as_str());
+        assert_eq!(named, ("Aktuelle Tabellen", "Pokal Deutschland"));
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let row = |i: usize| (table.rows[i].text.clone(), table.rows[i].ink, table.rows[i].mark);
+        let first = "1.\t(2.)\tVfB Stuttgart (E,P)\t3\t3\t0\t0\t9\t3\t4\t:\t1";
+        assert_eq!(row(0), (first.to_owned(), [0; 3], Some([255, 255, 0])));
+        let own = "11.\t(6.)\t1.FC Union Berlin\t3\t1\t0\t2\t3\t0\t4\t:\t4";
+        assert_eq!(row(10), (own.to_owned(), [255, 0, 0], None));
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "1. Bundesliga");
+        let forecast = format!("{open}\nnow click at 545 436\nnow row 1284 6");
+        let Some(runner) = on_save(&game, "A", &forecast) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tFortuna Düsseldorf\t24\t7\t3\t79\t46\t61\t:\t15");
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "2. Bundesliga");
+    }
 }

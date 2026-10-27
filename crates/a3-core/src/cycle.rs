@@ -107,6 +107,8 @@ pub mod dialogs {
     pub const CONTACTS: u16 = 404;
     /// The board ("Vereinsführung", bar symbol 13).
     pub const BOARD: u16 = 439;
+    /// The statistics archive ("Statistiken", bar symbol 14).
+    pub const STATISTICS: u16 = 18;
     /// The manager's own page ("Persönliche Erfolge", bar symbol 16).
     pub const HONOURS: u16 = 175;
     pub const CURRENT_SQUAD: u16 = 216;

@@ -38,6 +38,7 @@ pub mod special;
 pub mod squad;
 pub mod stadium;
 pub mod start;
+pub mod statistics;
 pub mod tactics;
 pub mod talk;
 pub mod training;
@@ -194,6 +195,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(grounds::GroundsScreen::default()),
         Box::new(contacts::Contacts::default()),
         Box::new(board::Board::default()),
+        Box::new(statistics::Statistics::default()),
         Box::new(honours::Honours::default()),
         Box::new(honours::abilities::Abilities),
         Box::new(honours::pay::Pay),
@@ -296,6 +298,7 @@ pub fn compose(game: &mut Game) {
     grounds::compose(&mut game.dialogs);
     contacts::compose(&mut game.dialogs, &game.data.rules);
     board::compose(&mut game.dialogs, &game.data.rules);
+    statistics::compose(&mut game.dialogs, &game.data.rules);
     honours::compose(&mut game.dialogs, &game.data.rules);
     honours::pay::compose(&mut game.dialogs);
     honours::season_records::compose(&mut game.dialogs);

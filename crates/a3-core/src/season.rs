@@ -127,6 +127,8 @@ pub struct Rules {
     pub messages: std::collections::HashMap<u32, String>,
     /// The leagues: the goal class a place reaches.
     pub league: crate::league::LeagueTables,
+    /// The statistics archive's pages.
+    pub statistics: crate::statistics::Pages,
     /// NORACSA's search: its combos' choices.
     pub noracsa: crate::noracsa::NoracsaTables,
     /// The dream stadiums.
@@ -173,6 +175,7 @@ impl Rules {
             forecast: crate::forecast::ForecastTables::load(exe)?,
             contract: crate::contract::ContractTables::load(exe)?,
             league: crate::league::LeagueTables::load(exe)?,
+            statistics: crate::statistics::Pages::load(exe)?,
             noracsa: crate::noracsa::NoracsaTables::load(exe)?,
             stadium: crate::stadium::StadiumTables::load(exe)?,
             messages: crate::youth::MESSAGES

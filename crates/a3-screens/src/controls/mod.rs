@@ -19,6 +19,7 @@ pub mod paint;
 pub mod player_box;
 pub mod slider;
 pub mod spin;
+pub mod table;
 pub mod text;
 
 use bevy_math::Rect;
@@ -42,6 +43,7 @@ use self::marker::Marker;
 use self::menu::MenuState;
 use self::options::OptionsState;
 use self::paint::PaintState;
+use self::table::TableState;
 use self::player_box::PlayerBox;
 use self::spin::Value;
 use self::text::StaticState;
@@ -77,6 +79,7 @@ pub enum ControlState {
     Menu(MenuState),
     Bar(BarState),
     Paint(PaintState),
+    Table(TableState),
     Other,
 }
 
@@ -138,6 +141,7 @@ impl ControlView {
             Kind::Menu => ControlState::Menu(MenuState::default()),
             Kind::Bar { .. } => ControlState::Bar(BarState::default()),
             Kind::Paint => ControlState::Paint(PaintState::default()),
+            Kind::Table => ControlState::Table(TableState::default()),
             Kind::Other => ControlState::Other,
         };
         Self { hidden: false, state }
@@ -178,6 +182,7 @@ kinds! {
     as_bar, as_bar_mut, Bar, BarState;
     as_check, as_check_mut, Check, CheckState;
     as_paint, as_paint_mut, Paint, PaintState;
+    as_table, as_table_mut, Table, TableState;
     as_combo, as_combo_mut, Combo, ComboState;
 }
 
@@ -262,6 +267,7 @@ impl ControlState {
             Self::Menu(m) => m.draw(frame, paint),
             Self::Bar(b) => b.draw(frame, paint),
             Self::Paint(p) => p.draw(frame, paint),
+            Self::Table(t) => t.draw(frame, paint),
             Self::Combo(c) => c.draw(frame, paint),
             Self::Player(None) | Self::Marker(None) | Self::Other => {}
         }
@@ -298,6 +304,9 @@ impl ControlState {
             Self::Combo(c) => c.targets(index, control, geometry, out),
             Self::Menu(m) => m.targets(index, control, geometry, out),
             Self::Player(Some(player)) => player.targets(index, control, geometry, out),
+            // A table answers as a whole, to be crossed out while its page
+            // is not built.
+            Self::Table(_) => out.push((Target::Control(index), geometry.rect(control))),
             // The markers have no handler: a click on one does nothing.
             Self::Header(_)
             | Self::Bitmap(_)

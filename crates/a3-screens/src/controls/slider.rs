@@ -44,7 +44,8 @@ const RIGHT_END: u32 = 0x1ba;
 pub fn handle(control: &Control, value: &Value) -> Rect {
     let r = control.rect;
     let (min, max) = value.range;
-    let track = (r.width() - 2.0 * SLIDER_ARROW - SLIDER_HANDLE) as i64;
+    let length = handle_length(value);
+    let track = (r.width() - 2.0 * SLIDER_ARROW - length) as i64;
     let along = if max > min {
         // A C division: a track shorter than nothing (the calculations'
         // arrow bar, -1 px) leaves the handle at its start.
@@ -53,13 +54,27 @@ pub fn handle(control: &Control, value: &Value) -> Rect {
         0
     };
     let left = r.min.x + SLIDER_ARROW + along as f32;
-    Rect::new(left, r.min.y, left + SLIDER_HANDLE, r.max.y)
+    Rect::new(left, r.min.y, left + length, r.max.y)
+}
+
+/// How long the handle is.
+fn handle_length(value: &Value) -> f32 {
+    value.handle.map_or(SLIDER_HANDLE, |l| l as f32)
+}
+
+/// A handle as long as the track is to `count` steps, at least eight
+/// pixels; the whole track for fewer than two (`FUN_007ae43e`,
+/// `FUN_0045ad88`).
+pub fn handle_for(control: &Control, count: i32) -> i32 {
+    const LEAST: i32 = 8;
+    let track = (control.rect.width() - 2.0 * SLIDER_ARROW) as i32;
+    if count < 2 { track } else { (track / count).max(LEAST) }
 }
 
 /// The value of a handle at `left`, rounded down as the game reckons it.
 pub fn value_at(control: &Control, value: &Value, left: f32) -> i32 {
     let (min, max) = value.range;
-    let track = ((control.rect.width() - 2.0 * SLIDER_ARROW - SLIDER_HANDLE) as i64).max(1);
+    let track = ((control.rect.width() - 2.0 * SLIDER_ARROW - handle_length(value)) as i64).max(1);
     let along = (left - control.rect.min.x - SLIDER_ARROW) as i64;
     let value = i64::from(min) + (i64::from(max - min) * along).div_euclid(track);
     (value as i32).clamp(min, max.max(min))
@@ -92,13 +107,14 @@ pub(crate) fn draw(value: &Value, frame: &mut RgbaImage, paint: &Paint) {
     }
     let name = HANDLES[usize::from(style).min(HANDLES.len() - 1)];
     if let Some(bar) = paint.widget(name) {
-        paste(frame, &cut(bar), handle(paint.control, value).min);
+        let at = handle(paint.control, value);
+        paste(frame, &cut(bar, at.width() as u32), at.min);
     }
 }
 
 /// A handle cut from its long bar.
-fn cut(bar: &RgbaImage) -> RgbaImage {
-    let (width, height) = (SLIDER_HANDLE as u32, bar.height());
+fn cut(bar: &RgbaImage, width: u32) -> RgbaImage {
+    let height = bar.height();
     let mut handle = RgbaImage::new(width, height);
     let part = |x: u32, w: u32| imageops::crop_imm(bar, x, 0, w, height).to_image();
     imageops::replace(&mut handle, &part(0, width - END), 0, 0);

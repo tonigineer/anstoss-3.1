@@ -14,6 +14,7 @@ use crate::controls::header::HeaderState;
 use crate::controls::list::{ListState, WHEEL_ROWS, visible_rows};
 use crate::controls::options::OptionsState;
 use crate::controls::paint::PaintState;
+use crate::controls::table::TableState;
 use crate::controls::player_box::PlayerBox;
 use crate::controls::spin::Value;
 use crate::controls::text::StaticState;
@@ -145,6 +146,7 @@ impl View {
         value, value_mut, as_value, as_value_mut, Value;
         check, check_mut, as_check, as_check_mut, CheckState;
         paint, paint_mut, as_paint, as_paint_mut, PaintState;
+        table, table_mut, as_table, as_table_mut, TableState;
         combo, combo_mut, as_combo, as_combo_mut, ComboState;
         bitmap, bitmap_mut, as_bitmap, as_bitmap_mut, BitmapState;
         static_text, static_mut, as_static, as_static_mut, StaticState;

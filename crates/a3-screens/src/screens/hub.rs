@@ -63,6 +63,7 @@ pub(crate) const SQUAD_SYMBOL: usize = 10;
 pub(crate) const STADIUM_SYMBOL: usize = 11;
 pub(crate) const CONTACTS_SYMBOL: usize = 12;
 pub(crate) const BOARD_SYMBOL: usize = 13;
+pub(crate) const STATISTICS_SYMBOL: usize = 14;
 pub(crate) const HONOURS_SYMBOL: usize = 16;
 const SATURDAY_CLOSED: [usize; 2] = [3, 5];
 /// What the turn before a match closes: the money, the club, the national
@@ -72,7 +73,7 @@ pub(crate) const NATIONAL_SYMBOL: usize = 15;
 pub(crate) const DRESSING_SYMBOL: usize = 17;
 pub const WHISTLE: usize = 18;
 /// The screens the bar's symbols lead to, as far as they are built.
-const BAR_SCREENS: [(usize, u16); 16] = [
+const BAR_SCREENS: [(usize, u16); 17] = [
     (LINEUP_SYMBOL, LINEUP),
     (COMPARISON_SYMBOL, COMPARISON),
     (TACTICS_SYMBOL, TACTICS),
@@ -87,6 +88,7 @@ const BAR_SCREENS: [(usize, u16); 16] = [
     (STADIUM_SYMBOL, STADIUM),
     (CONTACTS_SYMBOL, CONTACTS),
     (BOARD_SYMBOL, BOARD),
+    (STATISTICS_SYMBOL, a3_core::cycle::dialogs::STATISTICS),
     (HONOURS_SYMBOL, HONOURS),
     (DRESSING_SYMBOL, DRESSING_ROOM),
 ];
@@ -1684,8 +1686,6 @@ mod tests {
     use crate::controls::{ControlState, bar, player_box};
     use crate::screens::compose;
 
-    /// A symbol not built yet.
-    const UNBUILT_SYMBOL: usize = 14;
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
@@ -1711,12 +1711,11 @@ mod tests {
         let mut view = View::new(LINEUP, dialog);
         let mut cx = Cx { game: &game, dialog, state: &mut state };
         MenuBar::default().open(&mut cx, &mut view, Args::None);
-        // Crossed out: the bar's symbols that lead nowhere yet — the
-        // contacts' —, not the line-up's, the dressing room's or the
-        // whistle.
+        // Nothing on the bar is crossed out: the one symbol not built,
+        // the national team's, is off for a manager without one.
         let bar = control(dialog, BAR_ID).unwrap();
         let crossed = |item| view.inert.contains(&Target::Option { control: bar, item });
-        assert!(crossed(UNBUILT_SYMBOL) && !crossed(LINEUP_SYMBOL));
+        assert!((0..WHISTLE).all(|item| !crossed(item)));
         assert!(!crossed(DRESSING_SYMBOL) && !crossed(WHISTLE));
         // The rest of the test looks at the picture without the crosses.
         view.inert.clear();

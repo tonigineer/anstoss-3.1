@@ -35,6 +35,7 @@ pub mod refit;
 pub mod season;
 pub mod squadlist;
 pub mod stadium;
+pub mod statistics;
 pub mod state;
 pub mod stock;
 pub mod tactics;
