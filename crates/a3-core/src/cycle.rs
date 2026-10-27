@@ -58,6 +58,9 @@ pub mod dialogs {
     pub const NATIONAL_OFFICE: u16 = 484;
     /// The grand office of the grandest clubs.
     pub const GRAND_OFFICE: u16 = 504;
+    /// The manager's page of notes (`CDiNotizen`); the office opens it
+    /// over itself when the manager left a note on it.
+    pub const NOTEPAD: u16 = 397;
     /// The text menu of a manager who chose it.  Dialog 502, the national
     /// team's smaller variant, is not built yet.
     pub const TEXT_MENU: u16 = 501;
@@ -745,6 +748,13 @@ impl Cycle {
     /// in the office, until it is ended.
     fn turn(&self) -> Result<(), Gone> {
         let Some(mut screen) = self.season(|s| self.turn_screen(s)) else { return Ok(()) };
+        // A manager with a note on his page reads it before his office:
+        // the hub opens the notepad, and only then its own dialog
+        // (`CMyStartDialog::FUN_00650b84`; seen for the office only, the
+        // original's guard being a manager field +0x2128 not yet known).
+        if matches!(screen, OFFICE | GRAND_OFFICE) && self.a_note_waits() {
+            self.ask(Request::new(NOTEPAD))?;
+        }
         loop {
             match self.ask(Request::new(screen))? {
                 Reply::Goto(next) => {
@@ -776,6 +786,18 @@ impl Cycle {
             };
         }
         if manager.club.is_some() { line_up_view(season, LINEUP) } else { DRESSING_ROOM }
+    }
+
+    /// Whether the current manager left text on his notepad page: what
+    /// the hub's `strlen` of `DAT_008ed400 + (human − 1) × 0x420` tests.
+    fn a_note_waits(&self) -> bool {
+        let state = self.state();
+        let Some(season) = state.season.as_ref() else { return false };
+        let Some(records) = state.records.as_ref() else { return false };
+        records
+            .human_slot(season.current)
+            .and_then(|page| records.notes.get(page))
+            .is_some_and(|note| !note.text().is_empty())
     }
 
     /// A saved game: read, and on with its weeks; for a network game, where

@@ -3878,6 +3878,41 @@ mod tests {
         assert_eq!(page(&runner), "");
     }
 
+    /// The office opens the note left on it: the turn of an office-view
+    /// manager starts on the notepad over the office, and the office
+    /// follows once the note is read away; a manager with an empty page
+    /// walks straight into his office.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_office_opens_a_note_left_on_it() {
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let noted = patched(&dir, "Toni", "office-noted", |records| {
+            let page = records.human_slot(0).unwrap();
+            records.managers[page].set_menu_view(1);
+            records.notes[page].set_text("Abstieg knapp");
+        });
+        let mut game = Game::load(&noted).unwrap();
+        compose(&mut game);
+        let load = LOAD.replace("until dialog 147", "until dialog 397");
+        let script = format!("{load}now press 1\nuntil dialog 483");
+        let (runner, result) = Runner::play(&game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("noted: {err}\n{}", runner.log.join("\n")));
+        let at = |what: &str| runner.log.iter().position(|l| l == what);
+        let note = at("screen 397").expect("no notepad at the office turn");
+        let office = at("screen 483").expect("no office after the note");
+        assert!(note < office, "the notepad came after the office: {}", runner.log.join("\n"));
+        let bare = patched(&dir, "Toni", "office-bare", |records| {
+            let page = records.human_slot(0).unwrap();
+            records.managers[page].set_menu_view(1);
+        });
+        let mut game = Game::load(&bare).unwrap();
+        compose(&mut game);
+        let load = LOAD.replace("until dialog 147", "until dialog 483");
+        let (runner, result) = Runner::play(&game, &Script::parse(&load).unwrap());
+        result.unwrap_or_else(|err| panic!("bare: {err}\n{}", runner.log.join("\n")));
+        assert_eq!(seen(&runner, 397), 0, "a page of none popped: {}", runner.log.join("\n"));
+    }
+
     #[test]
     fn scripts_say_what_is_wrong_with_them() {
         assert_eq!(
