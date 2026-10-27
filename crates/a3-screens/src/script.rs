@@ -3044,6 +3044,51 @@ mod tests {
         assert!(view.list(control(dialog, 2011).unwrap()).unwrap().rows.is_empty());
     }
 
+    /// Item 3 of the honours' pages: on the save "A" the manager is a
+    /// player-manager already — stepping down takes him out of the squad
+    /// and out of the label, and becoming one again puts him back where
+    /// his position sorts him (`FUN_0053f3be`).
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_manager_steps_down_and_becomes_a_player_again() {
+        let game = game();
+        let open = "now click bar 16\nuntil dialog 175";
+        let pages = control(&game.dialogs[&175], 5643).unwrap();
+        let manager = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            records.humans().next().unwrap().playing()
+        };
+        let squad = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let m = records.humans().next().unwrap();
+            records.team(u16::from(m.country()), m.team()).unwrap().players()
+        };
+        let label = |runner: &Runner| runner.host.view().options(pages).unwrap().labels[3].clone();
+        // As he stands: player-manager, in the squad, and so labelled.
+        let Some(before) = on_save(&game, "A", open) else { return };
+        let standing = squad(&before);
+        assert!(standing.contains(&17001));
+        assert_eq!(manager(&before), 1);
+        assert_eq!(label(&before), game.text(4246));
+        // He steps down: out of the squad, the flag off, the label asks
+        // him to become one.
+        let down = format!("{open}\nnow choose 5643 3\nuntil dialog 384\nnow ok");
+        let runner = on_save(&game, "A", &down).unwrap();
+        let ids = squad(&runner);
+        assert!(!ids.contains(&17001));
+        assert_eq!(ids.len(), standing.len() - 1);
+        assert_eq!(manager(&runner), 0);
+        assert_eq!(label(&runner), game.text(4290));
+        // And he becomes one again: the very squad as before.
+        let up = format!("{down}\nnow choose 5643 3\nuntil dialog 384\nnow ok");
+        let runner = on_save(&game, "A", &up).unwrap();
+        assert_eq!(squad(&runner), standing);
+        assert_eq!(manager(&runner), 1);
+        assert_eq!(label(&runner), game.text(4246));
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_trainer_sees_his_titles_and_stations() {

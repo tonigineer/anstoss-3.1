@@ -3,14 +3,14 @@
 //! pays, his national team, nerves, marks, age and image, the board's
 //! confidence, his private wealth and his shares, with two sliders that
 //! move money into the club's books and into the black till. The nine
-//! pages. Seven of the nine are built — his own career with its titles
-//! and stations, his private life, his abilities, his pay, how popular
-//! he is, his season records and the highscores —; the player-manager's
-//! page and the comparison with other managers are not.
+//! pages. Eight of the nine work — his own career with its titles and
+//! stations, his private life, his abilities, his pay, how popular he
+//! is, his season records, the highscores, and the player-manager's
+//! toggle; only the comparison with other managers is not.
 
 use std::collections::HashMap;
 
-use a3_core::cycle::dialogs::HONOURS;
+use a3_core::cycle::dialogs::{HONOURS, NOTICE, QUESTION};
 use a3_core::season::Rules;
 use a3_files::rch::Dialog;
 
@@ -70,9 +70,9 @@ const MARKETS: u16 = 5572;
 /// Item 3 of the pages, whose label changes for a player-manager.
 const PLAYER_MANAGER: usize = 3;
 /// The dialog each page button opens, by the item (ERFOLGE.md §5): the
-/// career, the privates, the abilities, the player-manager's page, the
-/// pay, the popularity, the comparison, the season records and the
-/// highscores. Those not built are `None`.
+/// career, the privates, the abilities, the player-manager's toggle,
+/// which answers for itself, the pay, the popularity, the comparison,
+/// the season records and the highscores. Those not built are `None`.
 const PAGE_DIALOGS: [Option<u16>; 9] = [
     Some(trainer_erfolge::TRAINER_DIALOG),
     Some(privates::PRIVATES_DIALOG),
@@ -85,6 +85,23 @@ const PAGE_DIALOGS: [Option<u16>; 9] = [
     Some(scores::SCORES_DIALOG),
 ];
 const STEP_DOWN: u16 = 4246;
+/// The label once he is no longer one; the alerts that stand in the way
+/// of becoming one, and the two questions (`FUN_0053f3be`, ERFOLGE.md
+/// §5.1).
+const BECOME: u16 = 4290;
+const TOO_YOUNG: u16 = 4998;
+const SQUAD_FULL: u16 = 3195;
+const TOO_OLD: u16 = 4248;
+const BECOME_ASK: u16 = 4247;
+const STEP_DOWN_ASK: u16 = 4249;
+/// Youths may not play, nobody plays past 42, and a squad of 35 is
+/// full. His own player is 17000, plus the slot he manages from.
+const YOUNG_AGE: i32 = 18;
+const OLD_AGE: i32 = 43;
+const SQUAD_MOST: usize = 35;
+const PLAYER_ID: u16 = 17000;
+/// The slot of his own player, in his manager record (object +0x1a).
+const PLAYER_SLOT_AT: usize = 0x1c;
 /// "Ja" / "Nein"; "(bis 30.06.%4d)"; the season's goals 1069 to 1080.
 const YES_NO: [u16; 2] = [1028, 1029];
 const UNTIL: u16 = 1596;
@@ -157,10 +174,18 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     hub::add_bar(dialog, rules);
 }
 
+/// The third page's question, waiting for an answer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Ask {
+    Become,
+    StepDown,
+}
+
 /// The screen.
 #[derive(Default)]
 pub struct Honours {
     whistle: bool,
+    ask: Option<Ask>,
 }
 
 impl Screen for Honours {
@@ -282,7 +307,7 @@ impl Screen for Honours {
         // The two transfers and the built pages are open.
         let works = |t: Target| match t {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(PAGES) => {
-                PAGE_DIALOGS.get(item).is_some_and(Option::is_some)
+                item == PLAYER_MANAGER || PAGE_DIALOGS.get(item).is_some_and(Option::is_some)
             }
             Target::Option { control: c, .. }
                 if matches!(dialog.controls[c].id, Some(CONFIDENCE_PAGE | MARKETS)) =>
@@ -318,6 +343,9 @@ impl Screen for Honours {
             Target::Option { control: c, item }
                 if dialog.controls[c].id == Some(PAGES) =>
             {
+                if item == PLAYER_MANAGER {
+                    return self.player_manager(cx);
+                }
                 match PAGE_DIALOGS.get(item).copied().flatten() {
                     Some(id) => Outcome::Popup(a3_core::cycle::Request::new(id)),
                     None => {
@@ -341,6 +369,23 @@ impl Screen for Honours {
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
         }
+        // The player-manager's answer: he becomes one or steps down, and
+        // the page's label follows.
+        if let Some(ask) = self.ask.take() {
+            if reply == Reply::Ok {
+                match ask {
+                    Ask::Become => play_again(cx),
+                    Ask::StepDown => step_down(cx),
+                }
+            }
+            let playing = super::kalkulation::own_manager(cx)
+                .is_some_and(|m| m.get::<i16>(PLAYS_AT) != 0);
+            if let Some(options) = control(cx.dialog, PAGES).and_then(|c| view.options_mut(c))
+                && let Some(label) = options.labels.get_mut(PLAYER_MANAGER)
+            {
+                *label = cx.game.text(if playing { STEP_DOWN } else { BECOME }).to_owned();
+            }
+        }
         if let Some(c) = control(cx.dialog, PAGES) {
             view.set_chosen(c, NONE);
         }
@@ -354,5 +399,136 @@ impl Screen for Honours {
             set(view, cx.dialog, CONFIDENCE, confidence);
         }
         Outcome::Stay
+    }
+}
+
+impl Honours {
+    /// The third page: become a player-manager or step down as one
+    /// (`FUN_0053f3be`, ERFOLGE.md §5.1). Under 18 he's too young, a
+    /// squad of 35 stops him and past 42 the board won't have it; else
+    /// he's simply asked — as a player, to step down.
+    fn player_manager(&mut self, cx: &mut Cx) -> Outcome {
+        let notice = |id: u16| Outcome::Popup(a3_core::cycle::Request::with(NOTICE, Args::Text(id)));
+        let (Some(records), Some(season)) = (cx.state.records.as_ref(), cx.state.season.as_ref())
+        else {
+            return Outcome::Stay;
+        };
+        let Some(slot) = records.human_slot(season.current) else {
+            return Outcome::Stay;
+        };
+        let Some(manager) = records.managers.get(slot) else {
+            return Outcome::Stay;
+        };
+        if manager.get::<i16>(PLAYS_AT) != 0 {
+            self.ask = Some(Ask::StepDown);
+            return Outcome::Popup(a3_core::cycle::Request::with(
+                QUESTION,
+                Args::Text(STEP_DOWN_ASK),
+            ));
+        }
+        let age = manager_age(manager, season.date());
+        if age < YOUNG_AGE {
+            return notice(TOO_YOUNG);
+        }
+        let squad = own_team(cx).map_or(0, |t| t.players().len());
+        if squad >= SQUAD_MOST {
+            return notice(SQUAD_FULL);
+        }
+        if age >= OLD_AGE {
+            // The original asks for the full squad again here, though
+            // the alert above already turned him away.
+            return notice(TOO_OLD);
+        }
+        self.ask = Some(Ask::Become);
+        Outcome::Popup(a3_core::cycle::Request::with(QUESTION, Args::Text(BECOME_ASK)))
+    }
+}
+
+/// The manager's age in years on the season's day.
+fn manager_age(manager: &a3_core::records::Manager, today: chrono::NaiveDate) -> i32 {
+    chrono::NaiveDate::from_ymd_opt(
+        i32::from(manager.get::<u16>(BORN_AT + 2)),
+        u32::from(manager.get::<u8>(BORN_AT + 1)),
+        u32::from(manager.get::<u8>(BORN_AT)),
+    )
+    .and_then(|born| today.years_since(born))
+    .unwrap_or(0) as i32
+}
+
+/// The manager pulls himself into his own squad (the question's OK):
+/// his player gets his club, a contract running to his forty-fifth year
+/// and good humour, and into the squad he goes behind its last player
+/// of his main position, as the youths do (`FUN_0070df0b`).
+fn play_again(cx: &mut Cx) {
+    let Some((country, number)) = own_team(cx).map(|t| (t.country(), u16::from(t.number())))
+    else {
+        return;
+    };
+    let data = &cx.game.data;
+    let state = &mut *cx.state;
+    let (Some(records), Some(season)) = (state.records.as_mut(), state.season.as_mut()) else {
+        return;
+    };
+    let Some(slot) = records.human_slot(season.current) else { return };
+    let Some(manager) = records.managers.get(slot) else { return };
+    let id = PLAYER_ID + manager.get::<u16>(PLAYER_SLOT_AT);
+    let age = manager_age(manager, season.date());
+    let Some(main) = records.player(id).map(|r| r.positions()[0]) else { return };
+    let Some(mut squad) = records.team(country.into(), number).map(|t| t.players()) else {
+        return;
+    };
+    let place = squad
+        .iter()
+        .rposition(|&p| records.player(p).is_some_and(|r| r.positions()[0] <= main))
+        .map_or(0, |k| k + 1);
+    squad.insert(place, id);
+    if let Some(team) = records.team_mut(country.into(), number) {
+        team.set_players(&squad);
+    }
+    let contract = i32::from(records.globals.start_year()) + (45 - age).max(0);
+    if let Some(r) = records.players.get_mut(usize::from(id)) {
+        r.set_club([country, number as u8]);
+        r.set_contract(contract as u16);
+        r.set_mood(10);
+    }
+    records.managers[slot].set_playing(1);
+    let Some(key) = season.manager().and_then(|m| m.club) else { return };
+    if let Some(joining) = a3_core::load::any_player(records, data, id)
+        && let Some(club) = season.clubs.get_mut(&key)
+    {
+        club.insert(key, place, joining);
+    }
+}
+
+/// And back out of it: out of the squad with its line-up and lists,
+/// and his player record stays without a club.
+fn step_down(cx: &mut Cx) {
+    let Some((country, number)) = own_team(cx).map(|t| (t.country(), u16::from(t.number())))
+    else {
+        return;
+    };
+    let state = &mut *cx.state;
+    let (Some(records), Some(season)) = (state.records.as_mut(), state.season.as_mut()) else {
+        return;
+    };
+    let Some(slot) = records.human_slot(season.current) else { return };
+    let Some(manager) = records.managers.get(slot) else { return };
+    let id = PLAYER_ID + manager.get::<u16>(PLAYER_SLOT_AT);
+    let Some(mut squad) = records.team(country.into(), number).map(|t| t.players()) else {
+        return;
+    };
+    let Some(at) = squad.iter().position(|&p| p == id) else { return };
+    squad.remove(at);
+    if let Some(team) = records.team_mut(country.into(), number) {
+        team.set_players(&squad);
+    }
+    if let Some(r) = records.players.get_mut(usize::from(id)) {
+        r.set_club([0, 0]);
+    }
+    records.managers[slot].set_playing(0);
+    if let Some(key) = season.manager().and_then(|m| m.club)
+        && let Some(club) = season.clubs.get_mut(&key)
+    {
+        club.leave(key, at);
     }
 }

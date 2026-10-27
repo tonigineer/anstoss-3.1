@@ -415,6 +415,43 @@ impl ClubState {
         self.status.insert(at, status);
     }
 
+    /// A player leaves the squad at a place, the club being `key`: those
+    /// after it move one place back, in the line-up, the duty lists and the
+    /// tactics' picks; his own spots fall out of them.
+    pub fn leave(&mut self, key: (usize, usize), at: usize) {
+        let shift_back = |place: &mut usize| {
+            if *place > at {
+                *place -= 1;
+            }
+        };
+        let lineup = &mut self.lineup;
+        for place in lineup.field.iter_mut().chain(lineup.bench.iter_mut()) {
+            match *place {
+                Some(p) if p == at => *place = None,
+                Some(p) if p > at => *place = Some(p - 1),
+                _ => {}
+            }
+        }
+        for list in self.duties.iter_mut() {
+            list.retain(|&p| p != at);
+            list.iter_mut().for_each(shift_back);
+        }
+        for slot in self.tactics.picks.iter_mut() {
+            let place = slot
+                .as_ref()
+                .filter(|p| p.club == key)
+                .map(|p| p.place.cmp(&at));
+            match place {
+                Some(std::cmp::Ordering::Equal) => *slot = None,
+                Some(std::cmp::Ordering::Greater) => slot.as_mut().unwrap().place -= 1,
+                _ => {}
+            }
+        }
+        self.players.remove(at);
+        self.fitness.remove(at);
+        self.status.remove(at);
+    }
+
     /// A club followed from now on: no season tickets sold yet, the week's
     /// record starting today.
     pub fn new(
