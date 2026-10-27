@@ -27,7 +27,9 @@ const OFFICE_DOOR: u16 = 6131;
 /// The objects in the room and the symbols of the bar they stand for, as
 /// the game's table at 0x87fc38 pairs them (by its actions divided by
 /// 100); the jacket on the door ends the turn.  The grand office shares
-/// this table; a third office, dialog 484, shuffles some ids around.
+/// this table; the national office, dialog 484, keeps most of these ids at
+/// other places and drops squad, money, both trainings, nation and
+/// honours; the file titles it "ANSTOSS 3 - Büro".
 const OBJECTS: [(u16, usize); 18] = [
     (6116, hub::LINEUP_SYMBOL),
     (6117, hub::COMPARISON_SYMBOL),
