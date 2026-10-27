@@ -189,6 +189,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(contacts::Trainers::default()),
         Box::new(contacts::TrainerOffer::default()),
         Box::new(contacts::TrainerNews::default()),
+        Box::new(contacts::TrainerExtend),
         Box::new(grounds::GroundsInfo),
         Box::new(grounds::GroundsStaff),
         Box::new(grounds::GroundsFans),

@@ -263,6 +263,15 @@ pub enum Args {
         amount: i64,
         years: i32,
     },
+    /// The answer to "Vertrag verlängern" (dialogs 36 and 38): which of
+    /// them, the coach by kind and record id, and — of the one that agrees
+    /// — the year his longer contract now runs to.
+    TrainerExtend {
+        dialog: u16,
+        keepers: bool,
+        id: i16,
+        until: i32,
+    },
     /// A cooperation contract still running (text 4456): the partner's
     /// number in the main country, the year it ends.
     Cooperation {

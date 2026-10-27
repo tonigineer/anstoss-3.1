@@ -1297,6 +1297,9 @@ pub struct Trainers {
     keepers: bool,
     /// Whether the popup last asked was the offer dialog and not an alert.
     offered: bool,
+    /// Whether the last popup was the answer to "Vertrag verlängern", whose
+    /// closing only refreshes the line naming the club's own coach.
+    extended: bool,
 }
 
 const TRAINERS_DIALOG: u16 = 35;
@@ -1307,6 +1310,14 @@ const TRAINERS_OFFER: u16 = 32;
 const TRAINER_GONE: u16 = 4312;
 const TRAINERS_LIST: u16 = 1359;
 const EXTEND: u16 = 1361;
+/// The answers to that button (dialogs 36 and 38,
+/// `CCoTrainerKeineVerlaengerung` and `CCoTrainerVerlaengerung`) and their
+/// texts; the ball they animate stands in control 1366.
+const EXTEND_REFUSED: u16 = 36;
+const EXTEND_DONE: u16 = 38;
+const EXTEND_REFUSED_TEXT: u16 = 1364;
+const EXTEND_DONE_TEXT: u16 = 1371;
+const EXTEND_BALL: u16 = 1366;
 const CURRENT: u16 = 1362;
 const TRAINERS_HEADER: u16 = 1375;
 /// The goalkeepers' caption and header, and the lines naming the club's
@@ -1401,6 +1412,23 @@ fn trainer(cx: &Cx, keepers: bool, id: i16) -> Option<Trainer> {
     })
 }
 
+/// What the head trainer knows, the yardstick for an extension
+/// (`FUN_0040a1ec`): the manager's standing while he trains himself, else
+/// the competence of the co-trainer record the club names, else the other
+/// one's, else two.
+fn head_competence(cx: &Cx, team: &a3_core::records::Team) -> i32 {
+    if team.get::<u8>(0xa8) != 0 {
+        return super::kalkulation::own_manager(cx).map_or(0, |m| m.standing());
+    }
+    for at in [0x9c, 0x9e] {
+        let id = team.get::<i16>(at);
+        if id != 0 {
+            return trainer(cx, false, id).map_or(2, |t| i32::from(t.competence));
+        }
+    }
+    2
+}
+
 impl Screen for Trainers {
     fn ids(&self) -> &[u16] {
         &[TRAINERS_DIALOG]
@@ -1411,6 +1439,7 @@ impl Screen for Trainers {
         let (game, dialog) = (cx.game, cx.dialog);
         self.keepers = matches!(args, Args::Trainers { keepers: true });
         self.offered = false;
+        self.extended = false;
         let caption =
             if self.keepers { game.text(KEEPERS_CAPTION).to_owned() } else { dialog.title.clone() };
         set(view, dialog, CAPTION_ID, caption);
@@ -1428,6 +1457,11 @@ impl Screen for Trainers {
             }
         }
         self.fill(cx, view);
+        // "Vertrag verlängern" is a static with SS_NOTIFY: it answers the
+        // pointer like a button.
+        if let Some(i) = control(dialog, EXTEND) {
+            view.set_clickable(i, true);
+        }
         mark_inert(view, dialog, |_| true);
     }
 
@@ -1456,6 +1490,52 @@ impl Screen for Trainers {
             return Outcome::Popup(Request::with(TRAINERS_OFFER, args));
         }
         match target {
+            // "Vertrag verlängern": his record says whether he extends,
+            // and if he does it gains a year (§5.8).
+            Target::Control(c) if dialog.controls[c].id == Some(EXTEND) => {
+                let Some(team) = own_team(cx) else { return Outcome::Stay };
+                let own = team.get::<i16>(if self.keepers { KEEPERS_AT } else { CO_AT });
+                let Some(t) = (own != 0).then(|| trainer(cx, self.keepers, own)).flatten() else {
+                    return Outcome::Stay;
+                };
+                let head = head_competence(cx, team);
+                let pool = if self.keepers { KEEPERS_POOL } else { CO_POOL };
+                if trainers::may_extend(
+                    i32::from(t.years_left),
+                    t.age as i32,
+                    i32::from(t.competence),
+                    head,
+                    i64::from(t.pay),
+                    self.keepers,
+                ) {
+                    // The year named is the one the season ends in, plus the
+                    // new years before him (`DAT_00b5cbca + years`): a season
+                    // counted from 2025 ends in 2026.
+                    let until =
+                        cx.state.season.as_ref().map_or(0, |s| s.year) + i32::from(t.years_left) + 2;
+                    if let Some(at) = cx
+                        .state
+                        .records
+                        .as_mut()
+                        .and_then(|rs| {
+                            rs.block_mut(&format!(
+                                "{pool}[{}]",
+                                usize::try_from(own).unwrap_or(0)
+                            ))
+                        })
+                        .and_then(|r| r.get_mut(YEARS_LEFT_AT))
+                    {
+                        *at = at.saturating_add(1);
+                    }
+                    self.extended = true;
+                    let args =
+                        Args::TrainerExtend { dialog: EXTEND_DONE, keepers: self.keepers, id: own, until };
+                    return Outcome::Popup(Request::with(EXTEND_DONE, args));
+                }
+                let args =
+                    Args::TrainerExtend { dialog: EXTEND_REFUSED, keepers: self.keepers, id: own, until: 0 };
+                Outcome::Popup(Request::with(EXTEND_REFUSED, args))
+            }
             Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
                 Outcome::Close(Reply::Ok)
             }
@@ -1465,8 +1545,13 @@ impl Screen for Trainers {
 
     /// What the offer chain had to say: with a trainer hired the market
     /// closes with him (the list's `EndDialog(1)`); after failed talks its
-    /// rows show again, the turned-down one gone (§5.5).
+    /// rows show again, the turned-down one gone (§5.5). The extension's
+    /// answer only refreshes the line naming the club's own coach.
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        if std::mem::take(&mut self.extended) {
+            self.fill(cx, view);
+            return Outcome::Stay;
+        }
         if !std::mem::take(&mut self.offered) {
             return Outcome::Stay;
         }
@@ -2014,6 +2099,50 @@ impl Screen for TrainerNews {
             Target::Button(c) if crate::controls::button::is_ok(&cx.dialog.controls[c]) => {
                 Outcome::Close(Reply::Ok)
             }
+            _ => Outcome::Stay,
+        }
+    }
+}
+
+/// The answer to "Vertrag verlängern" (dialogs 36 and 38,
+/// `CCoTrainerKeineVerlaengerung` and `CCoTrainerVerlaengerung`): he won't,
+/// or he agrees and his contract runs a year longer. The market opens them
+/// and refreshes its line when they close; the salary stays (§5.8).
+#[derive(Default)]
+pub struct TrainerExtend;
+
+impl Screen for TrainerExtend {
+    fn ids(&self) -> &[u16] {
+        &[EXTEND_REFUSED, EXTEND_DONE]
+    }
+
+    /// `0x485ac2` and `0x487682`: his name, and of the one that agrees the
+    /// year his contract now runs to.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let dialog = cx.dialog;
+        let Args::TrainerExtend { dialog: which, keepers, id, until } = args else { return };
+        let name = trainer(cx, keepers, id).map_or_else(String::new, |t| t.name);
+        let (text_id, parts): (u16, Vec<&dyn std::fmt::Display>) = if which == EXTEND_DONE {
+            (EXTEND_DONE_TEXT, vec![&name, &until])
+        } else {
+            (EXTEND_REFUSED_TEXT, vec![&name])
+        };
+        if let Some(c) = control(dialog, text_id) {
+            let filled = super::finances::printf(&dialog.controls[c].text, &parts);
+            set(view, dialog, text_id, filled);
+        }
+        if let Some(ball) = control(dialog, EXTEND_BALL).and_then(|b| view.anim_mut(b)) {
+            ball.frames = (1762u16..=1773).collect();
+            ball.playing = true;
+        }
+    }
+
+    /// Only to close again; the market stays open. Each has one button —
+    /// the agreeing one's drawn with the cancel face, but its handler
+    /// (`0x4877d9`) just ends the dialog like the other's OK.
+    fn input(&mut self, _: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(_) => Outcome::Close(Reply::Ok),
             _ => Outcome::Stay,
         }
     }

@@ -93,6 +93,8 @@ AREAS = {
                 (*bar(12, 464, "now press 5861", "until dialog 466"), 466),
                 # The page lists contacts, the board and the honours in the stadium's card.
                 (*bar(13, 404), 404), (*menu(13, 404, 4975, 0, 35), 35),
+                (*bar(13, 404, "now choose 4975 0", "until dialog 35",
+                       "now click 1361", "until dialog 36"), 36),
                 (*bar(13, 404, "now choose 4975 0", "until dialog 35", "now row 1359 0",
                        "until dialog 32"), 32),
                 (*bar(14, 439), 439), (*menu(14, 439, 5387, 4, 384), 384),

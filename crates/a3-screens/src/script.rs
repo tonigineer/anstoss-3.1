@@ -1759,6 +1759,77 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_own_coach_extends_his_contract_or_refuses() {
+        let game = game();
+        let open = "now click bar 12\nuntil dialog 404";
+        let shown = format!("{open}\nnow choose 4975 0\nuntil dialog 35");
+        let own_of = |state: &a3_core::state::GameState| -> i16 {
+            let records = state.records.as_ref().unwrap();
+            let manager = records.humans().next().unwrap();
+            records.team(manager.country(), manager.team()).unwrap().get::<i16>(0xa2)
+        };
+        // Probe1's coach of 1953: past the age, and more a co-trainer than
+        // the playing manager is a head — he won't, whatever the money.
+        let ask = format!("{shown}\nnow click 1361\nuntil dialog 36");
+        let Some(runner) = on_save(&game, "Probe1", &ask) else { return };
+        assert_eq!(seen(&runner, 36), 1);
+        assert_eq!(seen(&runner, 38), 0);
+        let notice = &game.dialogs[&36];
+        let filled = runner.host.view().text(control(notice, 1364).unwrap()).to_owned();
+        assert!(filled.contains("möchte seinen Vertrag derzeit nicht verlängern"), "{filled}");
+        // Closing it leaves the market open and the contract untouched.
+        let runner = on_save(&game, "Probe1", &format!("{ask}\nnow ok\nuntil dialog 35")).unwrap();
+        assert_eq!(runner.host.view().id, 35);
+        let state = runner.host.state();
+        assert_eq!(co_block(state.records.as_ref().unwrap(), own_of(&state))[0xe], 0);
+        // A younger one of modest competence agrees, and his contract runs
+        // a year longer; the salary stays (§5.8).
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "Probe1", "co-extend", |records| {
+            let index = records.human_slot(0).unwrap();
+            let (country, number) =
+                (records.managers[index].country(), records.managers[index].team());
+            let own = records.team(country, number).unwrap().get::<i16>(0xa2);
+            let r = records.block_mut(&format!("0xbe3920[{own}]")).unwrap();
+            r[4] = 2;
+            r[0xa..0xc].copy_from_slice(&1967i16.to_le_bytes());
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let before = on_save(&game, "co-extend", &shown).unwrap();
+        let (own, left) = {
+            let state = before.host.state();
+            let records = state.records.as_ref().unwrap();
+            let own = own_of(&state);
+            (own, co_block(records, own)[0xe])
+        };
+        let year = before.host.state().season.as_ref().unwrap().year;
+        let runner = on_save(&game, "co-extend", &format!("{shown}\nnow click 1361\nuntil dialog 38"))
+            .unwrap();
+        assert_eq!(seen(&runner, 38), 1);
+        let agreed = &game.dialogs[&38];
+        let filled = runner.host.view().text(control(agreed, 1371).unwrap()).to_owned();
+        // The original names the year the season ends in plus the new years
+        // before him: 2025/26 with one year added reads "bis 2027".
+        let until = year + i32::from(left) + 2;
+        assert!(filled.contains(&format!("bis {until}")), "{filled}");
+        let runner =
+            on_save(
+                &game,
+                "co-extend",
+                // 38's one button is drawn with the cancel face.
+                &format!("{shown}\nnow click 1361\nuntil dialog 38\nnow press 1372\nuntil dialog 35"),
+            )
+                .unwrap();
+        assert_eq!(runner.host.view().id, 35);
+        let state = runner.host.state();
+        let r = co_block(state.records.as_ref().unwrap(), own);
+        assert_eq!(r[0xe], left + 1);
+        assert_eq!(i32::from_le_bytes(r[0x10..0x14].try_into().unwrap()), 182_400);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn a_refused_co_trainer_leaves_the_market_list() {
         let game = game();
         let open = "now click bar 12\nuntil dialog 404";

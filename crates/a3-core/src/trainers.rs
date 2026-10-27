@@ -102,6 +102,33 @@ pub fn compromise(
     (money, asked)
 }
 
+/// Whether the club's own coach extends his contract by a year
+/// (`FUN_0048735f` and `FUN_00592662`): not while more than three years are
+/// left or past his sixty-fourth year, not over the head trainer's
+/// competence, and only at the pay his own asks — for a co-trainer 70,000
+/// plus two thousand a point of competence up to four, six thousand up to
+/// nine, ten thousand beyond; for a goalkeepers' coach 30,000 plus five
+/// thousand a point.
+pub fn may_extend(
+    years_left: i32,
+    age: i32,
+    competence: i32,
+    head: i32,
+    salary: i64,
+    keepers: bool,
+) -> bool {
+    if years_left > 3 || age > 64 || head < competence {
+        return false;
+    }
+    let asked = if keepers {
+        30_000 + i64::from(competence) * 5_000
+    } else {
+        let point = match competence { 0..=4 => 20_000, 5..=9 => 60_000, _ => 100_000 };
+        70_000 + i64::from(competence) * point
+    };
+    salary >= asked
+}
+
 /// What sending a coach still under contract away costs (`FUN_00487424`):
 /// half his yearly salary, or a twelfth per month of the season still to
 /// play when only his last year is left — never under a thousand, and whole
@@ -155,6 +182,29 @@ mod tests {
         let mut random = Random::new(7);
         assert_eq!(compromise(500_000, 400_000, 3, 3, &mut random), (450_000, 3));
         assert_eq!(compromise(500_000, 33_000, 3, 3, &mut random), (260_000, 3));
+    }
+
+    #[test]
+    fn a_coach_extends_only_on_terms() {
+        // The Probe1 co-trainer of 1953: past the age, however modestly
+        // he stands.
+        assert!(!may_extend(0, 73, 5, 12, 182_400, false));
+        // Too many years already left, and one who knows more than the
+        // head trainer.
+        assert!(!may_extend(4, 50, 5, 12, 1_000_000, false));
+        assert!(!may_extend(1, 50, 13, 12, 1_470_000, false));
+        // The pay floor climbs with competence: 150,000 at four, 430,000
+        // at six, 1,270,000 at twelve.
+        assert!(!may_extend(1, 59, 4, 12, 149_000, false));
+        assert!(may_extend(1, 59, 4, 12, 259_200, false));
+        assert!(!may_extend(1, 59, 6, 12, 429_000, false));
+        assert!(may_extend(1, 59, 6, 12, 430_000, false));
+        assert!(may_extend(1, 59, 12, 12, 1_270_000, false));
+        // A goalkeepers' coach: 30,000 and 5,000 a point, whatever his
+        // competence against the head trainer.
+        assert!(!may_extend(1, 63, 15, 15, 104_000, true));
+        assert!(may_extend(1, 63, 15, 15, 465_000, true));
+        assert!(may_extend(3, 64, 5, 5, 55_000, true));
     }
 
     #[test]
