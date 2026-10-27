@@ -4652,5 +4652,23 @@ mod tests {
         let view = runner.host.view();
         let table = view.table(control(dialog, 29999).unwrap()).unwrap();
         assert_eq!(table.scroll, 3);
+        // A league cup's page (`FUN_00446c74`): whichever of the five
+        // pages opens, the pairings come from the one cup object at
+        // 0x1ba7488, whose own rounds the strip steps through — here
+        // round 1 only, played among the English clubs.
+        let lg = format!("{open}\nnow row 1284 13");
+        let Some(runner) = on_save(&game, "A", &lg) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Runde 1");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 25);
+        assert_eq!(
+            table.rows[0].text,
+            "Wolverhampton Wand.\t-\tAFC Sunderland\t\t\t\t "
+        );
+        assert_eq!(
+            table.rows[24].text,
+            "FC Dagenham & Redb.\t-\tAFC Bradford\t\t\t\t "
+        );
     }
 }

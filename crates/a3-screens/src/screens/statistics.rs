@@ -429,6 +429,14 @@ impl Statistics {
                     .map(|r| text(statistics::CUP_ROUND_NAMES[r as usize]))
                     .collect()
             }
+            // A league cup's strip: the rounds of the one cup object,
+            // whichever of the pages asks for it.
+            k if statistics::LEAGUE_CUP_STRIPS.contains(&k) => {
+                let (first, last) = statistics::league_cup_rounds(records);
+                (i16::max(first, 0)..=i16::min(last, 6))
+                    .map(|r| text(statistics::CUP_ROUND_NAMES[r as usize]))
+                    .collect()
+            }
             _ => return,
         };
         let n = self.strip.len();
@@ -469,7 +477,12 @@ impl Statistics {
             }
             Some(FORECAST) if self.category == TABLES => self.forecast_page(cx, view),
             Some(code) if self.category == TABLES && statistics::CUP_PAGES.contains(&code) => {
-                self.cup_page(cx, view)
+                self.cup_page(cx, view, false)
+            }
+            Some(code)
+                if self.category == TABLES && statistics::LEAGUE_CUP_PAGES.contains(&code) =>
+            {
+                self.cup_page(cx, view, true)
             }
             _ => false,
         };
@@ -548,24 +561,39 @@ impl Statistics {
 }
 
 impl Statistics {
-    /// A national cup's page (`FUN_004469c0`): the cup of the page's
-    /// country, the round the strip stands on counting from the cup's
-    /// first, and its pairings as the row `FUN_0044893f` writes them —
-    /// sides, legs and the "n.V."/"n.E." note over a blank header, the
-    /// own club's pairing red.
-    fn cup_page(&self, cx: &Cx, view: &mut View) -> bool {
+    /// A cup's page (`FUN_004469c0`, and `FUN_00446c74` for the league
+    /// cups): the cup of the page's country, or the one cup object, the
+    /// round the strip stands on counting from the cup's first, and its
+    /// pairings as the row `FUN_0044893f` writes them — sides, legs and
+    /// the "n.V."/"n.E." note over a blank header, the own club's
+    /// pairing red.
+    fn cup_page(&self, cx: &Cx, view: &mut View, league: bool) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let pages = &game.rules.statistics.categories[self.category];
         let Some(page) = self.page.and_then(|e| pages.get(e)) else { return false };
-        let slot = usize::from((page.flags & statistics::SLOT) >> 12);
-        let country = records.countries.get::<i16>(SLOT_COUNTRIES + 2 * slot);
-        let cup = usize::from(records.countries.slot(country as usize));
-        let (first, _) = statistics::cup_rounds(records, cup);
+        // A national cup's slot names the country whose cup it shows; a
+        // league cup's only names it, the pairings standing in the one
+        // cup object either way.
+        let cup = if league {
+            None
+        } else {
+            let slot = usize::from((page.flags & statistics::SLOT) >> 12);
+            let country = records.countries.get::<i16>(SLOT_COUNTRIES + 2 * slot);
+            Some(usize::from(records.countries.slot(country as usize)))
+        };
+        let (first, _) = match cup {
+            Some(cup) => statistics::cup_rounds(records, cup),
+            None => statistics::league_cup_rounds(records),
+        };
         let round = first + i16::try_from(self.chosen).unwrap_or(i16::MAX);
         set_header(view, dialog, String::new(), &[(0, 0)]);
         let own = own_team(cx).map(|t| (u16::from(t.country()), i16::from(t.number())));
-        let rows = statistics::cup_pairings(records, cup, round)
+        let pairings = match cup {
+            Some(cup) => statistics::cup_pairings(records, cup, round),
+            None => statistics::league_cup_pairings(records, round),
+        };
+        let rows = pairings
             .iter()
             .map(|p| {
                 let side = |country: u8, team: i16| {

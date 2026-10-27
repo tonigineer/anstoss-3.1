@@ -454,6 +454,11 @@ pub fn letters(records: &Records, country: u16, team: i16) -> u16 {
 /// cases 0x12..0x16, the cup of the slot typed there).
 pub const CUP_PAGES: std::ops::RangeInclusive<i16> = 0x13..=0x17;
 pub const CUP_STRIPS: std::ops::RangeInclusive<i16> = 0x12..=0x16;
+/// The league cups' pages (`FUN_00446c74`) and their strip
+/// (`FUN_004599d8`'s cases 0x1e..0x22): every page shows the one cup the
+/// object at 0x1ba7488 keeps, the slot's country only naming it.
+pub const LEAGUE_CUP_PAGES: std::ops::RangeInclusive<i16> = 0x21..=0x25;
+pub const LEAGUE_CUP_STRIPS: std::ops::RangeInclusive<i16> = 0x1e..=0x22;
 
 /// The cups' rounds by mode (the table at `0x8a5e10`, read by `FUN_006d124d`
 /// for the start and `FUN_006d1228` for the count): where each round's
@@ -499,10 +504,24 @@ fn cup(records: &Records, slot: usize) -> Option<&[u8]> {
     records.block(&format!("{CUPS_AT:#x}[{slot}]"))
 }
 
+/// The one cup record of the league cups' pages: the object at
+/// `0x1ba7488`, laid out as a slot's.
+fn league_cup(records: &Records) -> Option<&[u8]> {
+    records.block("0x1ba7488")
+}
+
 /// The rounds a cup is played from and to (+0x26 and +0x28): the strip
 /// steps through the names from the one to the other.
 pub fn cup_rounds(records: &Records, slot: usize) -> (i16, i16) {
-    let Some(cup) = cup(records, slot) else { return (0, 0) };
+    rounds(cup(records, slot))
+}
+
+pub fn league_cup_rounds(records: &Records) -> (i16, i16) {
+    rounds(league_cup(records))
+}
+
+fn rounds(cup: Option<&[u8]>) -> (i16, i16) {
+    let Some(cup) = cup else { return (0, 0) };
     let number = |at: usize| {
         cup.get(at..at + 2)
             .map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
@@ -514,7 +533,15 @@ pub fn cup_rounds(records: &Records, slot: usize) -> (i16, i16) {
 /// row in the table has them — including the pairings where no club
 /// stands yet, which the page shows as "ohne Verein".
 pub fn cup_pairings(records: &Records, slot: usize, round: i16) -> Vec<CupPairing> {
-    let Some(cup) = cup(records, slot) else { return Vec::new() };
+    pairings(cup(records, slot), round)
+}
+
+pub fn league_cup_pairings(records: &Records, round: i16) -> Vec<CupPairing> {
+    pairings(league_cup(records), round)
+}
+
+fn pairings(cup: Option<&[u8]>, round: i16) -> Vec<CupPairing> {
+    let Some(cup) = cup else { return Vec::new() };
     let Some((start, count)) = usize::try_from(round)
         .ok()
         .and_then(|r| {
