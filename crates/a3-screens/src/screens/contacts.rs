@@ -48,7 +48,7 @@ const ENQUIRY: usize = 8;
 const NEW_JOB: u16 = 2422;
 const MOVING_AT: usize = 0x130;
 /// Every sub-dialog, which shows its file's title as its caption.
-const SUB_DIALOGS: [u16; 13] = [35, 58, 166, 398, 494, 492, 493, 15, 31, 32, 34, 37, 39];
+const SUB_DIALOGS: [u16; 16] = [35, 58, 166, 398, 494, 492, 493, 15, 12, 13, 14, 31, 32, 34, 37, 39];
 /// The buttons whose sub-dialogs are built, and those.
 const BUILT: [(usize, u16); 6] = [
     (2, FAN_DIALOG),
@@ -1245,11 +1245,15 @@ fn write_article(cx: &mut Cx) -> u16 {
 /// The enquiry at another club (dialog 15 `CAnfrageVereinsauswahl`,
 /// KONTAKTE.md §8.2): the leagues with clubs looking for a manager, the
 /// candidates for next season and the clubs that would take one at once.
-/// What a click on a club does is not built.
+/// A click on a club sends the enquiry there; its appointment booking and
+/// the run of form it weighs are not built.
 #[derive(Default)]
 pub struct Enquiry {
     /// The combo's leagues, by country and league there.
     leagues: Vec<(u16, usize)>,
+    /// The chosen combo row and the club numbers its two lists show.
+    chosen: usize,
+    clubs: [Vec<u16>; 2],
 }
 
 const ENQUIRY_DIALOG: u16 = 15;
@@ -1267,6 +1271,42 @@ const AT_ONCE_COUNTS: usize = 0x000;
 const NEXT_COUNTS: usize = 0x014;
 const AT_ONCE_CLUBS: usize = 0x028;
 const NEXT_CLUBS: usize = 0x208;
+/// The three answers to an enquiry: the chairman friendly, the unfriendly
+/// one where the manager stands no chance, and the one that takes the
+/// enquiry kindly. Each shows its picture in control 1256.
+const ANSWER_FRIENDLY: u16 = 12;
+const ANSWER_UNFRIENDLY: u16 = 13;
+const ANSWER_WELCOME: u16 = 14;
+const ANSWER_PICTURE: u16 = 1256;
+const PICTURE_REFUSED: u16 = 1932;
+const PICTURE_RUDE: u16 = 1933;
+const PICTURE_KEEN: u16 = 1931;
+/// Why the enquiry cannot go out at all: talks with that club already
+/// running, its board full this week, and the manager under contract with
+/// neither clause nor the president's release.
+const ALREADY_TALKING: u16 = 2452;
+const BOARD_FULL: u16 = 2453;
+const UNDER_CONTRACT: u16 = 2454;
+/// The odds of an enquiry, per cent, by the manager's standing 0…15 and
+/// the club's class 0…9 (the table at `0x8ab900`, `FUN_006a61e5`).
+const CHANCES: [[u8; 10]; 16] = [
+    [10, 10, 10, 0, 0, 0, 0, 0, 0, 0],
+    [20, 10, 10, 0, 0, 0, 0, 0, 0, 0],
+    [30, 20, 10, 0, 0, 0, 0, 0, 0, 0],
+    [40, 30, 10, 0, 0, 0, 0, 0, 0, 0],
+    [50, 40, 20, 0, 0, 0, 0, 0, 0, 0],
+    [10, 50, 30, 30, 0, 0, 0, 0, 0, 0],
+    [10, 50, 40, 40, 20, 0, 0, 0, 0, 0],
+    [0, 20, 50, 50, 50, 20, 0, 0, 0, 0],
+    [0, 0, 10, 40, 60, 50, 0, 0, 0, 0],
+    [0, 0, 0, 20, 40, 60, 20, 10, 0, 0],
+    [0, 0, 0, 10, 10, 50, 40, 20, 10, 0],
+    [0, 0, 0, 10, 10, 40, 70, 30, 20, 10],
+    [0, 0, 0, 5, 10, 30, 80, 40, 30, 20],
+    [0, 0, 0, 0, 5, 20, 90, 50, 40, 30],
+    [0, 0, 0, 0, 0, 10, 100, 60, 50, 40],
+    [0, 0, 0, 0, 0, 10, 100, 70, 60, 50],
+];
 
 /// A league's clubs looking for a manager: at once, and for next season.
 fn vacancies(records: &a3_core::records::Records, g: usize) -> ([Vec<u16>; 2], [i16; 2]) {
@@ -1292,6 +1332,7 @@ impl Screen for Enquiry {
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         let (game, dialog) = (cx.game, cx.dialog);
         self.leagues.clear();
+        (self.chosen, self.clubs) = (0, Default::default());
         let Some(records) = cx.state.records.as_ref() else { return };
         let main = records.globals.main_country().max(0) as u16;
         let has = |country: u16, league: usize| {
@@ -1343,6 +1384,18 @@ impl Screen for Enquiry {
                 self.fill(cx, view, row);
                 Outcome::Stay
             }
+            Target::Row { control: c, row }
+                if matches!(
+                    dialog.controls[c].id,
+                    Some(AT_ONCE_LIST) | Some(NEXT_SEASON_LIST)
+                ) =>
+            {
+                let at_once = dialog.controls[c].id == Some(AT_ONCE_LIST);
+                match self.clubs[usize::from(!at_once)].get(row).copied() {
+                    Some(number) => self.ask(cx, at_once, number),
+                    None => Outcome::Stay,
+                }
+            }
             _ => Outcome::Stay,
         }
     }
@@ -1351,10 +1404,11 @@ impl Screen for Enquiry {
 impl Enquiry {
     /// The two lists of a league (`FUN_00442c7f`), without the own club,
     /// its professionals and its amateurs.
-    fn fill(&self, cx: &Cx, view: &mut View, chosen: usize) {
+    fn fill(&mut self, cx: &Cx, view: &mut View, chosen: usize) {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(&(country, league)) = self.leagues.get(chosen) else { return };
         let (Some(records), Some(team)) = (cx.state.records.as_ref(), own_team(cx)) else { return };
+        self.chosen = chosen;
         let g = records.countries.first_league(country.into()).max(0) as usize + league;
         let ([at_once, next], _) = vacancies(records, g);
         let own = i16::from(team.number());
@@ -1362,17 +1416,113 @@ impl Enquiry {
         let mine = |n: u16| {
             country == u16::from(team.country()) && (n as i16 == own || linked.contains(&(n as i8)))
         };
-        for (id, clubs) in [(AT_ONCE_LIST, at_once), (NEXT_SEASON_LIST, next)] {
-            let rows: Vec<String> = clubs
-                .into_iter()
-                .filter(|&n| !mine(n))
-                .map(|n| game.club_name(Some(records), country as u8, n as i16))
-                .collect();
+        for (numbers, (id, clubs)) in
+            self.clubs.iter_mut().zip([(AT_ONCE_LIST, at_once), (NEXT_SEASON_LIST, next)])
+        {
+            *numbers = clubs.into_iter().filter(|&n| !mine(n)).collect();
             if let Some(list) = control(dialog, id).and_then(|c| view.list_mut(c)) {
-                list.rows = rows;
+                list.rows = numbers
+                    .iter()
+                    .map(|&n| game.club_name(Some(records), country as u8, n as i16))
+                    .collect();
                 list.selected = None;
                 list.scroll = 0;
             }
+        }
+    }
+
+    /// A click on a club (`0x442f85` and `0x443457`): three reasons the
+    /// enquiry cannot go out, then the club weighs the manager's standing
+    /// against its own class and its luck. `at_once` is the 1260 list.
+    /// The own club's run of form and the league's size are not weighed
+    /// here, so it always stands mid-table with a run of nought.
+    fn ask(&mut self, cx: &mut Cx, at_once: bool, number: u16) -> Outcome {
+        let (Some(records), Some(team)) = (cx.state.records.as_ref(), own_team(cx)) else {
+            return Outcome::Stay;
+        };
+        let Some(&(country, _)) = self.leagues.get(self.chosen) else {
+            return Outcome::Stay;
+        };
+        let index = records.human_slot(0).unwrap_or(0);
+        let manager = &records.managers[index];
+        let alert = |text| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+        // Under contract past the season, with neither clause nor the
+        // president's release, he asks nowhere.
+        let bound = if at_once { 0 } else { 1 };
+        if manager.contract_years() > bound
+            && manager.get::<u8>(0x178) == 0
+            && manager.get::<u8>(0x179) & 1 == 0
+        {
+            return alert(UNDER_CONTRACT);
+        }
+        let club = (country as u8, number as i16);
+        if a3_core::contract::talk_booked(records, index, club) {
+            return alert(ALREADY_TALKING);
+        }
+        if a3_core::contract::board_busy(records, club) {
+            return alert(BOARD_FULL);
+        }
+        let Some(other) = records.team(country, number) else { return Outcome::Stay };
+        let class = usize::from(other.class()).min(9);
+        let standing = usize::try_from(manager.standing()).unwrap_or(0).min(15);
+        let chance = u32::from(CHANCES[standing][class]);
+        // Too big for him: no chance there, while a smaller club has one.
+        let too_big = chance == 0 && CHANCES[standing][..class].iter().any(|&v| v != 0);
+        let engaged = other.engaged();
+        let luck = records.luck.values()[usize::from(team.number()) % 30];
+        // p: the run of form would lift it to 10 or sink it to 5 … 7, and
+        // the own place in the danger zone to 4; abroad the manager's
+        // foreign ability shrinks it (the fifth value of his abilities).
+        let mut p = 6;
+        if country as i16 != records.globals.main_country() {
+            let ability = manager.abilities()[usize::from(manager.level()).min(15)][4];
+            p = p * (i32::from(ability) * 4 + 80) / 100;
+        }
+        let answer = if too_big || (!at_once && engaged != 0) {
+            ANSWER_UNFRIENDLY
+        } else if cx.state.season.as_mut().map_or(0, |s| s.random.below(100)) >= chance {
+            ANSWER_FRIENDLY
+        } else if i32::from(luck) >= p {
+            ANSWER_FRIENDLY
+        } else {
+            // Keen — but the appointment dialog 14 follows and books the
+            // talks (412, kind 0x14), and that booking is not built.
+            ANSWER_WELCOME
+        };
+        Outcome::Popup(Request::new(answer))
+    }
+}
+
+/// The answer to an enquiry (dialogs 12, 13 and 14, `CAnfrageAbgelehntFr`,
+/// `CAnfrageAbgelehntUnfr` and `CAnfrageAngenommen`): one picture in
+/// control 1256 and the chairman's sentence, which stands in the file.
+/// Closing it returns to the enquiry, which stays open throughout.
+#[derive(Default)]
+pub struct EnquiryAnswer;
+
+impl Screen for EnquiryAnswer {
+    fn ids(&self) -> &[u16] {
+        &[ANSWER_FRIENDLY, ANSWER_UNFRIENDLY, ANSWER_WELCOME]
+    }
+
+    /// `0x442314`, `0x442494` and `0x442614`.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let dialog = cx.dialog;
+        let picture = match view.id {
+            ANSWER_UNFRIENDLY => PICTURE_RUDE,
+            ANSWER_WELCOME => PICTURE_KEEN,
+            _ => PICTURE_REFUSED,
+        };
+        if let Some(b) = control(dialog, ANSWER_PICTURE).and_then(|c| view.bitmap_mut(c)) {
+            b.picture = Some(crate::controls::bitmap::Picture::graphic(picture));
+        }
+    }
+
+    /// The one button each: 12's and 14's is id 1, 13's 1257.
+    fn input(&mut self, _: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        match target {
+            Target::Button(_) => Outcome::Close(Reply::Ok),
+            _ => Outcome::Stay,
         }
     }
 }

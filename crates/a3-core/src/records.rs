@@ -419,6 +419,13 @@ record! {
     0x12d => country, set_country: u8;
     /// Its league's level, 0 the first.
     0x12e => level, set_level: u8;
+    /// The club's class, 0 the biggest: the enquiries weigh their answer
+    /// by it (the club object's +0x113, `FUN_006a61e5`'s table).
+    0x13c => class, set_class: u8;
+    /// A manager signed with this club for next season: minus his number,
+    /// 0 none (the club object's +0x8c, which also names a human manager
+    /// while one manages the club).
+    0xae => engaged, set_engaged: i16;
     /// The team's mood ("Stimmung"), 0 to 200 (`FUN_007147ce`).
     0xc4 => mood, set_mood: u8;
     /// Its tactics ([`crate::tactics`]; the club object's +0xa0, +0xa8 …

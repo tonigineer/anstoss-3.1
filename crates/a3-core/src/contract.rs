@@ -559,6 +559,15 @@ pub fn talk_in_week(records: &Records, index: usize) -> bool {
         .any(|t| t.slot == talk_slot(index) && (start..start + 7).contains(&t.day))
 }
 
+/// Whether this club's board has an appointment in this week already
+/// (`FUN_006a8c36`): any booked talk naming it with its day in the week.
+pub fn board_busy(records: &Records, club: (u8, i16)) -> bool {
+    let start = records.globals.week_start();
+    talks(records)
+        .iter()
+        .any(|t| t.club == club && (start..start + 7).contains(&t.day))
+}
+
 /// The talk booked (`FUN_006a8d67`): only if the planner's day is free,
 /// the manager has no talk booked for that day, and the list has room —
 /// then the entry and the planner's kind 0x14 entry naming the club.

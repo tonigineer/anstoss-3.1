@@ -601,7 +601,11 @@ mod tests {
         patch: impl FnOnce(&mut a3_core::records::Records),
     ) -> PathBuf {
         use a3_core::records::Records;
-        let bytes = std::fs::read(dir.join(format!("saves/{name}.an3"))).unwrap();
+        let keeps = dir.parent().unwrap().join("saves-kept");
+        let bytes = [dir.join(format!("saves/{name}.an3")), keeps.join(format!("{name}.an3"))]
+            .into_iter()
+            .find_map(|path| std::fs::read(path).ok())
+            .unwrap();
         let mut records = Records::from_save(a3_files::an3::Save::parse(&bytes).unwrap()).unwrap();
         patch(&mut records);
         let root = std::env::temp_dir().join(format!("a3-script-{out}"));
@@ -1882,6 +1886,50 @@ mod tests {
         assert_ne!(manager.get::<u8>(0x179) & 1, 0);
         assert_eq!(manager.popularity(), [30, 50, 38]);
         assert_eq!(manager.confidence(), 55);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_other_clubs_answer_the_enquiry() {
+        let game = game();
+        let ask = "now click bar 12\nuntil dialog 404\nnow choose 4975 8\nuntil dialog 15";
+        // Probe1's manager is under contract past the season with neither
+        // clause nor release: the enquiry only brings that up (§8.2).
+        let runner = on_save(&game, "Probe1", &format!("{ask}\nnow row 1261 0\nuntil dialog 380"))
+            .unwrap();
+        assert_eq!(runner.host.view().id, 380);
+        // With a clause he may ask, and there he stands no chance: his
+        // standing of two is below what Probe1's candidates expect.
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "Probe1", "enquiry", |records| {
+            let index = records.human_slot(0).unwrap();
+            records.managers[index].put(0x178, 42u8);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let runner = on_save(
+            &game,
+            "enquiry",
+            &format!("{ask}\nnow row 1261 0\nuntil dialog 13\nnow press 1257\nuntil dialog 15"),
+        )
+        .unwrap();
+        assert_eq!(runner.host.view().id, 15);
+        // In A.an3 his standing fits the candidates' class, and the club
+        // turns him down kindly whichever way the dice fall: its luck of
+        // nine answers the enquiry at home in any case.
+        let root = patched(&dir, "A", "enquiry", |records| {
+            let index = records.human_slot(0).unwrap();
+            records.managers[index].put(0x178, 42u8);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let runner = on_save(
+            &game,
+            "enquiry",
+            &format!("{ask}\nnow row 1261 0\nuntil dialog 12\nnow press 1\nuntil dialog 15"),
+        )
+        .unwrap();
+        assert_eq!(runner.host.view().id, 15);
     }
 
     #[test]
