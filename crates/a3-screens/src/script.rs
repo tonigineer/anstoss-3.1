@@ -3396,6 +3396,48 @@ mod tests {
         assert!(a3_core::transfers::pending(records, booked.player));
     }
 
+    /// "Auf Transferliste setzen" on Probe1: the first player who asks
+    /// for something (205) goes onto the list on "Einverstanden", his
+    /// demand kept; clicked again he is asked about (4072) and taken off.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_player_goes_onto_the_transfer_list_and_off() {
+        let game = game();
+        let open = "now click bar 10\nuntil dialog 218\nnow choose 5042 0\nuntil dialog 216\n\
+                    now choose 5657 1";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let list = control(&game.dialogs[&216], 3298).unwrap();
+        let rows = runner.host.view().list(list).unwrap().rows.len();
+        drop(runner);
+        let asks = |row: usize| {
+            let then = format!("{open}\nnow row 3298 {row}");
+            on_save(&game, "Probe1", &then).is_some_and(|r| r.host.view().id == 205)
+        };
+        let Some(row) = (0..rows).find(|&row| asks(row)) else { panic!("nobody asks") };
+        let agreed = format!(
+            "{open}\nnow row 3298 {row}\nuntil dialog 205\nnow choose 3022 0\nuntil dialog 216"
+        );
+        let Some(runner) = on_save(&game, "Probe1", &agreed) else { return };
+        let id = {
+            let state = runner.host.state();
+            let season = state.season.as_ref().unwrap();
+            let club = &season.clubs[&season.manager().unwrap().club.unwrap()];
+            let key = runner.host.view().list(list).unwrap().keys[row];
+            let id = club.status[key].id;
+            let records = state.records.as_ref().unwrap();
+            assert_eq!(a3_core::transfers::listed_terms(records, id), Some(1));
+            assert!(records.player(id).unwrap().get::<u16>(0x1f0) > 0);
+            id
+        };
+        drop(runner);
+        let off = format!(
+            "{agreed}\nnow row 3298 {row}\nuntil dialog 384\nnow press 4741\nuntil dialog 216"
+        );
+        let Some(runner) = on_save(&game, "Probe1", &off) else { return };
+        let state = runner.host.state();
+        assert_eq!(a3_core::transfers::listed_terms(state.records.as_ref().unwrap(), id), None);
+    }
+
     /// Doping (dialog 394) on Probe1, as the original shows it: Ortag
     /// ready, Schmitt not; "Kondition steigern" doses Ortag at once — doped,
     /// his condition ten up, the dose on the medical bill — and a second

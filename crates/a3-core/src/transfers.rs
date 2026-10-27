@@ -429,3 +429,54 @@ pub fn terms(records: &Records, player: u16) -> [u8; TERMS] {
     t[17] = r.get::<u8>(0x160);
     t
 }
+
+/// A listing's terms as the club sets them: 1 for a fee, 2 "ablösefrei".
+pub const FOR_A_FEE: u8 = 1;
+
+/// The terms of his listing, if he is on the list (`FUN_0075b308`, the
+/// entry's +0xd): the club may take him off only when it is 1.
+pub fn listed_terms(records: &Records, id: u16) -> Option<u8> {
+    let b = records.block(&list_name())?;
+    let count = usize::try_from(word(b, 0)).unwrap_or(0).min(LIST_SIZE);
+    (0..count)
+        .map(|k| LIST_FIRST + k * LIST_ENTRY)
+        .find(|&e| word(b, e) as u16 == id)
+        .and_then(|e| b.get(e + 0xd).copied())
+}
+
+/// Him onto the transfer list for sale (`FUN_0075a129` → `FUN_007592fa`
+/// with kind 1): his club, main position and strength, today, the terms
+/// — `free` "ablösefrei" —, and his record marked; false when the list is
+/// full or holds him. The entry's +8 (a strength outlook,
+/// `FUN_006ff516`) and +0xe (a value factor, `FUN_00708b80`), which the
+/// list's screen does not show, stay 0.
+pub fn list_for_sale(records: &mut Records, id: u16, free: bool) -> bool {
+    let Some(r) = records.player(id) else { return false };
+    let [country, number] = r.club();
+    let (position, strength) = (r.positions()[0], r.strength());
+    let day = records.globals.day() as i16;
+    let Some(b) = records.block_mut(&list_name()) else { return false };
+    let count = usize::try_from(word(b, 0)).unwrap_or(0).min(LIST_SIZE);
+    if count >= LIST_SIZE || (0..count).any(|k| word(b, LIST_FIRST + k * LIST_ENTRY) as u16 == id)
+    {
+        return false;
+    }
+    let e = LIST_FIRST + count * LIST_ENTRY;
+    if b.len() < e + LIST_ENTRY {
+        return false;
+    }
+    b[e..e + LIST_ENTRY].fill(0);
+    put16(b, e, id as i16);
+    b[e + 2] = country;
+    put16(b, e + 4, i16::from(number));
+    b[e + 6] = position;
+    b[e + 7] = strength;
+    put16(b, e + 0xa, day);
+    b[e + 0xc] = SALE;
+    b[e + 0xd] = if free { FREE_TRANSFER } else { FOR_A_FEE };
+    put16(b, 0, count as i16 + 1);
+    if let Some(r) = records.players.get_mut(usize::from(id)) {
+        r.set_retiring(r.retiring() | LISTED);
+    }
+    true
+}

@@ -7,11 +7,11 @@ use std::collections::HashMap;
 use chrono::Datelike;
 
 use a3_core::cycle::Request;
-use a3_core::cycle::dialogs::NOTICE;
+use a3_core::cycle::dialogs::{NOTICE, QUESTION};
 use a3_core::cycle::dialogs::{
     AMATEUR_PLAYERS, APPOINTMENTS, CLUB_SEARCH, CURRENT_SQUAD, DRAW_OPTION, EXTENSIONS, LOANED_OUT,
-    MARKET_VALUES, NO_DATE, NEXT_SQUAD, NORACSA_REQUEST, NORACSA_SEARCH, RELATIONS, TRANSFER_LIST,
-    WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
+    LISTING_DEMAND, MARKET_VALUES, NEXT_SQUAD, NO_DATE, NORACSA_REQUEST, NORACSA_SEARCH, RELATIONS,
+    TRANSFER_LIST, WATCH_LIST, WORLDS_BEST, YOUTH_POACHING, YOUTH_TEAM,
 };
 use a3_core::records::Team;
 use a3_core::season::Rules;
@@ -240,6 +240,12 @@ enum Pending {
     Option(u16),
     /// The week planner booking his extension talk.
     Booking,
+    /// Whether to take him off the transfer list (384).
+    Unlist(u16),
+    /// His demand to go onto the list while under contract (205).
+    Demand(u16, i32),
+    /// An alert after which the squad is shown anew.
+    Refill,
 }
 
 /// What a click on a row does, by the mode buttons' items.
@@ -303,6 +309,36 @@ const CONTENT_ABOVE: i32 = 149;
 /// out (`FUN_0075827a`).
 const LATE_DAY: i32 = 216;
 const OLD: u32 = 30;
+/// The transfer list's further alerts (`FUN_00563f7b` steps 5–8).
+const TALK_THIS_WEEK: u16 = 2512;
+const WANTS_TO_STAY_LISTED: u16 = 3190;
+const NO_VALID_CONTRACT: u16 = 2511;
+const TAKE_OFF_LIST: u16 = 4072;
+const NO_MORE_MOVES: u16 = 3191;
+const FED_UP: u16 = 3846;
+const NOW_LISTED: u16 = 2513;
+/// R+0x161: how often he may still move this season, as the list reads
+/// it (L+0x98).
+const MOVES: usize = 0x161;
+const REGULAR_PLACE: u16 = a3_core::contract::REGULAR_PLACE;
+/// 205's choices; R+0x1f0, the demand kept; his answers to being benched
+/// and what in his character (traits[0], traits[1]) leads to which.
+const AGREE: usize = 0;
+const BENCH_HIM: usize = 1;
+const DEMAND_KEPT: usize = 0x1f0;
+const DONT_CARE: u16 = 2179;
+const GOLF: u16 = 2180;
+const FIGHTS: u16 = 2181;
+const CAREER: u16 = 2182;
+const GOES_FREELY: u16 = 2183;
+const WAIT_AND_SEE: u16 = 2184;
+const CARELESS: u16 = 0x260;
+const FIGHTER: u16 = 0x1;
+const AMBITIOUS: u16 = 0x10;
+const GOES: u16 = 0x100;
+const YOUNG: u32 = 22;
+const SULK_MORE: i32 = -5;
+const SULK_LESS: i32 = -2;
 /// The transfer list's: the manager himself; the loan's: the manager, a
 /// borrowed player.
 const OWN_LISTING: u16 = 3315;
@@ -339,7 +375,10 @@ impl Screen for CurrentSquad {
         }
         let works = |target: Target| match target {
             Target::Option { control: c, item } if dialog.controls[c].id == Some(MODE_BUTTONS) => {
-                matches!(MODES.get(item), Some(Mode::Contract | Mode::Bonus | Mode::Fine))
+                matches!(
+                    MODES.get(item),
+                    Some(Mode::Contract | Mode::TransferList | Mode::Bonus | Mode::Fine)
+                )
             }
             _ => true,
         };
@@ -408,7 +447,27 @@ impl Screen for CurrentSquad {
                 Outcome::Stay
             }
             Pending::Option(id) => contract_talk(cx, id, true, &mut self.pending),
-            Pending::Booking | Pending::Nothing => Outcome::Stay,
+            Pending::Unlist(id) if reply == Reply::Ok => {
+                if let Some(records) = cx.state.records.as_mut() {
+                    a3_core::transfers::take_off(records, id);
+                }
+                fill_squad(cx, view);
+                Outcome::Stay
+            }
+            Pending::Demand(id, demand) => match reply {
+                Reply::Choice(choice) => {
+                    let (item, free) = (choice / 2, choice % 2 == 1);
+                    let outcome = demanded(cx, id, demand, item, free);
+                    fill_squad(cx, view);
+                    outcome
+                }
+                _ => Outcome::Stay,
+            },
+            Pending::Refill => {
+                fill_squad(cx, view);
+                Outcome::Stay
+            }
+            Pending::Booking | Pending::Unlist(_) | Pending::Nothing => Outcome::Stay,
         }
     }
 }
@@ -416,7 +475,7 @@ impl Screen for CurrentSquad {
 /// A row's player acted on by the mode chosen (`OnSelChange` 0x564c02):
 /// the bonus and the fine in their dialogs; the contract, the transfer
 /// list and the loan as far as their refusals go.
-fn act(cx: &Cx, mode: Mode, player: usize, pending: &mut Pending) -> Outcome {
+fn act(cx: &mut Cx, mode: Mode, player: usize, pending: &mut Pending) -> Outcome {
     let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
     match mode {
         Mode::Bonus => {
@@ -449,6 +508,7 @@ fn act(cx: &Cx, mode: Mode, player: usize, pending: &mut Pending) -> Outcome {
     match refusal {
         Some(text) => notice(text),
         None if mode == Mode::Contract => contract_talk(cx, id, false, pending),
+        None if mode == Mode::TransferList => listing(cx, id, pending),
         None => {
             info!("{mode:?} ({id}): not built yet");
             Outcome::Stay
@@ -493,6 +553,118 @@ fn contract_talk(cx: &Cx, id: u16, optioned: bool, pending: &mut Pending) -> Out
     *pending = Pending::Booking;
     let args = Args::Book(a3_core::contract::EXTENSION_KIND, id);
     Outcome::Popup(Request::with(super::planner::PLANNER, args))
+}
+
+/// "Auf Transferliste setzen" past its first refusals (`FUN_00563f7b`
+/// steps 5–8): off the list if he is on it and willing, onto it — at once
+/// if his contract runs out or he is fed up, else for what he demands
+/// (205).
+fn listing(cx: &mut Cx, id: u16, pending: &mut Pending) -> Outcome {
+    let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+    let (Some(records), Some(season)) = (cx.state.records.as_ref(), cx.state.season.as_ref())
+    else {
+        return Outcome::Stay;
+    };
+    let Some(r) = records.player(id) else { return Outcome::Stay };
+    let years = years_left(r, i32::from(records.globals.start_year()));
+    let late = i32::try_from(season.day).unwrap_or(0) > LATE_DAY;
+    let running = years > 1 || years == 1 && !late;
+    if let Some(terms) = a3_core::transfers::listed_terms(records, id) {
+        if a3_core::transfers::pending(records, id) {
+            return notice(TALK_THIS_WEEK);
+        }
+        if terms != a3_core::transfers::FOR_A_FEE {
+            return notice(WANTS_TO_STAY_LISTED);
+        }
+        if !running {
+            return notice(NO_VALID_CONTRACT);
+        }
+        *pending = Pending::Unlist(id);
+        return Outcome::Popup(Request::with(QUESTION, Args::TextFor(TAKE_OFF_LIST, id)));
+    }
+    let moves = r.get::<u8>(MOVES);
+    if (moves == 0 || moves == 1 && records.globals.seasons() > 1) && !late {
+        return notice(NO_MORE_MOVES);
+    }
+    if running {
+        let content = a3_core::mood::content_level(a3_core::mood::parts(r));
+        if content > 1 {
+            *pending = Pending::Refill;
+            let listed = list(cx, id, false);
+            return if listed { notice(FED_UP) } else { Outcome::Stay };
+        }
+        let month = usize::try_from(season.date().month()).unwrap_or(0);
+        let regular = r.terms() & REGULAR_PLACE != 0;
+        let demand =
+            cx.game.rules.contract.listing_demand(id, r.salary(), years, month, regular);
+        *pending = Pending::Demand(id, demand);
+        return Outcome::Popup(Request::with(LISTING_DEMAND, Args::Record(id)));
+    }
+    *pending = Pending::Refill;
+    if list(cx, id, false) { notice(NOW_LISTED) } else { Outcome::Stay }
+}
+
+/// What 205's answer does (`FUN_00563f7b` step 7, [asm 0x5645de]):
+/// "Einverstanden" lists him, his demand kept (R+0x1f0, in thousands); "Dann
+/// machen Sie kein Spiel mehr" gets his answer by his age and character —
+/// some go onto the list, some sulk; "Vergessen Sie es" nothing.
+fn demanded(cx: &mut Cx, id: u16, demand: i32, item: usize, free: bool) -> Outcome {
+    let notice = |text: u16| Outcome::Popup(Request::with(NOTICE, Args::Text(text)));
+    let agreed = |cx: &mut Cx| {
+        if list(cx, id, free)
+            && let Some(r) = player_mut(cx, id)
+        {
+            r.put(DEMAND_KEPT, (demand / 1000) as u16);
+        }
+    };
+    match item {
+        AGREE => {
+            agreed(cx);
+            Outcome::Stay
+        }
+        BENCH_HIM => {
+            let Some(r) = cx.state.records.as_ref().and_then(|r| r.player(id)) else {
+                return Outcome::Stay;
+            };
+            let [first, second] = r.traits();
+            let today = cx.state.season.as_ref().map(|s| s.date());
+            let age = shown(cx, id).zip(today).map_or(0, |(s, d)| s.player.age(d));
+            if age > OLD || second & CARELESS != 0 {
+                let golf = cx.state.season.as_mut().map_or(0, |s| s.random.below(2)) == 0;
+                sulk(cx, id, SULK_MORE);
+                notice(if golf { GOLF } else { DONT_CARE })
+            } else if second & FIGHTER != 0 || first & FIGHTER != 0 {
+                notice(FIGHTS)
+            } else if age < YOUNG || second & AMBITIOUS != 0 {
+                agreed(cx);
+                notice(CAREER)
+            } else if second & GOES != 0 {
+                agreed(cx);
+                notice(GOES_FREELY)
+            } else {
+                sulk(cx, id, SULK_LESS);
+                notice(WAIT_AND_SEE)
+            }
+        }
+        _ => Outcome::Stay,
+    }
+}
+
+/// Less content with the trainer (`FUN_007007a1`).
+fn sulk(cx: &mut Cx, id: u16, by: i32) {
+    if let Some(r) = player_mut(cx, id) {
+        a3_core::mood::change_trainer(r, by);
+    }
+}
+
+fn player_mut<'a>(cx: &'a mut Cx, id: u16) -> Option<&'a mut a3_core::records::Player> {
+    cx.state.records.as_mut()?.players.get_mut(usize::from(id))
+}
+
+/// Onto the list for sale (`FUN_0075a129(L, free, 1)`): whether it took
+/// him.
+fn list(cx: &mut Cx, id: u16, free: bool) -> bool {
+    cx.state.records.as_mut().is_some_and(|r| a3_core::transfers::list_for_sale(r, id, free))
 }
 
 /// Whether he is happy with his contract as it runs (`FUN_00767cb9`):
@@ -902,9 +1074,10 @@ const NEXT_CLUB_COUNTRY: usize = 0x14c;
 const INFO_ONLY: [hub::Command; 1] = [hub::Command::Info];
 
 pub(crate) fn compose_next(dialogs: &mut HashMap<u16, Dialog>) {
-    for id in [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION, RELATIONS, NO_DATE] {
+    let ids = [NEXT_SQUAD, LOANED_OUT, EXTENSIONS, DRAW_OPTION, RELATIONS, NO_DATE, LISTING_DEMAND];
+    for id in ids {
         if let Some(dialog) = dialogs.get_mut(&id) {
-            let kept = matches!(id, DRAW_OPTION | RELATIONS | NO_DATE);
+            let kept = matches!(id, DRAW_OPTION | RELATIONS | NO_DATE | LISTING_DEMAND);
             let title = if kept { dialog.title.clone() } else { String::new() };
             dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, title));
             if matches!(id, NEXT_SQUAD | EXTENSIONS) {
@@ -1486,6 +1659,71 @@ fn extend(cx: &mut Cx, id: u16) {
         season.clubs.get_mut(&club).and_then(|c| c.status.iter_mut().find(|s| s.id == id))
     {
         status.contract = Some(years.into());
+    }
+}
+
+/// A player under contract asked onto the transfer list (dialog 205,
+/// `CSpielerMitVertragAufTL`): his contract's end and what he wants for
+/// it; the choice and the "ablösefrei" box go back as the choice × 2 +
+/// the box.
+#[derive(Default)]
+pub struct ListingDemand {
+    demand: i32,
+}
+
+const UNTIL_TEXT: u16 = 3020;
+const DEMAND_TEXT: u16 = 3021;
+const DEMAND_CHOICES: u16 = 3022;
+const FREE_BOX: u16 = 6047;
+/// "%1.%2.%3", a date; contracts run to the 30th of June.
+const DATE_TEXT: u16 = 1997;
+
+impl Screen for ListingDemand {
+    fn ids(&self) -> &[u16] {
+        &[LISTING_DEMAND]
+    }
+
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Args::Record(id) = args else { return };
+        let Some(records) = cx.state.records.as_ref() else { return };
+        let Some(r) = records.player(id) else { return };
+        let year = i32::from(records.globals.start_year());
+        let years = years_left(r, year);
+        let month = cx.state.season.as_ref().map_or(0, |s| s.date().month() as usize);
+        let regular = r.terms() & REGULAR_PLACE != 0;
+        self.demand = game.rules.contract.listing_demand(id, r.salary(), years, month, regular);
+        let name = records.known_as(id).unwrap_or_default();
+        let until = game
+            .text(DATE_TEXT)
+            .replacen("%1", "30", 1)
+            .replacen("%2", "6", 1)
+            .replacen("%3", &(year + i32::from(years)).to_string(), 1);
+        let text = |c: u16| control(dialog, c).map(|i| dialog.controls[i].text.clone());
+        let first = text(UNTIL_TEXT).unwrap_or_default().replacen("%s", &name, 1);
+        set(view, dialog, UNTIL_TEXT, first.replacen("%s", &until, 1));
+        let demand = money(game, i64::from(self.demand));
+        let second = text(DEMAND_TEXT).unwrap_or_default().replacen("%s", &demand, 1);
+        set(view, dialog, DEMAND_TEXT, second);
+        if let Some(c) = control(dialog, DEMAND_CHOICES) {
+            view.set_chosen(c, NONE);
+        }
+        super::market::question_ball(view, dialog);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        match target {
+            Target::Option { control: c, item }
+                if dialog.controls[c].id == Some(DEMAND_CHOICES) =>
+            {
+                let free_box = control(dialog, FREE_BOX).and_then(|b| view.check(b));
+                let free = free_box.is_some_and(|b| b.checked);
+                Outcome::Close(Reply::Choice(item * 2 + usize::from(free)))
+            }
+            _ => Outcome::Stay,
+        }
     }
 }
 

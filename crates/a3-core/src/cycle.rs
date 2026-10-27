@@ -115,6 +115,9 @@ pub mod dialogs {
     pub const DRAW_OPTION: u16 = 305;
     /// "Kein Termin mehr frei": a player with no free appointment this week.
     pub const NO_DATE: u16 = 262;
+    /// A player under contract asked onto the transfer list: what he
+    /// wants for it.
+    pub const LISTING_DEMAND: u16 = 205;
     /// Other clubs' youths to poach, and the pre-contract offered.
     pub const YOUTH_POACHING: u16 = 107;
     pub const PRE_CONTRACT: u16 = 325;

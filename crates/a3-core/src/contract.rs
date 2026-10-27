@@ -273,6 +273,31 @@ impl ContractTables {
         (ftol(x) / step * step).max(SMALL_STEP)
     }
 
+    /// What he asks to go onto the transfer list while his contract runs
+    /// (`CSpielerMitVertragAufTL::FUN_00569653`): his salary for the
+    /// months left, a share of it by how many — (id % 3 + 5) tenths below
+    /// seven months, + 4 below twelve, + 3 beyond —, half again for a
+    /// regular place, at most 20 million.
+    pub fn listing_demand(
+        &self,
+        id: u16,
+        salary: u16,
+        years: i8,
+        month: usize,
+        regular: bool,
+    ) -> i32 {
+        const MOST: f32 = 20_000_000.0;
+        let months = self.months(years, month);
+        // Wide on the FPU, kept as f32 where the game stores it.
+        let mut v = (f64::from(salary) * f64::from(months) * f64::from(THOUSAND) / 12.0) as f32;
+        let share = i32::from(id) % 3 + if months < 7 { 5 } else if months < 12 { 4 } else { 3 };
+        v = (f64::from(share) / 10.0 * f64::from(v)) as f32;
+        if regular {
+            v = (f64::from(v) * 1.5) as f32;
+        }
+        v.min(MOST) as i32
+    }
+
     /// The months a contract of so many years still runs
     /// (`FUN_00707f50`).
     fn months(&self, years: i8, month: usize) -> i32 {
