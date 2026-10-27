@@ -9,6 +9,8 @@ use std::collections::HashMap;
 
 use a3_core::cycle::Request;
 use a3_core::cycle::dialogs::{CONTACTS, NOTICE};
+use a3_core::trainers;
+use a3_core::random::Random;
 use a3_core::season::Rules;
 use a3_files::rch::Dialog;
 
@@ -16,6 +18,7 @@ use super::hub::{self, CONTACTS_SYMBOL};
 use super::squad::own_team;
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
 use crate::controls::options::NONE;
+use crate::game::Game;
 use crate::pointer::Target;
 use crate::view::View;
 use a3_core::finances::CLUB_TO_TEAM;
@@ -45,7 +48,7 @@ const ENQUIRY: usize = 8;
 const NEW_JOB: u16 = 2422;
 const MOVING_AT: usize = 0x130;
 /// Every sub-dialog, which shows its file's title as its caption.
-const SUB_DIALOGS: [u16; 8] = [35, 58, 166, 398, 494, 492, 493, 15];
+const SUB_DIALOGS: [u16; 13] = [35, 58, 166, 398, 494, 492, 493, 15, 31, 32, 34, 37, 39];
 /// The buttons whose sub-dialogs are built, and those.
 const BUILT: [(usize, u16); 6] = [
     (2, FAN_DIALOG),
@@ -1288,13 +1291,20 @@ impl Enquiry {
 /// The trainers' market (dialog 35, `CCoTrainerListe` for the
 /// co-trainers, `CToTrainerlisteDialog` for the goalkeepers' coaches;
 /// KONTAKTE.md §5): the country's free candidates by competence, and the
-/// club's own trainer below. Making an offer is not built.
+/// club's own trainer below. A row opens talks with that candidate.
 #[derive(Default)]
 pub struct Trainers {
     keepers: bool,
+    /// Whether the popup last asked was the offer dialog and not an alert.
+    offered: bool,
 }
 
 const TRAINERS_DIALOG: u16 = 35;
+/// The offer dialog (`CCoTrainerAngebotMachen`).
+const TRAINERS_OFFER: u16 = 32;
+/// A row whose trainer is no longer on the market, or no longer free
+/// (`0x486ab9`).
+const TRAINER_GONE: u16 = 4312;
 const TRAINERS_LIST: u16 = 1359;
 const EXTEND: u16 = 1361;
 const CURRENT: u16 = 1362;
@@ -1328,6 +1338,7 @@ const REPUTATION_AT: usize = 6;
 const BORN_AT: usize = 8;
 const UNDER_CONTRACT_AT: usize = 0xc;
 const PAY_AT: usize = 0x10;
+const YEARS_LEFT_AT: usize = 0xe;
 const YEARS_ASKED_AT: usize = 0x15;
 const TURNED_DOWN_AT: usize = 0x18;
 /// The goalkeepers' header and list columns (`0x88b0a4`, `0x88b0b8`,
@@ -1360,6 +1371,7 @@ struct Trainer {
     reputation: u8,
     pay: i32,
     years: u8,
+    years_left: u8,
     under_contract: u8,
     turned_down: i16,
 }
@@ -1383,6 +1395,7 @@ fn trainer(cx: &Cx, keepers: bool, id: i16) -> Option<Trainer> {
         reputation: *r.get(REPUTATION_AT)?,
         pay: i32::from_le_bytes(r.get(PAY_AT..PAY_AT + 4)?.try_into().ok()?),
         years: *r.get(YEARS_ASKED_AT)?,
+        years_left: *r.get(YEARS_LEFT_AT)?,
         under_contract: *r.get(UNDER_CONTRACT_AT)?,
         turned_down: word(TURNED_DOWN_AT),
     })
@@ -1397,6 +1410,7 @@ impl Screen for Trainers {
     fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
         let (game, dialog) = (cx.game, cx.dialog);
         self.keepers = matches!(args, Args::Trainers { keepers: true });
+        self.offered = false;
         let caption =
             if self.keepers { game.text(KEEPERS_CAPTION).to_owned() } else { dialog.title.clone() };
         set(view, dialog, CAPTION_ID, caption);
@@ -1413,6 +1427,64 @@ impl Screen for Trainers {
                 list.aligns = KEEPERS_ALIGNS.into();
             }
         }
+        self.fill(cx, view);
+        mark_inert(view, dialog, |_| true);
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        if let Target::Row { control: c, row } = target {
+            if dialog.controls[c].id != Some(TRAINERS_LIST) {
+                return Outcome::Stay;
+            }
+            let Some(id) = view.list(c).and_then(|l| l.keys.get(l.scroll + row).copied()) else {
+                return Outcome::Stay;
+            };
+            let id = id as i16;
+            // Talks only while he is on the market and nobody still has him
+            // under contract; the co-trainers say when he is not, the
+            // goalkeepers' coaches say nothing (§5.5).
+            if !self.on_market(cx, id) {
+                return if self.keepers {
+                    Outcome::Stay
+                } else {
+                    Outcome::Popup(Request::with(NOTICE, Args::Text(TRAINER_GONE)))
+                };
+            }
+            self.offered = true;
+            let args = Args::TrainerOffer { keepers: self.keepers, id };
+            return Outcome::Popup(Request::with(TRAINERS_OFFER, args));
+        }
+        match target {
+            Target::Button(c) if crate::controls::button::is_ok(&dialog.controls[c]) => {
+                Outcome::Close(Reply::Ok)
+            }
+            _ => Outcome::Stay,
+        }
+    }
+
+    /// What the offer chain had to say: with a trainer hired the market
+    /// closes with him (the list's `EndDialog(1)`); after failed talks its
+    /// rows show again, the turned-down one gone (§5.5).
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        if !std::mem::take(&mut self.offered) {
+            return Outcome::Stay;
+        }
+        match reply {
+            Reply::Ok => Outcome::Close(Reply::Ok),
+            _ => {
+                self.fill(cx, view);
+                Outcome::Stay
+            }
+        }
+    }
+}
+
+impl Trainers {
+    /// The candidates of the country's market by competence, the ids the
+    /// rows stand for, and the club's own trainer on the line below.
+    fn fill(&self, cx: &Cx, view: &mut View) {
+        let (game, dialog) = (cx.game, cx.dialog);
         let (Some(team), Some(records)) = (own_team(cx), cx.state.records.as_ref()) else { return };
         let current = cx.state.season.as_ref().map_or(0, |s| s.current);
         let number = records.human_slot(current).map_or(1, |s| s as i16 + 1);
@@ -1421,12 +1493,8 @@ impl Screen for Trainers {
         let ids: Vec<i16> = records
             .block(&format!("{market}[{b}]"))
             .map(|m| {
-                let count = i16::from_le_bytes([m[0], m[1]]).max(0) as usize;
-                (0..count.min(MARKET_ENTRIES))
-                    .map(|k| {
-                        let at = 2 + k * MARKET_ENTRY;
-                        m.get(at..at + 2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
-                    })
+                (0..market_count(m).min(MARKET_ENTRIES))
+                    .filter_map(|k| Some(market_entry(m, k)?.0))
                     .filter(|&id| id > 0)
                     .collect()
             })
@@ -1445,9 +1513,12 @@ impl Screen for Trainers {
         let what = |t: &Trainer| {
             game.text(REPUTATIONS + u16::from(t.reputation.min(REPUTATIONS_LAST))).to_owned()
         };
-        let rows: Vec<String> = found
+        let kept: Vec<&(i16, Trainer)> = found
             .iter()
             .filter(|(_, t)| t.turned_down & (1 << number) == 0 && t.under_contract == 0)
+            .collect();
+        let rows: Vec<String> = kept
+            .iter()
             .map(|(_, t)| {
                 let pay = super::playerinfo::money(game, t.pay.into());
                 if self.keepers {
@@ -1460,6 +1531,7 @@ impl Screen for Trainers {
             .collect();
         if let Some(list) = control(dialog, TRAINERS_LIST).and_then(|c| view.list_mut(c)) {
             list.rows = rows;
+            list.keys = kept.iter().map(|(id, _)| *id as usize).collect();
             list.selected = None;
         }
         // The club's own trainer, or neither line.
@@ -1488,15 +1560,466 @@ impl Screen for Trainers {
                 }
             }
         }
-        mark_inert(view, dialog, |_| true);
     }
 
+    /// Whether talks can still be opened with him: he stands in the
+    /// country's market block, and his record keeps no year left for him
+    /// with anyone (record +0xe).
+    fn on_market(&self, cx: &Cx, id: i16) -> bool {
+        let (Some(records), Some(team)) = (cx.state.records.as_ref(), own_team(cx)) else {
+            return false;
+        };
+        let b = usize::from(records.countries.slot(team.country().into()));
+        let (market, pool) =
+            if self.keepers { (KEEPERS_MARKET, KEEPERS_POOL) } else { (CO_MARKET, CO_POOL) };
+        let listed = records.block(&format!("{market}[{b}]")).is_some_and(|m| {
+            (0..market_count(m).min(MARKET_ENTRIES))
+                .any(|k| market_entry(m, k).is_some_and(|(entry, _)| entry == id))
+        });
+        let free = records
+            .block(&format!("{pool}[{}]", usize::try_from(id).unwrap_or(0)))
+            .and_then(|r| r.get(YEARS_LEFT_AT))
+            == Some(&0);
+        listed && free
+    }
+}
+
+/// A market block: how many candidates it holds.
+fn market_count(m: &[u8]) -> usize {
+    m.get(..2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]).max(0) as usize)
+}
+
+/// Its entry of a trainer's id and his competence.
+fn market_entry(m: &[u8], k: usize) -> Option<(i16, i16)> {
+    let at = 2 + k * MARKET_ENTRY;
+    let e = m.get(at..at + MARKET_ENTRY)?;
+    Some((i16::from_le_bytes([e[0], e[1]]), i16::from_le_bytes([e[2], e[3]])))
+}
+
+/// The market block after one of its trainers was hired: he is taken out
+/// of it, and the coach sent away goes back in (`FUN_0040ae73` and
+/// `FUN_0040b142`).
+fn market_leave(m: Option<&mut [u8]>, gone: i16, back: i16, back_competence: i16) {
+    let Some(m) = m else { return };
+    let mut count = market_count(m);
+    let hit = (0..count.min(MARKET_ENTRIES)).find(|&k| {
+        market_entry(m, k).is_some_and(|(id, _)| id == gone)
+    });
+    if let Some(k) = hit {
+        for j in k..count - 1 {
+            let (id, competence) = market_entry(m, j + 1).unwrap_or((0, 0));
+            let Some(at) = m.get_mut(2 + j * MARKET_ENTRY..2 + j * MARKET_ENTRY + MARKET_ENTRY)
+            else {
+                break;
+            };
+            at[0..2].copy_from_slice(&id.to_le_bytes());
+            at[2..4].copy_from_slice(&competence.to_le_bytes());
+        }
+        count -= 1;
+    }
+    let listed = (0..count).any(|k| market_entry(m, k).is_some_and(|(id, _)| id == back));
+    if back != 0 && !listed && count < MARKET_ENTRIES {
+        if let Some(at) = m.get_mut(2 + count * MARKET_ENTRY..2 + count * MARKET_ENTRY + MARKET_ENTRY)
+        {
+            at[0..2].copy_from_slice(&back.to_le_bytes());
+            at[2..4].copy_from_slice(&back_competence.to_le_bytes());
+        }
+        count += 1;
+    }
+    if let Some(at) = m.get_mut(..2) {
+        at.copy_from_slice(&(count as i16).to_le_bytes());
+    }
+}
+
+/// One year as the offer dialog says it, else so many years
+/// (`FUN_00730c8d`).
+fn years_short(game: &Game, years: i32) -> String {
+    if years < 2 {
+        game.text(ONE_YEAR).to_owned()
+    } else {
+        game.text(MANY_YEARS).replacen("%d", &years.to_string(), 1)
+    }
+}
+
+/// One to ten years as the compromise's words say them, and more than
+/// those (`FUN_00730bdc`).
+fn years_word(game: &Game, years: i32) -> String {
+    match u32::try_from(years) {
+        Ok(y @ 1..=10) => game.text(YEARS_TEXTS + u16::try_from(y - 1).unwrap_or(0)).to_owned(),
+        _ => game.text(YEARS_MANY).replacen("%d", &years.to_string(), 1),
+    }
+}
+
+/// The offer dialog (32, `CCoTrainerAngebotMachen`; KONTAKTE.md §5.6): a
+/// yearly salary on the slider and years on the spin against what the
+/// candidate's record says he asks. He takes it, makes one last compromise,
+/// or turns it down for good; the news dialogs of that outcome are led from
+/// here.
+#[derive(Default)]
+pub struct TrainerOffer {
+    keepers: bool,
+    id: i16,
+    /// What his record says he asks: a yearly salary and years.
+    demand: i64,
+    asked_years: i32,
+    /// What slider and spin stand on.
+    salary: i64,
+    years: i32,
+    /// The contract about to be made, and what sending the old coach away
+    /// costs.
+    pending: (i64, i32),
+    severance: i64,
+    stage: Stage,
+}
+
+/// How far the talks got.
+#[derive(Default, PartialEq)]
+enum Stage {
+    #[default]
+    Idle,
+    /// Turned down; its news dialog has only to close.
+    Failed,
+    /// His last compromise; to take it or to leave it.
+    Compromise,
+    /// Taken, but the old coach wants his severance first.
+    Severance,
+    /// Hired; its news dialog closes the market.
+    Done,
+}
+
+/// The goalkeepers' captions for the offer and for the news dialogs; the
+/// severance notice keeps its own title.
+const OFFER_CAPTION: u16 = 1449;
+const NEWS_CAPTION: u16 = 1450;
+const OFFER_HEAD: u16 = 1353;
+/// The money and years he asks, and the ones offered.
+const OFFER_DEMAND: u16 = 1346;
+const OFFER_ASKED_YEARS: u16 = 1348;
+const OFFER_OFFER: u16 = 1342;
+const OFFER_YEARS: u16 = 1344;
+const OFFER_SPIN: u16 = 1349;
+const OFFER_SLIDER: u16 = 1350;
+const OFFER_OK: u16 = 1351;
+const OFFER_BREAK: u16 = 1352;
+/// "1 Jahr" and "%d Jahre", the offer dialog's way of counting.
+const ONE_YEAR: u16 = 1007;
+const MANY_YEARS: u16 = 4956;
+/// The news dialogs and their texts; 37 has the one refusal button.
+const NEWS_DIALOGS: [u16; 4] = [SEVER_NEWS, FAILED_NEWS, PROMISE_NEWS, DONE_NEWS];
+const SEVER_NEWS: u16 = 31;
+const FAILED_NEWS: u16 = 34;
+const PROMISE_NEWS: u16 = 37;
+const DONE_NEWS: u16 = 39;
+const SEVER_TEXT: u16 = 1338;
+const FAILED_TEXT: u16 = 1357;
+const PROMISE_TEXT: u16 = 1367;
+const PROMISE_BREAK: u16 = 1369;
+const DONE_TEXT: u16 = 1373;
+/// The balls, and the frames they loop through; the one of failed talks
+/// comes from further along the film.
+const BALLS: [(u16, std::ops::RangeInclusive<u16>); 4] = [
+    (1340, 1762..=1773),
+    (1358, 1778..=1783),
+    (1370, 1762..=1773),
+    (1375, 1762..=1773),
+];
+/// The staff accounts the severance is booked on: a co-trainer two of them,
+/// a goalkeepers' coach one (club +0x280/+0x264 and +0x268).
+const SEVERANCE_ACCOUNTS: &[usize] = &[0x4f8, 0x4dc];
+const SEVERANCE_ACCOUNT_KEEPERS: &[usize] = &[0x4e0];
+
+impl Screen for TrainerOffer {
+    fn ids(&self) -> &[u16] {
+        &[TRAINERS_OFFER]
+    }
+
+    /// `FUN_00485059`: what he asks stands in his record; the offer starts
+    /// at half of it, snapped onto the money scale, and with the years he
+    /// asks for.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Args::TrainerOffer { keepers, id } = args else { return };
+        *self = Self { keepers, id, ..Self::default() };
+        let caption =
+            if self.keepers { game.text(OFFER_CAPTION).to_owned() } else { dialog.title.clone() };
+        set(view, dialog, CAPTION_ID, caption);
+        let Some(t) = trainer(cx, self.keepers, self.id) else { return };
+        self.demand = i64::from(t.pay);
+        self.asked_years = i32::from(t.years);
+        self.salary = trainers::at_position(trainers::position(self.demand / 2 / 1000)) * 1000;
+        self.years = self.asked_years.clamp(1, 5);
+        // The original puts only the trainer's name on the yellow band,
+        // though the file's text reads "Verhandlung mit %s".
+        set(view, dialog, OFFER_HEAD, t.name.clone());
+        let demand = super::playerinfo::money(game, self.demand);
+        let asked = years_short(game, self.asked_years);
+        let offer = super::playerinfo::money(game, self.salary);
+        let years = years_short(game, self.years);
+        set(view, dialog, OFFER_DEMAND, demand);
+        set(view, dialog, OFFER_ASKED_YEARS, asked);
+        set(view, dialog, OFFER_OFFER, offer);
+        set(view, dialog, OFFER_YEARS, years);
+        if let Some(slider) = control(dialog, OFFER_SLIDER).and_then(|c| view.value_mut(c)) {
+            slider.range = (0, trainers::position(trainers::OFFER_MOST / 1000) as i32);
+            slider.set(trainers::position(self.salary / 1000) as i32);
+        }
+        if let Some(spin) = control(dialog, OFFER_SPIN).and_then(|c| view.value_mut(c)) {
+            spin.range = (1, 5);
+            spin.set(self.years);
+        }
+    }
+
+    fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
+        let dialog = cx.dialog;
+        let id = |c: usize| dialog.controls[c].id.unwrap_or(0);
+        match target {
+            // View has moved slider and spin along; the money snaps onto
+            // the scale and the dialog says what it became (`FUN_004853fa`,
+            // `FUN_00485459`).
+            Target::SliderStep { control: c, .. } | Target::SliderAt { control: c, .. }
+                if id(c) == OFFER_SLIDER =>
+            {
+                let at = view.value(c).map_or(0, |v| v.value);
+                self.salary = trainers::at_position(at.into()) * 1000;
+                let money = super::playerinfo::money(cx.game, self.salary);
+                set(view, dialog, OFFER_OFFER, money);
+                Outcome::Stay
+            }
+            Target::Spin { control: c, .. } if id(c) == OFFER_SPIN => {
+                self.years = view.value(c).map_or(1, |v| v.value);
+                let word = years_short(cx.game, self.years);
+                set(view, dialog, OFFER_YEARS, word);
+                Outcome::Stay
+            }
+            Target::Button(c) if id(c) == OFFER_BREAK => Outcome::Close(Reply::Cancel),
+            Target::Button(c) if id(c) == OFFER_OK => self.judge(cx),
+            _ => Outcome::Stay,
+        }
+    }
+
+    /// The chain of the talks' outcome (`0x486b84` onwards in
+    /// `CCoTrainerListe`): failed talks end back at the list, a compromise
+    /// is taken or left, the severance is shown and then the contract.
+    fn answer(&mut self, cx: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+        match self.stage {
+            Stage::Idle => Outcome::Stay,
+            Stage::Failed => {
+                self.stage = Stage::Idle;
+                Outcome::Close(Reply::Cancel)
+            }
+            Stage::Compromise => match reply {
+                Reply::Ok => {
+                    let (money, years) = self.pending;
+                    self.stage = Stage::Idle;
+                    self.sign(cx, money, years)
+                }
+                _ => {
+                    self.turn_down(cx);
+                    self.stage = Stage::Failed;
+                    news(FAILED_NEWS, self.keepers, self.id, 0, 0)
+                }
+            },
+            Stage::Severance => {
+                let (money, years) = self.pending;
+                self.hire(cx, money, years);
+                self.stage = Stage::Done;
+                news(DONE_NEWS, self.keepers, self.id, 0, 0)
+            }
+            Stage::Done => Outcome::Close(Reply::Ok),
+        }
+    }
+}
+
+impl TrainerOffer {
+    /// The offer taken as it stands: first the old coach's severance when
+    /// there is one, then the new contract, then the news of it.
+    fn sign(&mut self, cx: &mut Cx, money: i64, years: i32) -> Outcome {
+        use chrono::Datelike;
+        self.pending = (money, years);
+        let old =
+            own_team(cx).map_or(0, |t| t.get::<i16>(if self.keepers { KEEPERS_AT } else { CO_AT }));
+        if old != 0 {
+            let month = cx.state.season.as_ref().map_or(12, |s| s.date().month());
+            let (pay, left) = trainer(cx, self.keepers, old)
+                .map_or((0, 0), |t| (i64::from(t.pay), i32::from(t.years_left)));
+            self.severance = trainers::severance(pay, left, month);
+            self.stage = Stage::Severance;
+            return news(SEVER_NEWS, self.keepers, old, self.severance, 0);
+        }
+        self.hire(cx, money, years);
+        self.stage = Stage::Done;
+        news(DONE_NEWS, self.keepers, self.id, 0, 0)
+    }
+
+    /// The trainer's say over the offer (`FUN_004854c3` at the offer's OK
+    /// button), and the chain it opens.
+    fn judge(&mut self, cx: &mut Cx) -> Outcome {
+        let (salary, years, demand, asked) =
+            (self.salary, self.years, self.demand, self.asked_years);
+        let verdict = match cx.state.season.as_mut() {
+            Some(season) => trainers::negotiate(salary, years, demand, asked, &mut season.random),
+            None => trainers::negotiate(salary, years, demand, asked, &mut Random::new(0)),
+        };
+        match verdict {
+            -1 => self.sign(cx, salary, years),
+            1 => {
+                // The last compromise is computed at once, before its
+                // dialog shows, drawing after the judgement (`FUN_00485f3a`).
+                let promise = match cx.state.season.as_mut() {
+                    Some(season) => {
+                        trainers::compromise(demand, salary, years, asked, &mut season.random)
+                    }
+                    None => {
+                        let mut random = Random::new(0);
+                        trainers::compromise(demand, salary, years, asked, &mut random)
+                    }
+                };
+                self.pending = promise;
+                self.stage = Stage::Compromise;
+                news(PROMISE_NEWS, self.keepers, self.id, promise.0, promise.1)
+            }
+            _ => {
+                self.turn_down(cx);
+                self.stage = Stage::Failed;
+                news(FAILED_NEWS, self.keepers, self.id, 0, 0)
+            }
+        }
+    }
+
+    /// The new trainer's contract, the old coach sent away and the market
+    /// the two leave and come back to (`FUN_004870e1`). The goalkeepers'
+    /// coaches go without the market.
+    fn hire(&mut self, cx: &mut Cx, money: i64, years: i32) {
+        let (Some(team), Some(records)) = (own_team(cx), cx.state.records.as_ref()) else { return };
+        let (country, number) = (team.country(), team.number());
+        let old = team.get::<i16>(if self.keepers { KEEPERS_AT } else { CO_AT });
+        let b = usize::from(records.countries.slot(country.into()));
+        let old_competence =
+            if self.keepers || old == 0 { 0 } else { trainer(cx, false, old).map_or(0, |t| t.competence as i16) };
+        let (market, pool) =
+            if self.keepers { (KEEPERS_MARKET, KEEPERS_POOL) } else { (CO_MARKET, CO_POOL) };
+        let key = |pool: &str, id: i16| format!("{pool}[{}]", usize::try_from(id).unwrap_or(0));
+        let Some(records) = cx.state.records.as_mut() else { return };
+        if let Some(r) = records.block_mut(&key(pool, self.id)) {
+            let pay = i32::try_from(money).unwrap_or(i32::MAX);
+            if let Some(at) = r.get_mut(PAY_AT..PAY_AT + 4) {
+                at.copy_from_slice(&pay.to_le_bytes());
+            }
+            if let Some(at) = r.get_mut(YEARS_LEFT_AT) {
+                *at = years as u8;
+            }
+        }
+        if old != 0 {
+            if let Some(at) =
+                records.block_mut(&key(pool, old)).and_then(|r| r.get_mut(YEARS_LEFT_AT))
+            {
+                *at = 0;
+            }
+        }
+        if let Some(team) = records.team_mut(country.into(), number.into()) {
+            let accounts = if self.keepers { SEVERANCE_ACCOUNT_KEEPERS } else { SEVERANCE_ACCOUNTS };
+            for &at in accounts {
+                team.put::<i32>(at, team.get::<i32>(at).wrapping_add(self.severance as i32));
+            }
+            team.put::<i16>(if self.keepers { KEEPERS_AT } else { CO_AT }, self.id);
+        }
+        if !self.keepers {
+            market_leave(records.block_mut(&format!("{market}[{b}]")), self.id, old, old_competence);
+        }
+    }
+
+    /// A trainer turned down stays turned down with this manager, and the
+    /// list hides him (§5.5).
+    fn turn_down(&mut self, cx: &mut Cx) {
+        let current = cx.state.season.as_ref().map_or(0, |s| s.current);
+        let number = cx
+            .state
+            .records
+            .as_ref()
+            .and_then(|r| r.human_slot(current))
+            .map_or(1, |s| s as u32 + 1);
+        let pool = if self.keepers { KEEPERS_POOL } else { CO_POOL };
+        let Some(r) = cx
+            .state
+            .records
+            .as_mut()
+            .and_then(|rs| rs.block_mut(&format!("{pool}[{}]", usize::try_from(self.id).unwrap_or(0))))
+        else {
+            return;
+        };
+        if let Some(at) = r.get_mut(TURNED_DOWN_AT..TURNED_DOWN_AT + 2) {
+            let turned_down = u16::from_le_bytes([at[0], at[1]]) | (1 << (number & 31));
+            at.copy_from_slice(&turned_down.to_le_bytes());
+        }
+    }
+}
+
+/// One of the talks' outcome dialogs, opened from the offer screen.
+fn news(dialog: u16, keepers: bool, id: i16, amount: i64, years: i32) -> Outcome {
+    let args = Args::TrainerNews { dialog, keepers, id, amount, years };
+    Outcome::Popup(Request::with(dialog, args))
+}
+
+/// What the talks brought (dialogs 31, 34, 37 and 39, `CCoTrainerAbfindung`,
+/// `CCoTrainerGescheitert`, `CCoTrainerLetztesAngebot` and
+/// `CCoTrainerVerpflichtung`): what sending the old coach away costs, that
+/// talks came to nothing, his last compromise, and at last that he is here.
+/// The offer dialog leads them; the market's own rows wait below.
+#[derive(Default)]
+pub struct TrainerNews;
+
+impl Screen for TrainerNews {
+    fn ids(&self) -> &[u16] {
+        &NEWS_DIALOGS
+    }
+
+    /// Each names the trainer from his record, and the money; 37 asks
+    /// whether to take the last compromise.
+    fn open(&mut self, cx: &mut Cx, view: &mut View, args: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Args::TrainerNews { dialog: which, keepers, id, amount, years } = args else { return };
+        // The goalkeepers' coaches have their own captions, save the
+        // severance notice, which keeps its title.
+        let caption = if keepers && which != SEVER_NEWS {
+            game.text(NEWS_CAPTION).to_owned()
+        } else {
+            dialog.title.clone()
+        };
+        set(view, dialog, CAPTION_ID, caption);
+        let name = trainer(cx, keepers, id).map_or_else(String::new, |t| t.name);
+        let money = super::playerinfo::money(game, amount);
+        let word = years_word(game, years);
+        let (text_id, parts): (u16, &[&dyn std::fmt::Display]) = match which {
+            SEVER_NEWS => (SEVER_TEXT, &[&name, &money]),
+            PROMISE_NEWS => (PROMISE_TEXT, &[&name, &money, &word]),
+            FAILED_NEWS => (FAILED_TEXT, &[&name]),
+            _ => (DONE_TEXT, &[&name]),
+        };
+        if let Some(c) = control(dialog, text_id) {
+            let text = super::finances::printf(&dialog.controls[c].text, parts);
+            set(view, dialog, text_id, text);
+        }
+        for (ball, frames) in BALLS {
+            if let Some(ball) = control(dialog, ball).and_then(|b| view.anim_mut(b)) {
+                ball.frames = frames.collect();
+                ball.playing = true;
+            }
+        }
+    }
+
+    /// 37 asks; the others only tell.
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
         match target {
+            Target::Button(c) if id_is(cx, c, PROMISE_BREAK) => Outcome::Close(Reply::Cancel),
             Target::Button(c) if crate::controls::button::is_ok(&cx.dialog.controls[c]) => {
                 Outcome::Close(Reply::Ok)
             }
             _ => Outcome::Stay,
         }
     }
+}
+
+/// The control's id, or 0.
+fn id_is(cx: &Cx, c: usize, want: u16) -> bool {
+    cx.dialog.controls[c].id == Some(want)
 }

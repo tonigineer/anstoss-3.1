@@ -92,7 +92,10 @@ AREAS = {
     "stadium": [(*bar(12, 464), 464), (*bar(12, 464, "now click at 311 145", "until dialog 463"), 463),
                 (*bar(12, 464, "now press 5861", "until dialog 466"), 466),
                 # The page lists contacts, the board and the honours in the stadium's card.
-                (*bar(13, 404), 404), (*bar(14, 439), 439), (*menu(14, 439, 5387, 4, 384), 384),
+                (*bar(13, 404), 404), (*menu(13, 404, 4975, 0, 35), 35),
+                (*bar(13, 404, "now choose 4975 0", "until dialog 35", "now row 1359 0",
+                       "until dialog 32"), 32),
+                (*bar(14, 439), 439), (*menu(14, 439, 5387, 4, 384), 384),
                 (*bar(17, 175), 175),
                 *[(*menu(17, 175, 5643, i, d), d)
                   for i, d in [(0, 405), (1, 443), (4, 84), (5, 26), (7, 174), (8, 95)]]],

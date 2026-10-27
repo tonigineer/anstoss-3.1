@@ -37,6 +37,7 @@ pub mod stock;
 pub mod tactics;
 pub mod talk;
 pub mod tickets;
+pub mod trainers;
 pub mod training;
 pub mod transfers;
 pub mod value;

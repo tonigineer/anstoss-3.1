@@ -1666,6 +1666,156 @@ mod tests {
         assert!(!runner.host.view().list(list).unwrap().rows.is_empty());
     }
 
+    /// A co-trainer's record block.
+    fn co_block<'a>(records: &'a a3_core::records::Records, id: i16) -> &'a [u8] {
+        records.block(&format!("0xbe3920[{id}]")).unwrap()
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_telephone_hires_a_co_trainer_and_pays_off_the_old_one() {
+        let game = game();
+        let open = "now click bar 12\nuntil dialog 404";
+        let market = |records: &a3_core::records::Records, b: u8| -> Vec<(i16, i16)> {
+            let m = records.block(&format!("0x8e27a0[{b}]")).unwrap();
+            let count = i16::from_le_bytes(m[0..2].try_into().unwrap()).max(0) as usize;
+            (0..count.min(30))
+                .map(|k| {
+                    (
+                        i16::from_le_bytes(m[2 + k * 4..4 + k * 4].try_into().unwrap()),
+                        i16::from_le_bytes(m[4 + k * 4..6 + k * 4].try_into().unwrap()),
+                    )
+                })
+                .collect()
+        };
+        // The list as it stands on the save's day, and the club's own coach.
+        let list = control(&game.dialogs[&35], 1359).unwrap();
+        let seen = format!("{open}\nnow choose 4975 0\nuntil dialog 35");
+        let Some(before) = on_save(&game, "Probe1", &seen) else { return };
+        let state = before.host.state();
+        let records = state.records.as_ref().unwrap();
+        let manager = records.humans().next().unwrap();
+        let (country, number) = (manager.country(), manager.team());
+        let team = records.team(country, number).unwrap();
+        let old = team.get::<i16>(0xa2);
+        let cand = i16::try_from(before.host.view().list(list).unwrap().keys[0]).unwrap();
+        let b = records.countries.slot(usize::from(country));
+        let before_market = market(records, b);
+        assert!(before_market.iter().any(|&(id, _)| id == cand));
+        assert_eq!(co_block(records, cand)[0xe], 0);
+        let pay = i32::from_le_bytes(co_block(records, cand)[0x10..0x14].try_into().unwrap());
+        let years = i32::from(co_block(records, cand)[0x15]).clamp(1, 5);
+        let (old_pay, old_left, old_competence) = if old == 0 {
+            (0, 0, 0)
+        } else {
+            let r = co_block(records, old);
+            (
+                i32::from_le_bytes(r[0x10..0x14].try_into().unwrap()),
+                i32::from(r[0xe]),
+                i16::from(r[4]),
+            )
+        };
+        let staff = (team.get::<i32>(0x4f8), team.get::<i32>(0x4dc));
+        use chrono::Datelike;
+        let month = state.season.as_ref().unwrap().date().month();
+        let severance = a3_core::trainers::severance(i64::from(old_pay), old_left, month);
+        // An offer one step over what he asks: he takes it at once.
+        let pos = a3_core::trainers::position(i64::from(pay) / 1000) + 1;
+        let salary = a3_core::trainers::at_position(pos) * 1000;
+        assert!(salary >= i64::from(pay), "{salary} against {pay}");
+        let settle = if old == 0 {
+            "until dialog 39".to_owned()
+        } else {
+            "until dialog 31\nnow ok\nuntil dialog 39".to_owned()
+        };
+        let then = format!(
+            "{seen}\nnow row 1359 0\nuntil dialog 32\nnow slide 1350 {pos}\nnow press 1351\n\
+             {settle}\nnow ok\nuntil dialog 404"
+        );
+        let runner = on_save(&game, "Probe1", &then).unwrap();
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let team = records.team(country, number).unwrap();
+        assert_eq!(team.get::<i16>(0xa2), cand);
+        let r = co_block(records, cand);
+        assert_eq!(i32::from_le_bytes(r[0x10..0x14].try_into().unwrap()), i32::try_from(salary).unwrap());
+        assert_eq!(r[0xe], u8::try_from(years).unwrap());
+        if old != 0 {
+            // The old coach stands without a contract again, and the
+            // severance sits on his two accounts.
+            assert_eq!(co_block(records, old)[0xe], 0);
+            assert_eq!(team.get::<i32>(0x4f8), staff.0.wrapping_add(severance as i32));
+            assert_eq!(team.get::<i32>(0x4dc), staff.1.wrapping_add(severance as i32));
+            let after = market(records, b);
+            assert!(after.iter().any(|&(id, competence)| {
+                id == old && competence == old_competence
+            }));
+        }
+        // He himself left the market.
+        let after = market(records, b);
+        assert!(!after.iter().any(|&(id, _)| id == cand));
+        assert_eq!(after.len(), before_market.len().saturating_sub(if old == 0 { 1 } else { 0 }));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_refused_co_trainer_leaves_the_market_list() {
+        let game = game();
+        let open = "now click bar 12\nuntil dialog 404";
+        let list = control(&game.dialogs[&35], 1359).unwrap();
+        let seen = format!("{open}\nnow choose 4975 0\nuntil dialog 35");
+        let Some(before) = on_save(&game, "Probe1", &seen) else { return };
+        let state = before.host.state();
+        let records = state.records.as_ref().unwrap();
+        let keys = before.host.view().list(list).unwrap().keys.clone();
+        // One who asks for enough that nothing at all really refuses him.
+        let (row, cand) = keys
+            .iter()
+            .enumerate()
+            .map(|(row, &key)| {
+                let id = i16::try_from(key).unwrap();
+                let r = records.block(&format!("0xbe3920[{id}]")).unwrap();
+                (row, id, i32::from_le_bytes(r[0x10..0x14].try_into().unwrap()))
+            })
+            .find(|&(_, _, pay)| pay >= 20_000)
+            .map(|(row, id, _)| (row, id))
+            .unwrap();
+        let before_co = records
+            .team(records.humans().next().unwrap().country(), records.humans().next().unwrap().team())
+            .unwrap()
+            .get::<i16>(0xa2);
+        let then = format!(
+            "{seen}\nnow row 1359 {row}\nuntil dialog 32\nnow slide 1350 0\nnow press 1351\n\
+             until dialog 34\nnow ok\nuntil dialog 35"
+        );
+        let runner = on_save(&game, "Probe1", &then).unwrap();
+        assert_eq!(runner.host.view().id, 35);
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        // Turned down for good with this manager, and gone from the list;
+        // the market block keeps him, the club its old coach.
+        let number =
+            u32::try_from(records.human_slot(state.season.as_ref().unwrap().current).unwrap())
+                .unwrap()
+                + 1;
+        let r = records.block(&format!("0xbe3920[{cand}]")).unwrap();
+        let turned_down = u16::from_le_bytes([r[0x18], r[0x19]]);
+        assert_ne!(turned_down & (1 << (number & 31)), 0);
+        let keys = runner.host.view().list(list).unwrap().keys.clone();
+        assert!(!keys.iter().any(|&key| key == usize::try_from(cand).unwrap()));
+        let b = records.countries.slot(usize::from(records.humans().next().unwrap().country()));
+        let m = records.block(&format!("0x8e27a0[{b}]")).unwrap();
+        let listed = (0..30).any(|k| {
+            m.get(2 + k * 4..6 + k * 4)
+                .is_some_and(|e| i16::from_le_bytes([e[0], e[1]]) == cand)
+        });
+        assert!(listed);
+        let team = records
+            .team(records.humans().next().unwrap().country(), records.humans().next().unwrap().team())
+            .unwrap();
+        assert_eq!(team.get::<i16>(0xa2), before_co);
+    }
+
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_board_books_a_talk_about_the_manager_s_own_contract() {

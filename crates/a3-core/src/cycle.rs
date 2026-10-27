@@ -247,6 +247,22 @@ pub enum Args {
     Trainers {
         keepers: bool,
     },
+    /// The market's offer dialog, opening talks with one candidate: the
+    /// goalkeepers' coach or not, and his record's id.
+    TrainerOffer {
+        keepers: bool,
+        id: i16,
+    },
+    /// What came of such talks (dialogs 31, 34, 37 and 39): which of them,
+    /// the trainer by kind and record id, and the money and years the
+    /// dialog names — the old coach's severance, or the compromise.
+    TrainerNews {
+        dialog: u16,
+        keepers: bool,
+        id: i16,
+        amount: i64,
+        years: i32,
+    },
     /// A cooperation contract still running (text 4456): the partner's
     /// number in the main country, the year it ends.
     Cooperation {
