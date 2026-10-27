@@ -3878,13 +3878,13 @@ mod tests {
         assert_eq!(page(&runner), "");
     }
 
-    /// The office opens the note left on it: the turn of an office-view
-    /// manager starts on the notepad over the office, and the office
-    /// follows once the note is read away; a manager with an empty page
-    /// walks straight into his office.
+    /// A turn opens the note left on it: the turn of a manager with text
+    /// on his page starts on the notepad over his turn screen — the office
+    /// or the line-up — which follows once the note is read away; a
+    /// manager with an empty page walks straight into his office.
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
-    fn the_office_opens_a_note_left_on_it() {
+    fn the_turn_opens_the_note_left_on_it() {
         let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
         let noted = patched(&dir, "Toni", "office-noted", |records| {
             let page = records.human_slot(0).unwrap();

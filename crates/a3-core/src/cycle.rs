@@ -748,11 +748,12 @@ impl Cycle {
     /// in the office, until it is ended.
     fn turn(&self) -> Result<(), Gone> {
         let Some(mut screen) = self.season(|s| self.turn_screen(s)) else { return Ok(()) };
-        // A manager with a note on his page reads it before his office:
-        // the hub opens the notepad, and only then its own dialog
-        // (`CMyStartDialog::FUN_00650b84`; seen for the office only, the
-        // original's guard being a manager field +0x2128 not yet known).
-        if matches!(screen, OFFICE | GRAND_OFFICE) && self.a_note_waits() {
+        // A manager with a note on his page reads it before his turn screen:
+        // the hub opens the notepad, and only then its own dialog — office,
+        // text menu or line-up, all guarded by the same `strlen`
+        // (`CMyStartDialog::FUN_00650b84`; behind it a further guard, a
+        // manager field +0x2128 not yet known, may skip both).
+        if self.a_note_waits() {
             self.ask(Request::new(NOTEPAD))?;
         }
         loop {
