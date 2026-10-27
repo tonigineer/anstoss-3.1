@@ -27,6 +27,8 @@ const CENTRED_LABELS: u16 = 0x2;
 /// check box's (259's music modes, as the original shows them).
 const TICKED: u16 = 0x100;
 const TICKED_LABEL: i32 = 12;
+/// Its tick stands a pixel lower than a check box's.
+const TICKED_DOWN: f32 = 3.0;
 
 fn ticked(control: &Control) -> bool {
     matches!(control.kind, Kind::Options { style, .. } if style & TICKED != 0)
@@ -119,7 +121,7 @@ impl OptionsState {
             }
             if *image == 0 && ticked(control) {
                 if let Some(tick) = paint.widget(super::check::TICK) {
-                    let at = r.min + it.rect.min + Vec2::new(0.0, super::check::TICK_DOWN);
+                    let at = r.min + it.rect.min + Vec2::new(0.0, TICKED_DOWN);
                     crate::classic::paste(frame, tick, at);
                 }
             } else if *image == 0 {
