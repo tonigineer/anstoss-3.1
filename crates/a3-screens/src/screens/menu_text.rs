@@ -4,6 +4,8 @@
 //! "Weiter" ends the turn; dialog 502, the national team's smaller
 //! variant, is not built yet.
 
+use std::collections::HashMap;
+
 use tracing::info;
 
 use a3_files::rch::{Dialog, Kind};
@@ -32,6 +34,9 @@ const MENU_FURTHER: u16 = 6311;
 const MENU_PAIRING: u16 = 6313;
 const MENU_STRENGTH: u16 = 6314;
 const MENU_CONFIDENCE: u16 = 6478;
+/// The window's caption line, added like the honours' under an id of its
+/// own; its words are the dialog's own title, "ANSTOSS 3 - Hauptmenü".
+const MENU_CAPTION_ID: u16 = 9937;
 
 /// The entries, as the game's table at 0x882168 pairs group, item and
 /// action (the action divided by 100 names the symbol on the bar); the
@@ -57,6 +62,13 @@ const ENTRIES: [(u16, usize, usize); 17] = [
     (GROUP_OTHER, 1, hub::HONOURS_SYMBOL),
     (GROUP_NATIONAL, 0, hub::NATIONAL_SYMBOL),
 ];
+
+/// The menu gets the caption line its title names, as the bar and the
+/// honours carry one.
+pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
+    let Some(dialog) = dialogs.get_mut(&TEXT_MENU) else { return };
+    dialog.controls.insert(0, super::caption(dialog.frame, MENU_CAPTION_ID, String::new()));
+}
 
 /// The text menu.
 pub struct MenuText;
@@ -146,6 +158,7 @@ fn show_menu(cx: &Cx, view: &mut View) {
     let Some(season) = &cx.state.season else { return };
     let Some(manager) = season.manager() else { return };
     let Some(club) = manager.club else { return };
+    set(view, dialog, MENU_CAPTION_ID, hub::manager_title_of(game, season, &dialog.title));
     let records = cx.state.records.as_ref();
     if let (Some(records), Some(slot)) = (records, records.and_then(|r| r.human_slot(season.current)))
     {

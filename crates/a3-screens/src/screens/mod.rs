@@ -237,6 +237,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
 pub fn compose(game: &mut Game) {
     calendar::compose(&mut game.dialogs);
     office::compose(&mut game.dialogs);
+    menu_text::compose(&mut game.dialogs);
     hub::compose(&mut game.dialogs, &game.data.rules);
     formations::compose(&mut game.dialogs, &game.data.rules);
     special::compose(&mut game.dialogs);
