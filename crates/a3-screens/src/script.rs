@@ -3448,6 +3448,32 @@ mod tests {
         assert_eq!(screens, ["9", "95", "9", "424", "9", "474", "9"]);
     }
 
+    /// What the high scores behind the start menu look like: the same
+    /// captioned list as the honours page's, read off the installation
+    /// (a shot of the original: "ANSTOSS 3 - Highscoreliste" over the
+    /// careers).
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_start_menu_shows_the_captioned_score_list() {
+        let game = game();
+        let script = Script::parse("now choose 4771 5; ok\nuntil dialog 95").unwrap();
+        let (runner, result) = Runner::play(&game, &script);
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&95];
+        let caption = view.text(control(dialog, crate::screens::honours::scores::CAPTION_ID).unwrap());
+        assert_eq!(caption, dialog.title);
+        assert_eq!(caption, "ANSTOSS 3 - Highscoreliste");
+        let careers = game.high_entries(9).iter().filter(|e| e.points != 0).count();
+        if careers == 0 {
+            eprintln!("no high09 in this installation; the oracle's copy has it");
+            return;
+        }
+        let rows = &view.list(control(dialog, 2010).unwrap()).unwrap().rows;
+        assert_eq!(rows.len(), careers);
+        assert!(view.list(control(dialog, 2011).unwrap()).unwrap().rows.is_empty());
+    }
+
     /// The notepad of the week planner (`CDiNotizen`, dialog 397): what
     /// the manager types stays on his own page, which he sees again when
     /// he opens it; löschen empties the edit, and OK keeps it that way.

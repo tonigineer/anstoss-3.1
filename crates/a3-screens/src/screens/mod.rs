@@ -106,7 +106,6 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
     vec![
         Box::new(start::StartMenu::default()),
         Box::new(start::LoadGame),
-        Box::new(start::HighScores),
         Box::new(start::setup::Countries),
         Box::new(start::setup::Players),
         Box::new(start::setup::Names),

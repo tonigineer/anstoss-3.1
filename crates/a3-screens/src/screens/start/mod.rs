@@ -1,6 +1,8 @@
 //! The start menu, "Spielvorbereitung", and the screens it leads to besides
 //! a new game (see [`setup`]) and the network games (see [`network`]): the
-//! saved games and the high scores.
+//! saved games. The high scores its fifth entry opens are dialog 95, which
+//! the honours page runs as well (`crate::screens::honours::scores`) — the
+//! original opens the very same `CHighscoreListe` from here.
 
 pub mod network;
 pub mod setup;
@@ -8,7 +10,7 @@ pub mod setup;
 use chrono::{DateTime, Local};
 
 pub use a3_core::cycle::dialogs::START;
-use a3_core::cycle::dialogs::{HIGH_SCORES, LOAD};
+use a3_core::cycle::dialogs::LOAD;
 use a3_files::rch::{Dialog, Kind};
 
 use super::{Args, Cx, Outcome, Reply, Screen, control, indices, ok_or_cancel};
@@ -29,12 +31,9 @@ pub(crate) fn compose(dialogs: &mut std::collections::HashMap<u16, Dialog>) {
 
 const SAVE_LIST: u16 = 5144;
 const SAVE_INFO: u16 = 5146;
-const SCORES_CAREER: u16 = 2010;
-const SCORES_FIXED: u16 = 2011;
 /// Column starts of the lists, in classic pixels from the list's left edge.
 const SAVE_TABS: [f32; 3] = [0.0, 225.0, 318.0];
 const INFO_TABS: [f32; 2] = [0.0, 95.0];
-const SCORE_TABS: [f32; 8] = [0.0, 32.0, 190.0, 240.0, 310.0, 420.0, 478.0, 528.0];
 
 /// The start menu, which remembers the entry last chosen.
 #[derive(Default)]
@@ -127,55 +126,6 @@ fn show_save_info(view: &mut View, cx: &Cx) {
     fill_list(view, cx.dialog, SAVE_INFO, rows, &INFO_TABS);
     if let Some(info) = control(cx.dialog, SAVE_INFO).and_then(|i| view.list_mut(i)) {
         info.selected = None;
-    }
-}
-
-/// The high scores of the careers; the list of fixed-length games stays
-/// empty.
-pub struct HighScores;
-
-impl Screen for HighScores {
-    fn ids(&self) -> &[u16] {
-        &[HIGH_SCORES]
-    }
-
-    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
-        let rows = cx
-            .game
-            .high_scores()
-            .iter()
-            .enumerate()
-            .map(|(rank, s)| {
-                let (day, month, year) = s.date;
-                format!(
-                    "{}.\t{}\t{}\t{}\t{}\t{}\t{}\t{day:02}.{month:02}.{year}",
-                    rank + 1,
-                    s.name,
-                    s.age,
-                    s.points,
-                    s.points / u32::from(s.seasons.max(1)),
-                    s.level,
-                    s.titles,
-                )
-            })
-            .collect();
-        fill_list(view, cx.dialog, SCORES_CAREER, rows, &SCORE_TABS);
-        fill_list(view, cx.dialog, SCORES_FIXED, Vec::new(), &SCORE_TABS);
-        // A table to read, not to pick from.
-        for id in [SCORES_CAREER, SCORES_FIXED] {
-            if let Some(list) = control(cx.dialog, id).and_then(|l| view.list_mut(l)) {
-                list.selected = None;
-            }
-        }
-        line_up_headers(view, cx.dialog);
-    }
-
-    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
-        match ok_or_cancel(cx.dialog, target) {
-            (true, _) => Outcome::Close(Reply::Ok),
-            (_, true) => Outcome::Close(Reply::Cancel),
-            _ => Outcome::Stay,
-        }
     }
 }
 

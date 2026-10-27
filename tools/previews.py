@@ -64,7 +64,9 @@ AREAS = {
             (2, 78), (3, 271), (4, 345), (5, 346), (6, 347), (7, 348), (8, 413), (9, 349),
             (10, 417), (11, 218), (12, 464), (13, 404), (14, 439), (17, 175), (18, 302)]],
     ],
-    "start": [(*new_game(d), d) for d in (9, 140, 209, 212, 374, 99, 103)],
+    "start": [(*new_game(d), d) for d in (9, 140, 209, 212, 374, 99, 103)] + [
+        # The fifth entry's high scores, captioned like every window.
+        (None, ["now choose 4771 5; ok", "until dialog 95"], 95)],
     "week": [(*new_game(2), 2), (*bar(8, 413), 413)],
     "lineup": [(*on_a("until dialog 147"), 147),
                *[(*on_a(f"now choose 5266 {i}", f"until dialog {d}"), d)

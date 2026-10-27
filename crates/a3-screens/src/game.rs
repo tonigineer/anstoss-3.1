@@ -43,16 +43,6 @@ pub struct SaveGame {
     pub country: String,
 }
 
-pub struct HighScore {
-    pub name: String,
-    pub age: u16,
-    pub seasons: u16,
-    pub points: u32,
-    pub level: u8,
-    pub titles: u8,
-    pub date: (u8, u8, u16),
-}
-
 /// One entry of `Highscore/high{cat:02}` as the honours page reads it
 /// (48 bytes, ERFOLGE.md §A.5): both names, the first counter — the age
 /// in a career, the seasons in a fixed game —, the career's seasons,
@@ -265,25 +255,6 @@ impl Game {
             .collect();
         saves.sort_by_key(|save| std::cmp::Reverse(save.saved));
         saves
-    }
-
-    /// `Highscore/high09`: 48-byte entries of first and last name, age,
-    /// seasons, points, manager level, titles and the date.
-    pub fn high_scores(&self) -> Vec<HighScore> {
-        let Ok(data) = std::fs::read(self.dir.join("Highscore/high09")) else { return Vec::new() };
-        data.as_chunks::<48>()
-            .0
-            .iter()
-            .map(|e| HighScore {
-                name: format!("{} {}", cstring(&e[0..10]), cstring(&e[10..26])),
-                age: u16::from_le_bytes([e[26], e[27]]),
-                seasons: u16::from_le_bytes([e[28], e[29]]),
-                points: u32::from_le_bytes([e[32], e[33], e[34], e[35]]),
-                level: e[36],
-                titles: e[37],
-                date: (e[42], e[43], u16::from_le_bytes([e[44], e[45]])),
-            })
-            .collect()
     }
 
     /// `Highscore/high{cat:02}`, 48-byte entries (ERFOLGE.md §A.5): the

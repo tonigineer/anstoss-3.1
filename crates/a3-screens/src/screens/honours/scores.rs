@@ -1,6 +1,8 @@
 //! The lists of highscores (dialog 95 `CHighscoreListe`; ERFOLGE.md
 //! §A.5): the careers from `Highscore/high09` and the nine fixed games
-//! one entry apiece — files of the installation, not of the save.
+//! one entry apiece — files of the installation, not of the save. The
+//! start menu's entry leads here as well: the original opens the same
+//! dialog there, so this screen runs both routes.
 
 use std::collections::HashMap;
 
@@ -12,7 +14,7 @@ use crate::screens::{Args, Cx, Outcome, Reply, Screen, caption, control, mark_in
 use crate::view::View;
 
 pub(crate) const SCORES_DIALOG: u16 = 95;
-const CAPTION_ID: u16 = 9944;
+pub(crate) const CAPTION_ID: u16 = 9944;
 const CAREER: u16 = 2010;
 const FIXED: u16 = 2011;
 /// "The date" text.
