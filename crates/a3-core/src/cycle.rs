@@ -61,6 +61,12 @@ pub mod dialogs {
     /// The manager's page of notes (`CDiNotizen`); a turn opens it over
     /// its screen when the manager left a note on his page.
     pub const NOTEPAD: u16 = 397;
+    /// The next match's announcements, a league match's
+    /// (`CSpielankuendigungLiga`) and any other's (`CSpielAnkuendigung`),
+    /// which a turn opens first when the match is within a week and the
+    /// game's options ask for it.
+    pub const LEAGUE_ANNOUNCEMENT: u16 = 358;
+    pub const MATCH_ANNOUNCEMENT: u16 = 201;
     /// The text menu of a manager who chose it.  Dialog 502, the national
     /// team's smaller variant, is not built yet.
     pub const TEXT_MENU: u16 = 501;
@@ -181,6 +187,13 @@ const OFFICE_MENU: u8 = 1;
 /// The manager's choice of the text menu over the menu bar.
 const TEXT_MENU_CHOICE: u8 = 2;
 const WEEK_DAYS: usize = 7;
+/// The game option "Spielankündigung vor jedem Spiel" (its byte among the
+/// switches at `0xb5d13c`), on; how many days ahead it announces a match.
+const ANNOUNCE_OPTION: usize = 2;
+const ON: u8 = 1;
+const ANNOUNCE_AHEAD: i16 = 7;
+/// The kind of a league match (club +0xb4c).
+const LEAGUE_MATCH: u8 = 2;
 /// A talk booked in the week planner, and the talk itself.
 const TALK: u8 = 0x19;
 const TALK_DIALOG: u16 = dialogs::TALK;
@@ -767,6 +780,11 @@ impl Cycle {
     /// in the office, until it is ended; false once the game is given up.
     fn turn(&self) -> Result<bool, Gone> {
         let Some(mut screen) = self.season(|s| self.turn_screen(s)) else { return Ok(true) };
+        // The next match within the week is announced before all else, when
+        // "Spielankündigung vor jedem Spiel" is on (`FUN_00650b84`).
+        if let Some(announcement) = self.announcement() {
+            self.ask(Request::new(announcement))?;
+        }
         // A manager with a note on his page reads it before his turn screen:
         // the hub opens the notepad, and only then its own dialog — office,
         // text menu or line-up, all guarded by the same `strlen`
@@ -809,6 +827,24 @@ impl Cycle {
             };
         }
         if manager.club.is_some() { line_up_view(season, LINEUP) } else { DRESSING_ROOM }
+    }
+
+    /// The announcement the current manager's turn opens with, if any: the
+    /// game's switch for it on (`0xb5d13e`), and his club's next match
+    /// within a week of today (club +0xb46, +0xb44) — 358 for a league
+    /// match, else 201.
+    fn announcement(&self) -> Option<u16> {
+        let state = self.state();
+        let (season, records) = (state.season.as_ref()?, state.records.as_ref()?);
+        let (slot, number) = season.manager()?.club?;
+        let nation = self.data.world.country(slot)?.nation;
+        let team = records.team(nation, u16::try_from(number).ok()?)?;
+        let today = records.globals.day() as i16;
+        let due = records.globals.game_options()[ANNOUNCE_OPTION] == ON
+            && team.next_country() != 0
+            && team.next_day() < today + ANNOUNCE_AHEAD;
+        let league = team.next_kind() == LEAGUE_MATCH;
+        due.then_some(if league { LEAGUE_ANNOUNCEMENT } else { MATCH_ANNOUNCEMENT })
     }
 
     /// Whether the current manager left text on his notepad page: what

@@ -4467,52 +4467,109 @@ mod tests {
         assert!(matches!(script.lines[1].1, Line::Repeat(7)));
     }
 
-    /// A cup tie two days ahead (Probe1 patched: the first round at home
-    /// against the 20th club of the country): the planner's announcement
-    /// is dialog 201, every line as the original shows it — the computer's
-    /// club counted with its co-trainer's line-up.
-    #[test]
-    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
-    fn the_planner_announces_a_cup_match() {
+    /// Probe1 with its own club's next match moved within the week, and
+    /// changed as `patch` says; Probe1 has "Spielankündigung vor jedem
+    /// Spiel" on.
+    fn match_ahead(out: &str, patch: impl FnOnce(&mut a3_core::records::Team, u8)) -> Game {
         let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
-        let root = patched(&dir, "Probe1", "cup-tie", |records| {
+        let root = patched(&dir, "Probe1", out, |records| {
             let index = records.human_slot(0).unwrap();
             let (country, number) =
                 (records.managers[index].country(), records.managers[index].team());
             let today = records.globals.day() as i16;
             let team = records.team_mut(country, number).unwrap();
             team.set_next_day(today + 2);
-            team.set_next_country(country as u8);
+            patch(team, country as u8);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        game
+    }
+
+    /// A save's turn up to the announcement it opens with, `dialog`.
+    fn announced<'a>(game: &'a Game, save: &str, dialog: u16, then: &str) -> Runner<'a> {
+        let row = game.save_games().iter().position(|s| s.name == save).unwrap();
+        let load = LOAD.replace("row 5144 0", &format!("row 5144 {row}"));
+        let load = load.replace("until dialog 147", &format!("until dialog {dialog}"));
+        let script = format!("{}\n{then}", load.trim_end());
+        let (runner, result) = Runner::play(game, &Script::parse(&script).unwrap());
+        result.unwrap_or_else(|err| panic!("{err}\n{}", runner.log.join("\n")));
+        runner
+    }
+
+    fn announcement_lines(game: &Game, runner: &Runner, id: u16) -> Vec<String> {
+        let view = runner.host.view();
+        assert_eq!(view.id, id);
+        let dialog = &game.dialogs[&id];
+        (2973..=2985).map(|id| view.text(control(dialog, id).unwrap()).to_owned()).collect()
+    }
+
+    /// A cup tie two days ahead (Probe1 patched: the first round at home
+    /// against the 20th club of the country): the turn opens with dialog
+    /// 201, and the planner's button opens it again, every line as the
+    /// original shows it — the computer's club counted with its
+    /// co-trainer's line-up.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_planner_announces_a_cup_match() {
+        let game = match_ahead("cup-tie", |team, country| {
+            team.set_next_country(country);
             team.set_next_number(20);
             team.set_next_venue(0);
             team.set_next_kind(3);
             team.set_next_round(1);
         });
-        let mut game = Game::load(&root).unwrap();
-        compose(&mut game);
-        let then = "now click bar 7\nuntil dialog 413\nnow press 6215\nuntil dialog 201";
-        let runner = on_save(&game, "cup-tie", then).unwrap();
-        let view = runner.host.view();
-        let dialog = &game.dialogs[&201];
-        let text = |id| view.text(control(dialog, id).unwrap()).to_owned();
-        let shown: Vec<String> = (2973..=2985).map(text).collect();
+        let lines = [
+            "DFB-Pokal - 1. Runde",
+            "",
+            "SSV Ulm 1846",
+            " ",
+            "SV Waldhof Mannheim",
+            " ",
+            " ",
+            " ",
+            "-",
+            "-",
+            "-",
+            "61 : 64",
+            "-",
+        ];
+        let runner = announced(&game, "cup-tie", 201, "");
+        assert_eq!(announcement_lines(&game, &runner, 201), lines);
+        let then = "now press 1\nuntil dialog 147\nnow click bar 7\nuntil dialog 413\n\
+                    now press 6215\nuntil dialog 201";
+        let runner = announced(&game, "cup-tie", 201, then);
+        assert_eq!(announcement_lines(&game, &runner, 201), lines);
+    }
+
+    /// Probe1's league match at Freiberg moved to two days ahead: the turn
+    /// opens with the league's announcement 358, as the original's does;
+    /// its OK leads on to the line-up. Toni.an3, whose match is as near,
+    /// has the option off and opens on the line-up.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn a_turn_opens_with_its_match_announced() {
+        let game = match_ahead("league-ahead", |_, _| {});
+        let runner = announced(&game, "league-ahead", 358, "");
         assert_eq!(
-            shown,
+            announcement_lines(&game, &runner, 358),
             [
-                "DFB-Pokal - 1. Runde",
+                "3. Liga Süd 2025/26",
+                "1. Spieltag",
+                "SGV Freiberg",
                 "",
                 "SSV Ulm 1846",
-                " ",
-                "SV Waldhof Mannheim",
-                " ",
-                " ",
-                " ",
+                "",
+                "",
+                "",
                 "-",
                 "-",
-                "-",
-                "61 : 64",
+                "0:0:0",
+                "48 : 61",
                 "-",
             ]
         );
+        let runner = announced(&game, "league-ahead", 358, "now press 1\nuntil dialog 147");
+        assert_eq!(runner.host.view().id, 147);
     }
 }

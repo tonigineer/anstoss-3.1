@@ -10,7 +10,11 @@
 //! week of today (`FUN_0058e33c`), and for any other match the plainer
 //! announcement (dialog 201, `CSpielAnkuendigung`, `FUN_0054dc28`): the
 //! competition and its round, both clubs, the first leg of a national
-//! cup's tie, the strengths and the advance sales.
+//! cup's tie, the strengths and the advance sales. A turn opens the one
+//! or the other first when the game's options ask for it
+//! (`FUN_00650b84`). 201 of a league match shows 358's lines but for the
+//! games and the map (`FUN_0054dc28`); only another start path
+//! (`FUN_00653bab`) opens it so.
 
 use std::collections::HashMap;
 
@@ -26,8 +30,8 @@ use crate::game::Game;
 use crate::pointer::Target;
 use crate::view::View;
 
-pub const LEAGUE_ANNOUNCEMENT: u16 = 358;
-pub const CUP_ANNOUNCEMENT: u16 = 201;
+pub const LEAGUE_ANNOUNCEMENT: u16 = a3_core::cycle::dialogs::LEAGUE_ANNOUNCEMENT;
+pub const MATCH_ANNOUNCEMENT: u16 = a3_core::cycle::dialogs::MATCH_ANNOUNCEMENT;
 /// The match's kind for the league (club +0xb4c).
 pub const LEAGUE_MATCH: u8 = 2;
 /// How far ahead the announcement shows a match, in days.
@@ -71,7 +75,7 @@ const MARK: i32 = 3;
 /// not the dialog file's; the cup's dialog gives its title to the caption
 /// bar.
 pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>) {
-    if let Some(dialog) = dialogs.get_mut(&CUP_ANNOUNCEMENT) {
+    if let Some(dialog) = dialogs.get_mut(&MATCH_ANNOUNCEMENT) {
         let caption = super::caption(dialog.frame, CAPTION_ID, dialog.title.clone());
         dialog.controls.insert(0, caption);
     }
@@ -109,7 +113,7 @@ pub(crate) fn next_match<'a>(cx: &'a Cx) -> Option<(&'a Team, &'a Team)> {
 /// The dialog announcing the next match within the week, if any.
 pub(crate) fn dialog_for(cx: &Cx) -> Option<u16> {
     let (own, _) = next_match(cx)?;
-    Some(if own.next_kind() == LEAGUE_MATCH { LEAGUE_ANNOUNCEMENT } else { CUP_ANNOUNCEMENT })
+    Some(if own.next_kind() == LEAGUE_MATCH { LEAGUE_ANNOUNCEMENT } else { MATCH_ANNOUNCEMENT })
 }
 
 /// Whether the announcement button does what the original's does: a game
@@ -168,6 +172,82 @@ fn strength(cx: &Cx, team: &Team) -> i32 {
     parts.iter().sum::<i32>() / 10
 }
 
+/// What both announcements show of a league match (`FUN_0054f27e`, and
+/// `FUN_0054dc28` for one): the league and season, the matchday, each
+/// side's name, last results and place, the first leg, last season's game
+/// and the home side's record against the other; the league and the
+/// matchdays played, for the list of the matchday's games.
+fn show_league_match<'a>(
+    cx: &'a Cx,
+    view: &mut View,
+    own: &Team,
+    [home, away]: [&Team; 2],
+) -> (Option<League<'a>>, usize) {
+    let (game, dialog) = (cx.game, cx.dialog);
+    let Some(records) = cx.state.records.as_ref() else { return (None, 0) };
+    let league = League::of(records, own.country().into(), own.level());
+
+    // "1. Bundesliga 2025/26".
+    let year = i32::from(records.globals.start_year());
+    let next = if (year + 1) % 100 == 0 {
+        (year + 1).to_string()
+    } else {
+        format!("{:02}", (year + 1) % 100)
+    };
+    let name = league.as_ref().map(League::name).unwrap_or_default();
+    let title =
+        game.text(SEASON_TEXT).replacen("%s", &name, 1).replacen("%s", &year.to_string(), 1);
+    set(view, dialog, TITLE, title.replacen("%s", &next, 1));
+    let played = league.as_ref().map_or(0, League::played);
+    let matchday = game.text(MATCHDAY_TEXT).replacen("%d", &(played + 1).to_string(), 1);
+    set(view, dialog, MATCHDAY, matchday.replacen("%s", ".", 1));
+
+    for (team, [name, form, place]) in [home, away].into_iter().zip(SIDES) {
+        set(view, dialog, name, team.name());
+        let stand = opponent::stand(records, team);
+        set(view, dialog, form, stand.map(|s| s.form).unwrap_or_default());
+        let table = team.table_place();
+        let shown = if table > 0 { format!("({})", ordinal(table)) } else { String::new() };
+        set(view, dialog, place, shown);
+    }
+
+    let calendar = &game.calendar;
+    set(view, dialog, FIRST_LEG, goals(opponent::first_leg(records, calendar, home, away)));
+    let last = opponent::archived_result(records, home, away, 0, false);
+    set(view, dialog, LAST_YEAR, goals(last));
+    let [w, d, l] = opponent::home_record(records, calendar, home, away);
+    set(view, dialog, TENDENCY, format!("{w}:{d}:{l}"));
+    (league, played)
+}
+
+/// "2:1", or "-" for a game not found.
+fn goals(g: Option<(u8, u8)>) -> String {
+    g.map_or_else(|| "-".to_owned(), |(a, b)| format!("{a}:{b}"))
+}
+
+/// What both announcements show of any match: the crests, the strengths
+/// and the advance sales, with the home side's season tickets counted for
+/// a league match (`FUN_0054ec0d` and what follows it).
+fn show_both(cx: &Cx, view: &mut View, own: &Team, [home, away]: [&Team; 2], season: i32) {
+    let (game, dialog) = (cx.game, cx.dialog);
+    let Some(records) = cx.state.records.as_ref() else { return };
+    for (team, id) in [home, away].into_iter().zip(CRESTS) {
+        if let Some(c) = control(dialog, id) {
+            view.set_picture(c, crest(game, records, team));
+        }
+    }
+    let strengths = format!("{} : {}", strength(cx, home), strength(cx, away));
+    set(view, dialog, STRENGTHS, strengths);
+    let sale = a3_core::tickets::sale(
+        records,
+        (home.country(), i16::from(home.number())),
+        (away.country(), i16::from(away.number())),
+        own.next_day(),
+    );
+    let advance = sale.map(|s| count(s.sold + season));
+    set(view, dialog, ADVANCE, advance.unwrap_or_else(|| "-".to_owned()));
+}
+
 #[derive(Default)]
 pub struct Announcement;
 
@@ -183,62 +263,9 @@ impl Screen for Announcement {
             return;
         };
         let Some(records) = cx.state.records.as_ref() else { return };
-        let own_home = own.next_venue() <= 0;
-        let sides = if own_home { [own, other] } else { [other, own] };
-        let [home, away] = sides;
-        let league = League::of(records, own.country().into(), own.level());
-
-        // "1. Bundesliga 2025/26".
-        let year = i32::from(records.globals.start_year());
-        let next = if (year + 1) % 100 == 0 {
-            (year + 1).to_string()
-        } else {
-            format!("{:02}", (year + 1) % 100)
-        };
-        let name = league.as_ref().map(League::name).unwrap_or_default();
-        let title = game.text(SEASON_TEXT).replacen("%s", &name, 1).replacen(
-            "%s",
-            &year.to_string(),
-            1,
-        );
-        set(view, dialog, TITLE, title.replacen("%s", &next, 1));
-        let played = league.as_ref().map_or(0, League::played);
-        let matchday = game.text(MATCHDAY_TEXT).replacen("%d", &(played + 1).to_string(), 1);
-        set(view, dialog, MATCHDAY, matchday.replacen("%s", ".", 1));
-
-        for (team, [name, form, place]) in sides.into_iter().zip(SIDES) {
-            set(view, dialog, name, team.name());
-            let stand = opponent::stand(records, team);
-            set(view, dialog, form, stand.map(|s| s.form).unwrap_or_default());
-            let table = team.table_place();
-            let shown = if table > 0 { format!("({})", ordinal(table)) } else { String::new() };
-            set(view, dialog, place, shown);
-        }
-        for (team, id) in sides.into_iter().zip(CRESTS) {
-            if let Some(c) = control(dialog, id) {
-                view.set_picture(c, crest(game, records, team));
-            }
-        }
-
-        let calendar = &game.calendar;
-        let goals =
-            |g: Option<(u8, u8)>| g.map_or_else(|| "-".to_owned(), |(a, b)| format!("{a}:{b}"));
-        set(view, dialog, FIRST_LEG, goals(opponent::first_leg(records, calendar, home, away)));
-        let last = opponent::archived_result(records, home, away, 0, false);
-        set(view, dialog, LAST_YEAR, goals(last));
-        let [w, d, l] = opponent::home_record(records, calendar, home, away);
-        set(view, dialog, TENDENCY, format!("{w}:{d}:{l}"));
-        let strengths = format!("{} : {}", strength(cx, home), strength(cx, away));
-        set(view, dialog, STRENGTHS, strengths);
-        let sale = a3_core::tickets::sale(
-            records,
-            (home.country(), i16::from(home.number())),
-            (away.country(), i16::from(away.number())),
-            own.next_day(),
-        );
-        let advance = sale.map(|s| count(s.sold + home.get::<i32>(SEASON_TICKETS)));
-        set(view, dialog, ADVANCE, advance.unwrap_or_else(|| "-".to_owned()));
-
+        let sides = if own.next_venue() <= 0 { [own, other] } else { [other, own] };
+        let (league, played) = show_league_match(cx, view, own, sides);
+        show_both(cx, view, own, sides, sides[0].get::<i32>(SEASON_TICKETS));
         if let (Some(league), Some(list)) = (&league, control(dialog, GAMES)) {
             let rows = games(records, league, own.country().into(), played);
             if let Some(shown) = view.list_mut(list) {
@@ -323,22 +350,27 @@ fn cup_title(game: &Game, records: &Records, country: u8, kind: u8, round: u8) -
     if round_name.is_empty() { title } else { format!("{title} - {round_name}") }
 }
 
-/// The announcement of a match that is not the league's (dialog 201).
+/// The announcement of any match (dialog 201): a league match's as 358
+/// has it but for the games and the map, another's with its competition.
 #[derive(Default)]
-pub struct CupAnnouncement;
+pub struct MatchAnnouncement;
 
-impl Screen for CupAnnouncement {
+impl Screen for MatchAnnouncement {
     fn ids(&self) -> &[u16] {
-        &[CUP_ANNOUNCEMENT]
+        &[MATCH_ANNOUNCEMENT]
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
         let (game, dialog) = (cx.game, cx.dialog);
+        set(view, dialog, CAPTION_ID, dialog.title.clone());
         let Some((own, other)) = next_match(cx) else { return };
         let Some(records) = cx.state.records.as_ref() else { return };
-        set(view, dialog, CAPTION_ID, dialog.title.clone());
         let sides = if own.next_venue() == 0 { [own, other] } else { [other, own] };
-        let [home, away] = sides;
+        if own.next_kind() == LEAGUE_MATCH {
+            show_league_match(cx, view, own, sides);
+            show_both(cx, view, own, sides, sides[0].get::<i32>(SEASON_TICKETS));
+            return;
+        }
         let title = cup_title(game, records, own.country(), own.next_kind(), own.next_round());
         set(view, dialog, TITLE, title);
         set(view, dialog, MATCHDAY, String::new());
@@ -347,30 +379,15 @@ impl Screen for CupAnnouncement {
             set(view, dialog, form, " ".to_owned());
             set(view, dialog, place, " ".to_owned());
         }
-        for (team, id) in sides.into_iter().zip(CRESTS) {
-            if let Some(c) = control(dialog, id) {
-                view.set_picture(c, crest(game, records, team));
-            }
-        }
         // Only the national cup's second legs have a first (`FUN_0040dac1`).
         let tickets = &game.rules.forecast.tickets;
         let first = (own.next_kind() == NATIONAL_CUP)
             .then(|| a3_core::tickets::cup_first_leg(records, own, other, tickets, &game.calendar))
             .flatten();
-        let first = first.map_or_else(|| "-".to_owned(), |(h, a)| format!("{h}:{a}"));
-        set(view, dialog, FIRST_LEG, first);
+        set(view, dialog, FIRST_LEG, goals(first));
         set(view, dialog, LAST_YEAR, "-".to_owned());
         set(view, dialog, TENDENCY, "-".to_owned());
-        let strengths = format!("{} : {}", strength(cx, home), strength(cx, away));
-        set(view, dialog, STRENGTHS, strengths);
-        let sale = a3_core::tickets::sale(
-            records,
-            (home.country(), i16::from(home.number())),
-            (away.country(), i16::from(away.number())),
-            own.next_day(),
-        );
-        let advance = sale.map(|s| count(s.sold));
-        set(view, dialog, ADVANCE, advance.unwrap_or_else(|| "-".to_owned()));
+        show_both(cx, view, own, sides, 0);
     }
 
     fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
