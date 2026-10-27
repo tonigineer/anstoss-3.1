@@ -18,7 +18,7 @@ use crate::pointer::{Geometry, Target};
 const ROW_HEIGHT: f32 = 14.0;
 /// The scrollbar runs down the list's right edge this wide: an arrow at
 /// each end, a handle in between.
-const SCROLLBAR_WIDTH: f32 = 20.0;
+pub(crate) const SCROLLBAR_WIDTH: f32 = 20.0;
 /// The scrollbars' colours (the table at 0x8ade78, by the list's style):
 /// the long bars their handles are cut from, blue, red, red, green and
 /// yellow, and the tracks some draw behind them.
@@ -40,10 +40,10 @@ const COLOUR: u8 = 0x70;
 const WIDE_ROWS: u8 = 0x80;
 const BESIDE: u8 = 0x04;
 /// The track: where it starts across the scrollbar, and how wide it is.
-const TRACK_LEFT: u32 = 7;
-const TRACK_WIDTH: u32 = 13;
+pub(crate) const TRACK_LEFT: u32 = 7;
+pub(crate) const TRACK_WIDTH: u32 = 13;
 /// The shortest the handle gets (`FUN_007ae43e`).
-const MIN_HANDLE: i32 = 8;
+pub(crate) const MIN_HANDLE: i32 = 8;
 /// Rows the mouse wheel scrolls per notch, as Windows does.
 pub const WHEEL_ROWS: i32 = 3;
 /// The colour a selected row is drawn half over with, by the list's

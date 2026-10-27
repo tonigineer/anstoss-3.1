@@ -13,7 +13,7 @@ use std::io;
 
 use a3_files::exe::Exe;
 
-use crate::opponent::League;
+use crate::opponent::{CUPS_AT, League, PAIRING, PAIRINGS};
 use crate::random::Random;
 use crate::records::{Manager, Records, Team};
 
@@ -447,4 +447,95 @@ pub fn letters(records: &Records, country: u16, team: i16) -> u16 {
             .map_or(0, |&b| u16::from(b)),
         _ => 0,
     }
+}
+
+/// The national cups' pages in the tables' category (`FUN_004469c0`), and
+/// the kind of strip that steps through their rounds (`FUN_004599d8`'s
+/// cases 0x12..0x16, the cup of the slot typed there).
+pub const CUP_PAGES: std::ops::RangeInclusive<i16> = 0x13..=0x17;
+pub const CUP_STRIPS: std::ops::RangeInclusive<i16> = 0x12..=0x16;
+
+/// The cups' rounds by mode (the table at `0x8a5e10`, read by `FUN_006d124d`
+/// for the start and `FUN_006d1228` for the count): where each round's
+/// pairings stand and how many there are. Its seventh row, the final, is
+/// the one the opponent's stand never reads — `opponent::ROUNDS` stops
+/// before it.
+const CUP_ROUNDS: [[(usize, usize); 7]; 6] = [
+    [(0, 0), (0, 32), (32, 16), (48, 8), (56, 4), (60, 2), (62, 1)],
+    [(0, 0), (0, 0), (32, 16), (48, 8), (56, 4), (60, 2), (62, 1)],
+    [(0, 20), (20, 32), (52, 16), (68, 8), (76, 4), (80, 2), (82, 1)],
+    [(0, 0), (20, 32), (52, 16), (68, 8), (76, 4), (80, 2), (82, 1)],
+    [(0, 35), (35, 25), (60, 16), (76, 8), (84, 4), (88, 2), (90, 1)],
+    [(0, 0), (35, 25), (60, 16), (76, 8), (84, 4), (88, 2), (90, 1)],
+];
+
+/// The rounds' names as the pages show them (the table at `0x87cacc`).
+pub const CUP_ROUND_NAMES: [u16; 7] = [2118, 2119, 2120, 2121, 2122, 2123, 2124];
+
+/// A pairing on the cup pages (the 0xe bytes `FUN_006d1272` copies to the
+/// row `FUN_0044893f`): the two sides, the legs' goals where they were
+/// played, and how the pairing was decided beyond full time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CupPairing {
+    /// The country and the number of the home and of the away club; a
+    /// country of 0 means no club there yet, the round not set.
+    pub home_country: u8,
+    pub home: i16,
+    pub away_country: u8,
+    pub away: i16,
+    /// The first leg's goals (+8 and +9, flag 0x20) and the second's
+    /// (+0xa and +0xb, flag 0x10).
+    pub first: Option<(u8, u8)>,
+    pub second: Option<(u8, u8)>,
+    /// Whether penalties (0x40, "n.E.") or extra time (0x80, "n.V.")
+    /// decided it.
+    pub penalties: bool,
+    pub extra_time: bool,
+}
+
+/// The cup record of a slot: `0x1ba5390` and 0x698 a slot, the record's
+/// own bytes starting the block at 0x20.
+fn cup(records: &Records, slot: usize) -> Option<&[u8]> {
+    records.block(&format!("{CUPS_AT:#x}[{slot}]"))
+}
+
+/// The rounds a cup is played from and to (+0x26 and +0x28): the strip
+/// steps through the names from the one to the other.
+pub fn cup_rounds(records: &Records, slot: usize) -> (i16, i16) {
+    let Some(cup) = cup(records, slot) else { return (0, 0) };
+    let number = |at: usize| {
+        cup.get(at..at + 2)
+            .map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
+    };
+    (number(0x26 - 0x20), number(0x28 - 0x20))
+}
+
+/// The pairings of a cup's round, `start..start + count` as the mode's
+/// row in the table has them — including the pairings where no club
+/// stands yet, which the page shows as "ohne Verein".
+pub fn cup_pairings(records: &Records, slot: usize, round: i16) -> Vec<CupPairing> {
+    let Some(cup) = cup(records, slot) else { return Vec::new() };
+    let Some((start, count)) = usize::try_from(round)
+        .ok()
+        .and_then(|r| {
+            let m = cup.get(0x24 - 0x20..0x26 - 0x20)?;
+            let mode = usize::from(u16::from_le_bytes([m[0], m[1]]));
+            CUP_ROUNDS.get(mode)?.get(r).copied()
+        })
+    else {
+        return Vec::new();
+    };
+    (start..start + count)
+        .filter_map(|q| cup.get(PAIRINGS + q * PAIRING..PAIRINGS + (q + 1) * PAIRING))
+        .map(|p| CupPairing {
+            home_country: p[0],
+            home: i16::from_le_bytes([p[2], p[3]]),
+            away_country: p[4],
+            away: i16::from_le_bytes([p[6], p[7]]),
+            first: (p[0xc] & 0x20 != 0).then_some((p[8], p[9])),
+            second: (p[0xc] & 0x10 != 0).then_some((p[0xa], p[0xb])),
+            penalties: p[0xc] & 0x40 != 0,
+            extra_time: p[0xc] & 0x80 != 0,
+        })
+        .collect()
 }

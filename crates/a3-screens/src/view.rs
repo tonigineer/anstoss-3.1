@@ -279,6 +279,10 @@ impl View {
                 let visible = visible_rows(&dialog.controls[control]);
                 if let Some(list) = self.list_mut(control) {
                     list.scroll_by(if up { -1 } else { 1 }, visible);
+                } else if let Some(table) = self.table_mut(control) {
+                    // A table's scroll lives in the screen: it says so.
+                    table.scroll_by(if up { -1 } else { 1 });
+                    return true;
                 }
                 false
             }

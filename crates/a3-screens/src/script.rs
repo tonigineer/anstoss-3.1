@@ -4605,4 +4605,52 @@ mod tests {
         assert_eq!(table.rows[0].text, "1.\tFortuna Düsseldorf\t24\t7\t3\t79\t46\t61\t:\t15");
         assert_eq!(view.text(control(dialog, 4780).unwrap()), "2. Bundesliga");
     }
+
+    /// The archive's cup pages on A.an3 (bar symbol 14): Deutschland's
+    /// Runde 1 with its results, "n.V." and "n.E." notes and the own
+    /// club's tie red; the strip one step on to the drawn but unplayed
+    /// Runde 2; England's still open first round without results; and the
+    /// yellow bar at its edge, whose down arrow scrolls a long round.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_statistics_show_the_cup_rounds() {
+        let game = game();
+        let open = "now click bar 14\nuntil dialog 18";
+        let de = format!("{open}\nnow row 1284 8");
+        let Some(runner) = on_save(&game, "A", &de) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&18];
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Runde 1");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 32);
+        let row = |i: usize| (table.rows[i].text.clone(), table.rows[i].ink, table.rows[i].mark);
+        let aug = "FC Augsburg\t-\tVfB Stuttgart\t1\t:\t0\t ";
+        assert_eq!(row(0), (aug.to_owned(), [0; 3], None));
+        let own = "1.FC Union Berlin\t-\t1.FC Köln\t4\t:\t1\t ";
+        assert_eq!(row(1), (own.to_owned(), [255, 0, 0], None));
+        let Dortmund = "Borussia Dortmund\t-\tSV 07 Elversberg\t0\t:\t1\tn.V.";
+        assert_eq!(table.rows[4].text, Dortmund);
+        let Frankfurt = "Eintracht Frankfurt\t-\tKarlsruher SC\t5\t:\t3\tn.E.";
+        assert_eq!(table.rows[5].text, Frankfurt);
+        let on = format!("{de}\nnow click at 545 436");
+        let Some(runner) = on_save(&game, "A", &on) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Runde 2");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 16);
+        assert_eq!(table.rows[0].text, "1.FC Union Berlin\t-\tHamburger SV\t\t\t\t ");
+        assert_eq!(table.rows[0].ink, [255, 0, 0]);
+        let en = format!("{open}\nnow row 1284 9");
+        let Some(runner) = on_save(&game, "A", &en) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "FC Burnley\t-\tTottenham Hotspur\t\t\t\t ");
+        // The down arrow of the bar that stands over 32 pairs: three
+        // clicks and the eighth pair stands at the top.
+        let down = format!("{de}\nnow click at 608 394\nnow click at 608 394\nnow click at 608 394");
+        let Some(runner) = on_save(&game, "A", &down) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.scroll, 3);
+    }
 }

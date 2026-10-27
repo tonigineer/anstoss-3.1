@@ -630,9 +630,9 @@ const ROUNDS: [[(usize, usize); 6]; 6] = [
 /// text 1443.
 const ROUND_NAMES: [u16; 6] = [1528, 1519, 1520, 1521, 1521, 1522];
 const NO_ROUND: u16 = 1443;
-const CUPS_AT: u32 = 0x1ba5390;
-const PAIRINGS: usize = 0x2c - 0x20;
-const PAIRING: usize = 0xe;
+pub const CUPS_AT: u32 = 0x1ba5390;
+pub const PAIRINGS: usize = 0x2c - 0x20;
+pub const PAIRING: usize = 0xe;
 const HIGHEST_PAIRING: usize = 62;
 const PLAYED: u8 = 0x08;
 

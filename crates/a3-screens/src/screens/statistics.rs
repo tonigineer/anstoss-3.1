@@ -8,8 +8,9 @@
 //!
 //! Of the pages, the league tables of `FUN_00444ec6` are drawn: the
 //! current one, at home, away, of either half of the season, of either
-//! half of the games, with two points a win; and the forecast of the
-//! champion (`FUN_00445ded`). The others are crossed out.
+//! half of the games, with two points a win; the forecast of the
+//! champion (`FUN_00445ded`); and the rounds of the national cups
+//! (`FUN_004469c0`). The others are crossed out.
 
 use std::collections::HashMap;
 
@@ -139,6 +140,25 @@ const FORECAST_WIDTH: i32 = 0x198;
 const TABLES: usize = 0;
 const TABLE_CODES: std::ops::RangeInclusive<i16> = 0..=7;
 const FORECAST: i16 = 8;
+/// The cup rows' columns (`FUN_006df48b` with 0x879428 and 0x879450): the
+/// two sides, the legs' scores in the right-pulled columns, and the note
+/// behind them. A side with no club reads "ohne Verein" (0xfef), the note
+/// "n.V." (0x761) or "n.E." (0x762), else a space.
+const CUP_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (120, 0),
+    (125, 0),
+    (R | 245, 20),
+    (267, 0),
+    (270, 0),
+    (R | 290, 20),
+    (312, 0),
+    (315, 0),
+    (350, 0),
+];
+const NO_CLUB: u16 = 0xfef;
+const EXTRA_TIME: u16 = 0x761;
+const PENALTIES: u16 = 0x762;
 /// The own club's rows red, the others black (COLORREF 0xff).
 const OWN_INK: [u8; 3] = [255, 0, 0];
 const INK: [u8; 3] = [0, 0, 0];
@@ -195,6 +215,9 @@ pub struct Statistics {
     page: Option<usize>,
     /// The list's row last chosen.
     row: usize,
+    /// How far the page's table is scrolled, kept while the page is drawn
+    /// anew.
+    scrolled: usize,
     /// The strip: its names and the one chosen; the leagues it stands for
     /// when it steps through them.
     strip: Vec<String>,
@@ -358,6 +381,7 @@ impl Statistics {
             return;
         }
         self.page = Some(entry);
+        self.scrolled = 0;
         let Some(&page) = cx.game.rules.statistics.categories[self.category].get(entry) else {
             return;
         };
@@ -396,6 +420,14 @@ impl Statistics {
                 let mut names = countries();
                 names.push(text(NATIONS.1));
                 names
+            }
+            // A national cup: the rounds it is played from and to, by
+            // name.
+            k if statistics::CUP_STRIPS.contains(&k) => {
+                let (first, last) = statistics::cup_rounds(records, (k - 0x12) as usize);
+                (i16::max(first, 0)..=i16::min(last, 6))
+                    .map(|r| text(statistics::CUP_ROUND_NAMES[r as usize]))
+                    .collect()
             }
             _ => return,
         };
@@ -436,6 +468,9 @@ impl Statistics {
                 self.table_page(cx, view, code)
             }
             Some(FORECAST) if self.category == TABLES => self.forecast_page(cx, view),
+            Some(code) if self.category == TABLES && statistics::CUP_PAGES.contains(&code) => {
+                self.cup_page(cx, view)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -500,7 +535,82 @@ impl Statistics {
             })
             .collect();
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
-            *table = TableState { columns: columns.to_vec(), rows, width: ROW_WIDTH, centred: -1 };
+            *table = TableState {
+                columns: columns.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+            };
+        }
+        true
+    }
+}
+
+impl Statistics {
+    /// A national cup's page (`FUN_004469c0`): the cup of the page's
+    /// country, the round the strip stands on counting from the cup's
+    /// first, and its pairings as the row `FUN_0044893f` writes them —
+    /// sides, legs and the "n.V."/"n.E." note over a blank header, the
+    /// own club's pairing red.
+    fn cup_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let pages = &game.rules.statistics.categories[self.category];
+        let Some(page) = self.page.and_then(|e| pages.get(e)) else { return false };
+        let slot = usize::from((page.flags & statistics::SLOT) >> 12);
+        let country = records.countries.get::<i16>(SLOT_COUNTRIES + 2 * slot);
+        let cup = usize::from(records.countries.slot(country as usize));
+        let (first, _) = statistics::cup_rounds(records, cup);
+        let round = first + i16::try_from(self.chosen).unwrap_or(i16::MAX);
+        set_header(view, dialog, String::new(), &[(0, 0)]);
+        let own = own_team(cx).map(|t| (u16::from(t.country()), i16::from(t.number())));
+        let rows = statistics::cup_pairings(records, cup, round)
+            .iter()
+            .map(|p| {
+                let side = |country: u8, team: i16| {
+                    if country == 0 {
+                        game.text(NO_CLUB).to_owned()
+                    } else {
+                        game.club_name(Some(records), country, team)
+                    }
+                };
+                let leg = |leg: Option<(u8, u8)>, empty: &str| {
+                    leg.map_or_else(|| empty.to_owned(), |(a, b)| format!("\t{a}\t:\t{b}"))
+                };
+                let note = if p.penalties {
+                    game.text(PENALTIES)
+                } else if p.extra_time {
+                    game.text(EXTRA_TIME)
+                } else {
+                    " "
+                };
+                let text = format!(
+                    "{}\t-\t{}{}{}\t{note}",
+                    side(p.home_country, p.home),
+                    side(p.away_country, p.away),
+                    leg(p.first, "\t\t\t"),
+                    leg(p.second, "")
+                );
+                let ink = if own == Some((u16::from(p.home_country), p.home))
+                    || own == Some((u16::from(p.away_country), p.away))
+                {
+                    OWN_INK
+                } else {
+                    INK
+                };
+                TableRow { text, ink, mark: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table =
+                TableState {
+                    columns: CUP_COLUMNS.to_vec(),
+                    rows,
+                    width: ROW_WIDTH,
+                    centred: -1,
+                    scroll: self.scrolled,
+                };
         }
         true
     }
@@ -542,6 +652,7 @@ impl Statistics {
                 rows,
                 width: FORECAST_WIDTH,
                 centred: -1,
+                scroll: 0,
             };
         }
         true
@@ -613,6 +724,15 @@ impl Screen for Statistics {
                 }
                 self.show(cx, view, entry);
                 self.row = r;
+            }
+            // A table page's bar scrolled one row: the view has moved it,
+            // the page keeps it when it draws anew.
+            Target::Scroll { .. } => {
+                if let Some(c) = control(cx.dialog, TABLE)
+                    && let Some(t) = view.table(c)
+                {
+                    self.scrolled = t.scroll;
+                }
             }
             // The strip steps: its name, and the page drawn anew.
             Target::SliderStep { control: c, .. }

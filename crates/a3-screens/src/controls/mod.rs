@@ -305,8 +305,16 @@ impl ControlState {
             Self::Menu(m) => m.targets(index, control, geometry, out),
             Self::Player(Some(player)) => player.targets(index, control, geometry, out),
             // A table answers as a whole, to be crossed out while its page
-            // is not built.
-            Self::Table(_) => out.push((Target::Control(index), geometry.rect(control))),
+            // is not built; over it, the arrows of the bar that stands
+            // while it has more rows than fit.
+            Self::Table(t) => {
+                out.push((Target::Control(index), geometry.rect(control)));
+                if t.scrolls() {
+                    let (up, down) = TableState::bar_arrows(control.rect);
+                    out.push((Target::Scroll { control: index, up: true }, geometry.map(up)));
+                    out.push((Target::Scroll { control: index, up: false }, geometry.map(down)));
+                }
+            }
             // The markers have no handler: a click on one does nothing.
             Self::Header(_)
             | Self::Bitmap(_)
