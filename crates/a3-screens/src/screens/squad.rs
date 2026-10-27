@@ -405,6 +405,45 @@ fn squad_record<'a>(cx: &'a Cx, player: usize) -> Option<(u16, &'a a3_core::reco
     Some((id, cx.state.records.as_ref()?.player(id)?))
 }
 
+/// The eleven columns every squad row shows, here and in the opponent's
+/// squad (`FUN_00563147`, `FUN_005652cb`): name, position and its sides,
+/// strength and form, ES, age, nation, morale, will and freshness.
+pub(crate) fn squad_row(
+    cx: &Cx,
+    club: &a3_core::season::ClubState,
+    p: usize,
+    today: chrono::NaiveDate,
+) -> [String; 11] {
+    let (game, records) = (cx.game, cx.state.records.as_ref());
+    let pitch = &game.rules.pitch;
+    let player = &club.players[p];
+    let status = club.status.get(p).copied().unwrap_or_default();
+    let fitness = lineup::fitness_of(&club.fitness, p);
+    let record = records.and_then(|r| r.player(status.id));
+    let get = |f: &dyn Fn(&a3_core::records::Player) -> u16| record.map_or(0, f);
+    let [main, second, third] = player.positions;
+    let sides = match (second, third) {
+        (0, _) => " ".to_owned(),
+        (s, 0) => hub::abbreviation(game, s),
+        (s, t) => format!("{}/{}", hub::abbreviation(game, s), hub::abbreviation(game, t)),
+    };
+    let unknown = matches!((get(&|r| r.picks().into()) as u8 & UNKNOWN_STRENGTH) >> 6, 1 | 3);
+    let nation = game.world.nation_codes.get(usize::from(status.nations[0])).cloned();
+    [
+        super::duties::short_name(cx, player, status.id),
+        hub::abbreviation(game, main),
+        sides,
+        if unknown { "?".to_owned() } else { player.strength.to_string() },
+        lineup::form(fitness).to_string(),
+        hub::tenths(pitch.strength(player, fitness, status.doping)),
+        player.age(today).to_string(),
+        nation.unwrap_or_default(),
+        fitness.morale.to_string(),
+        lineup::condition(fitness).to_string(),
+        lineup::freshness(fitness).to_string(),
+    ]
+}
+
 /// The rows and the lines below them (`FUN_00563147`): the squad in its
 /// order, sorted by main position as the game sorts — not stably —, the
 /// scroll kept, no row selected.
@@ -416,7 +455,6 @@ fn fill_squad(cx: &Cx, view: &mut View) {
         return;
     };
     let records = cx.state.records.as_ref();
-    let pitch = &game.rules.pitch;
     let players = &club.players;
     let order = squadlist::exchange_sort((0..players.len()).collect(), |p, q| {
         players[p].positions[0] < players[q].positions[0]
@@ -429,19 +467,8 @@ fn fill_squad(cx: &Cx, view: &mut View) {
     for &p in &order {
         let player = &players[p];
         let status = club.status.get(p).copied().unwrap_or_default();
-        let fitness = lineup::fitness_of(&club.fitness, p);
         let record = records.and_then(|r| r.player(status.id));
         let get = |f: &dyn Fn(&a3_core::records::Player) -> u16| record.map_or(0, f);
-        let [main, second, third] = player.positions;
-        let sides = match (second, third) {
-            (0, _) => " ".to_owned(),
-            (s, 0) => hub::abbreviation(game, s),
-            (s, t) => format!("{}/{}", hub::abbreviation(game, s), hub::abbreviation(game, t)),
-        };
-        let unknown = matches!((get(&|r| r.picks().into()) as u8 & UNKNOWN_STRENGTH) >> 6, 1 | 3);
-        let strength = if unknown { "?".to_owned() } else { player.strength.to_string() };
-        let es = hub::tenths(pitch.strength(player, fitness, status.doping));
-        let nation = game.world.nation_codes.get(usize::from(status.nations[0])).cloned();
         let salary = i64::from(get(&|r| r.salary())) * SALARY_UNIT;
         let retiring = get(&|r| r.retiring().into()) as u8 & RETIRING != 0;
         let years = ((i32::from(get(&|r| r.contract()) & CONTRACT_YEAR) - year) as i8).max(0);
@@ -458,26 +485,9 @@ fn fill_squad(cx: &Cx, view: &mut View) {
         } else {
             super::finances::amount(game, i64::from(fee) * FEE_UNIT)
         };
-        rows.push(
-            [
-                super::duties::short_name(cx, player, status.id),
-                hub::abbreviation(game, main),
-                sides,
-                strength,
-                lineup::form(fitness).to_string(),
-                es,
-                player.age(today).to_string(),
-                nation.unwrap_or_default(),
-                fitness.morale.to_string(),
-                lineup::condition(fitness).to_string(),
-                lineup::freshness(fitness).to_string(),
-                money(game, salary),
-                contract,
-                star.to_owned(),
-                fee,
-            ]
-            .join("\t"),
-        );
+        let mut row = squad_row(cx, club, p, today).to_vec();
+        row.extend([money(game, salary), contract, star.to_owned(), fee]);
+        rows.push(row.join("\t"));
         let ink = if get(&|r| r.retiring().into()) as u8 & LISTED != 0 {
             LISTED_INK
         } else if get(&|r| r.terms()) & ON_LOAN != 0 {

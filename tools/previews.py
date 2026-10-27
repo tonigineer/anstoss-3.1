@@ -74,7 +74,9 @@ AREAS = {
     "players": [(*on_a(f"now rclick 2510; choose 9950 {i}", f"until dialog {d}"), d)
                 for i, d in [(0, 399), (1, 412), (3, 195), (4, 85)]],
     "comparison": [(*bar(2, 78), 78), (*bar(2, 78, "now choose 5618 1"), 78),
-                   (*bar(2, 78, "now choose 5618 1", "now click at 93 248"), 78)],
+                   (*bar(2, 78, "now choose 5618 1", "now click at 93 248"), 78),
+                   # "Gegner" shows the opponent's own squad (476).
+                   (*bar(2, 78, "now press 5664", "until dialog 476"), 476)],
     "tactics": [(*bar(3, 271), 271)],
     "long": [(*bar(4, 345), 345), (*bar(4, 345, "now choose 5035 2"), 345),
              (*bar(4, 345, "now choose 5035 2", "now click at 134 130"), 345),

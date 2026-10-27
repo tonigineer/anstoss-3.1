@@ -1563,6 +1563,23 @@ mod tests {
 
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_opponents_squad_stands_over_the_comparison() {
+        let game = game();
+        // The comparison's "Gegner" (button 5664 of 78) puts up the
+        // opponent's own squad (476); the OK brings it down again.
+        let Some(run) = on_save(
+            &game,
+            "Toni",
+            "now click bar 1\nuntil dialog 78\nnow press 5664\nuntil dialog 476\n\
+             now ok\nuntil dialog 78",
+        ) else {
+            return;
+        };
+        assert_eq!(seen(&run, 476), 1, "{}", run.log.join("\n"));
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_calendar_books_and_the_planner_shows() {
         let game = game();
         // September: the family day dragged onto the 10th, the club party

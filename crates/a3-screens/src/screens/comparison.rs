@@ -58,8 +58,16 @@ const AREA: u16 = 9921;
 const SET_PIECE: u16 = 5619;
 /// "Stürmer manndecken", "Spielm. manndecken".
 const MARKS: [(u16, u16); 2] = [(5662, MARK_STRIKERS), (5663, MARK_PLAYMAKERS)];
-/// "Gegner": the opponent's squad.
+/// "Gegner": the opponent's squad, in its own dialog.
 const SQUAD: u16 = 5664;
+const OPPONENT_SQUAD: u16 = 476;
+/// Its list and caption; the rows' inks, in the eleven, on the bench, in
+/// the stands (`FUN_0069675f`).
+const THEIR_LIST: u16 = 5261;
+const THEIR_CAPTION: u16 = 9929;
+const ELEVEN_INK: [u8; 3] = [0, 0, 0];
+const BENCH_INK: [u8; 3] = [10, 10, 250];
+const STANDS_INK: [u8; 3] = [69, 147, 11];
 /// The OK, whose place the bar takes.
 const OK: u16 = 1;
 const CAPTION_ID: u16 = 9920;
@@ -157,6 +165,13 @@ pub(crate) fn compose(dialogs: &mut HashMap<u16, Dialog>, rules: &Rules) {
     dialog.controls.extend(area);
     dialog.controls.insert(0, super::caption(dialog.frame, CAPTION_ID, String::new()));
     hub::add_bar(dialog, rules);
+}
+
+/// The opponent's squad's caption, like every window's.
+pub(crate) fn compose_opponent(dialogs: &mut HashMap<u16, Dialog>) {
+    if let Some(dialog) = dialogs.get_mut(&OPPONENT_SQUAD) {
+        dialog.controls.insert(0, super::caption(dialog.frame, THEIR_CAPTION, String::new()));
+    }
 }
 
 #[derive(Default)]
@@ -267,8 +282,9 @@ impl Screen for Comparison {
         }
         self.show_boxes(cx, view);
 
-        let works = |target: Target| match target {
-            Target::Button(c) => dialog.controls[c].id != Some(SQUAD),
+        let squad = self.their_club.is_some();
+        let works = move |target: Target| match target {
+            Target::Button(c) => dialog.controls[c].id != Some(SQUAD) || squad,
             _ => hub::on_bar(dialog, target).is_none_or(hub::bar_works),
         };
         mark_inert(view, dialog, works);
@@ -312,6 +328,10 @@ impl Screen for Comparison {
             Target::Option { control: c, item } if id(c) == MODE => {
                 self.mode = item;
                 self.show_boxes(cx, view);
+            }
+            // "Gegner": the opponent's own squad.
+            Target::Button(c) if id(c) == SQUAD => {
+                return Outcome::Popup(Request::new(OPPONENT_SQUAD));
             }
             // A handle of the area dragged: its sides follow the pointer.
             Target::Drop { from: Grip::Row { control: c, row }, at, moved, .. }
@@ -735,4 +755,78 @@ fn change(cx: &mut Cx, change: impl FnOnce(&mut ClubState)) {
 /// Tenths as the game prints them: "7.3".
 fn tenths(value: i32) -> String {
     format!("{:.1}", value as f32 / 10.0)
+}
+
+/// The opponent's squad, "Gegner" (dialog 476, `CSpielerkaderGegen`): the
+/// opponent in his squad's own order, the eleven in black, the bench blue,
+/// the rest in the stands green; his info is not built yet.
+#[derive(Default)]
+pub struct OpponentSquad;
+
+impl Screen for OpponentSquad {
+    fn ids(&self) -> &[u16] {
+        &[OPPONENT_SQUAD]
+    }
+
+    /// The rows in the club's own order, sorted by nothing (`FUN_005652cb`).
+    fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(club) = opponent(cx) else { return };
+        let key = next_opponent(cx);
+        let name = cx
+            .state
+            .records
+            .as_ref()
+            .and_then(|r| key.and_then(|k| team(cx, r, k)))
+            .map(Team::name)
+            .or_else(|| {
+                let (slot, c) = key?;
+                Some(game.world.country(slot)?.clubs.get(c)?.name.clone())
+            })
+            .unwrap_or_default();
+        set(view, dialog, THEIR_CAPTION, format!("{} {}", dialog.title, name));
+        let Some(today) = cx.state.season.as_ref().map(|s| s.date()) else { return };
+        let mut rows = Vec::new();
+        let mut inks = Vec::new();
+        for p in 0..club.players.len() {
+            // The game's row leaves out the Zuf. field altogether: Ko.
+            // and Fr. move a column left into the (383, 413) cells.
+            let mut row = super::squad::squad_row(cx, &club, p, today).to_vec();
+            row.remove(8);
+            rows.push(row.join("\t"));
+            let ink = if club.lineup.field.contains(&Some(p)) {
+                ELEVEN_INK
+            } else if club.lineup.bench.iter().any(|&b| b == Some(p)) {
+                BENCH_INK
+            } else {
+                STANDS_INK
+            };
+            inks.push(Some(ink));
+        }
+        if let Some(list) = control(dialog, THEIR_LIST).and_then(|c| view.list_mut(c)) {
+            let visible = control(dialog, THEIR_LIST)
+                .map_or(0, |l| crate::controls::list::visible_rows(&dialog.controls[l]));
+            list.scroll = list.scroll.min(rows.len().saturating_sub(visible));
+            list.selected = None;
+            list.rows = rows;
+            list.inks = inks;
+            list.keys = (0..club.players.len()).collect();
+        }
+        let works = |target: Target| match target {
+            Target::Button(c) => crate::controls::button::is_ok(&dialog.controls[c]),
+            // A row would ask for the player's info: not built yet.
+            Target::Row { .. } | Target::Cell { .. } | Target::Menu(_) => false,
+            _ => true,
+        };
+        mark_inert(view, dialog, works);
+    }
+
+    fn input(&mut self, cx: &mut Cx, _: &mut View, target: Target, _: bool) -> Outcome {
+        if let Target::Button(c) = target
+            && crate::controls::button::is_ok(&cx.dialog.controls[c])
+        {
+            return Outcome::Close(Reply::Ok);
+        }
+        Outcome::Stay
+    }
 }
