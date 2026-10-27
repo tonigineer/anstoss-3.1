@@ -3232,10 +3232,15 @@ mod tests {
             let room = runner.host.views().find(|v| v.id == 302).unwrap();
             room.chosen(entries)
         };
-        // Lit under its question, as the original's pressed entry is.
+        // Lit under its question, as the original's pressed entry is; so
+        // is "Spiel beenden" under its own.
         let ask = "now click bar 17\nuntil dialog 302\nnow choose 4035 3\nuntil dialog 384";
         let Some(runner) = on_save(&game, "Probe1", ask) else { return };
         assert_eq!(lit(&runner), 3);
+        let Some(runner) = on_save(&game, "Probe1", &ask.replace("4035 3", "4035 4")) else {
+            return;
+        };
+        assert_eq!(lit(&runner), 4);
         // No keeps the dressing room, the entry dark again.
         let no = format!("{ask}\nnow press 4739\nuntil dialog 302");
         let Some(runner) = on_save(&game, "Probe1", &no) else { return };
