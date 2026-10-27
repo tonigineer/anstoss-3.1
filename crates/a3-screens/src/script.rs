@@ -3277,6 +3277,55 @@ mod tests {
         assert_eq!(runner.host.state().listen, None);
     }
 
+    /// "Optionen" (dialog 503): OK writes the switches into the globals'
+    /// block, the start screen into the manager and the difficulty once,
+    /// locked from then on; cancel writes nothing.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_options_write_what_ok_keeps() {
+        let game = game();
+        let open = "now click bar 17\nuntil dialog 302\nnow choose 4035 6\nuntil dialog 503";
+        let Some(runner) = on_save(&game, "Probe1", open) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let before = records.globals.game_options();
+        let slot = records.human_slot(state.season.as_ref().unwrap().current).unwrap();
+        let difficulty = records.managers[slot].difficulty();
+        assert_eq!(difficulty & 0x80, 0);
+        drop(state);
+        // Tabellen twice (an, alle, aus), Spieldarstellung, the weeks up,
+        // the start screen and the difficulty one on.
+        let clicks = "now press 6328\nnow press 6328\nnow press 6336\nnow spin 6348 up\n\
+                      now press 6346\nnow press 6352";
+        let kept = format!("{open}\n{clicks}\nnow press 1\nuntil dialog 302");
+        let Some(runner) = on_save(&game, "Probe1", &kept) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let mut after = before;
+        after[0x08] = 0;
+        after[0x10] = 0x21;
+        after[0x1f] = before[0x1f] + 1;
+        assert_eq!(records.globals.game_options(), after);
+        assert_eq!(records.globals.last_display(), 0x21);
+        assert_eq!(records.managers[slot].menu_view(), 1);
+        assert_eq!(records.managers[slot].difficulty(), (difficulty & 0x7f) + 1 | 0x80);
+        let season = state.season.as_ref().unwrap();
+        assert_eq!(season.managers[season.current].menu, 1);
+        drop(state);
+        // Opened again, the difficulty's button no longer answers.
+        let again = format!("{kept}\nnow choose 4035 6\nuntil dialog 503");
+        let Some(runner) = on_save(&game, "Probe1", &again) else { return };
+        let button = control(&game.dialogs[&503], 6352).unwrap();
+        assert!(runner.host.view().disabled(button));
+        drop(runner);
+        let dropped = format!("{open}\n{clicks}\nnow press 2\nuntil dialog 302");
+        let Some(runner) = on_save(&game, "Probe1", &dropped) else { return };
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        assert_eq!(records.globals.game_options(), before);
+        assert_eq!(records.managers[slot].difficulty(), difficulty);
+    }
+
     /// "3D - Optionen" (dialog 511): open on the original's values, OK
     /// keeps a change for the next opening, cancel drops one.
     #[test]

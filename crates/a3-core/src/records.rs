@@ -1106,6 +1106,13 @@ record! {
     /// The start setting "Vorbereitung und Kalkulation" (dialog 256):
     /// normal 5, fast 7, only competitive matches 12.
     0xb5d152 => preparation, set_preparation: u8;
+    /// The game options of the dressing room (dialog 503,
+    /// `COptionenAnstoss3`): a byte each, "Vorbereitung" (`0xb5d152`)
+    /// among them.
+    0xb5d13c => game_options, set_game_options: [u8; 39];
+    /// The match display as last chosen, kept by the options' OK unless it
+    /// is 0x23 (`CUmkleide::FUN_005b1516`).
+    0xb5d19c => last_display, set_last_display: u16;
     /// The countries played besides the main one: how many, which.
     0xb5cbae => more_count, set_more_count: i16;
     0xb5cbb0 => main_country, set_main_country: i16;

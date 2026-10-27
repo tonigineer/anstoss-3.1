@@ -300,6 +300,8 @@ const NEW_GAME_QUESTION: u16 = u16::MAX - 2;
 const KONFIG_3D_ITEM: usize = 7;
 /// "Musik & Soundeffekte" (`FUN_005b1653`).
 const MUSIK_ITEM: usize = 1;
+/// "Optionen" (`FUN_005b1516`), for a loaded game.
+const OPTIONEN_ITEM: usize = 6;
 
 /// Lights a game option under its question, as the original's pressed
 /// button stays lit until the question is answered; `None` puts it out.
@@ -535,6 +537,7 @@ impl Screen for MenuBar {
             show_lineup(view, dialog, game, season, state, records, Boxes::Refill, self.sort);
         }
         // Crossed out: what does nothing yet.
+        let options_shown = super::optionen::available(cx);
         let works = |target: Target| {
             if let Target::Button(c) = target {
                 return dialog.controls[c].id == Some(ROWS_BUTTON);
@@ -560,6 +563,7 @@ impl Screen for MenuBar {
                 }
                 Some(DRESSING_OPTIONS) => {
                     matches!(item, QUIT_ITEM | NEW_GAME_ITEM | KONFIG_3D_ITEM | MUSIK_ITEM)
+                        || item == OPTIONEN_ITEM && options_shown
                 }
                 _ => false,
             }
@@ -750,6 +754,7 @@ impl Screen for MenuBar {
         let settings = match item {
             KONFIG_3D_ITEM => Some(super::konfig3d::KONFIG_3D),
             MUSIK_ITEM => Some(super::musik::MUSIK),
+            OPTIONEN_ITEM if super::optionen::available(cx) => Some(super::optionen::OPTIONEN),
             _ => None,
         };
         if view.id == DRESSING_ROOM
@@ -825,7 +830,7 @@ impl Screen for MenuBar {
             (
                 Some(
                     QUIT_QUESTION | NEW_GAME_QUESTION | super::konfig3d::KONFIG_3D
-                    | super::musik::MUSIK,
+                    | super::musik::MUSIK | super::optionen::OPTIONEN,
                 ),
                 _,
             ) => {
