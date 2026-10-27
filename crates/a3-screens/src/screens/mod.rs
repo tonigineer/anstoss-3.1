@@ -236,6 +236,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(comparison::OpponentSquad),
         Box::new(training::ShortTraining::default()),
         Box::new(training::UnitChoice),
+        Box::new(training::editor::TemplateEditor::default()),
         Box::new(training::long::LongTraining::default()),
         Box::new(training::individual::IndividualTraining::default()),
         Box::new(training::individual::AbilityChoice::default()),
@@ -263,6 +264,7 @@ pub fn compose(game: &mut Game) {
     comparison::compose(&mut game.dialogs, &game.data.rules);
     comparison::compose_opponent(&mut game.dialogs);
     training::compose(&mut game.dialogs, &game.data.rules);
+    training::editor::compose(&mut game.dialogs, &game.data.rules);
     training::long::compose(&mut game.dialogs, &game.data.rules);
     training::individual::compose(&mut game.dialogs, &game.data.rules);
     training::settings::compose(&mut game.dialogs);

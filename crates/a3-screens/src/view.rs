@@ -16,6 +16,7 @@ use crate::controls::options::OptionsState;
 use crate::controls::paint::PaintState;
 use crate::controls::player_box::PlayerBox;
 use crate::controls::spin::Value;
+use crate::controls::text::StaticState;
 use crate::controls::{ControlState, ControlView};
 use crate::pointer::{Grip, Target};
 
@@ -101,7 +102,7 @@ impl View {
                 let list = self.list(control)?;
                 list.row_boxes.get(list.scroll + row)?.clone()?
             }
-            Grip::Tile { .. } => return None,
+            Grip::Tile { .. } | Grip::Option { .. } => return None,
         };
         if !shown.filled {
             return None;
@@ -146,6 +147,7 @@ impl View {
         paint, paint_mut, as_paint, as_paint_mut, PaintState;
         combo, combo_mut, as_combo, as_combo_mut, ComboState;
         bitmap, bitmap_mut, as_bitmap, as_bitmap_mut, BitmapState;
+        static_text, static_mut, as_static, as_static_mut, StaticState;
     }
 
     /// What a static, field or header says; nothing for other controls.

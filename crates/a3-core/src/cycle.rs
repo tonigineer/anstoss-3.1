@@ -375,6 +375,8 @@ pub enum Args {
     },
     /// A youth age group: 0 the A, 1 the B, 2 the C youth.
     AgeGroup(usize),
+    /// One of the manager's week templates, by its place.
+    Template(usize),
 }
 
 /// How a screen was left.

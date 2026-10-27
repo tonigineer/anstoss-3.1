@@ -105,6 +105,7 @@ pub(crate) enum Action {
 pub(crate) enum Spot {
     Control(u16),
     Row(u16, usize),
+    Item(u16, usize),
 }
 
 /// A spot at the start of `words`: `ID` or `ID row N`; and what follows it.
@@ -112,6 +113,7 @@ fn spot<'a>(words: &'a [&'a str]) -> Option<(Spot, &'a [&'a str])> {
     let id = words.first()?.parse().ok()?;
     match words.get(1..3) {
         Some(["row", row]) => Some((Spot::Row(id, row.parse().ok()?), &words[3..])),
+        Some(["item", item]) => Some((Spot::Item(id, item.parse().ok()?), &words[3..])),
         _ => Some((Spot::Control(id), &words[1..])),
     }
 }
@@ -582,6 +584,7 @@ fn grip(controls: &Dialog, dialog: u16, spot: Spot) -> Result<Grip, Error> {
     Ok(match spot {
         Spot::Control(id) => Grip::Control(find(id)?),
         Spot::Row(id, row) => Grip::Row { control: find(id)?, row },
+        Spot::Item(id, item) => Grip::Option { control: find(id)?, item },
     })
 }
 
@@ -3354,6 +3357,33 @@ mod tests {
         let then = "now click bar 7\nuntil dialog 413\nnow press 6215";
         let Some(runner) = on_save(&game, "Probe1", then) else { return };
         assert_eq!(runner.host.view().id, 413);
+    }
+
+    /// The template editor (dialog 350) from a right click on the short
+    /// training's first template: a unit clicked fills Sunday's first
+    /// session and moves on; switching to the second template on the
+    /// combo keeps the first in the manager and his record, the session
+    /// to set staying where it was (Sunday's second), and OK keeps the
+    /// second's change.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_template_editor_keeps_the_weeks() {
+        let game = game();
+        let categories = &game.data.rules.training.categories;
+        let (first, second) = (categories[0].units[3].1, categories[1].units[0].1);
+        let then = "now click bar 4\nuntil dialog 346\nnow rclick 5035 item 0\nuntil dialog 350\n\
+                    now click 35003\nnow row 5651 1\nnow click 35100\n\
+                    now press 1\nuntil dialog 346";
+        let Some(runner) = on_save(&game, "Probe1", then) else { return };
+        let state = runner.host.state();
+        let season = state.season.as_ref().unwrap();
+        let templates = &season.managers[season.current].templates;
+        assert_eq!((templates[0].week[0], templates[1].week[1]), (first, second));
+        let records = state.records.as_ref().unwrap();
+        let slot = records.human_slot(season.current).unwrap();
+        let kept = records.managers[slot].templates();
+        assert_eq!((kept[0].1[0], kept[1].1[1]), (first, second));
+        assert_eq!(kept[1].0, templates[1].name);
     }
 
     /// The A youth's tables (dialog 430) on Probe1, before its first

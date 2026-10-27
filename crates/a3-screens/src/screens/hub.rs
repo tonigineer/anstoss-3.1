@@ -1110,7 +1110,7 @@ fn place_of(dialog: &Dialog, view: &View, grip: Grip) -> Option<Place> {
             let list = view.list(control)?;
             list.keys.get(list.scroll + row).map(|&p| Place::Player(p))
         }
-        Grip::Tile { .. } => None,
+        Grip::Tile { .. } | Grip::Option { .. } => None,
     }
 }
 

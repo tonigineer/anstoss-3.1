@@ -18,13 +18,15 @@ pub struct StaticState {
     pub clickable: bool,
     /// One that answers to be dragged does not light up.
     pub quiet: bool,
+    /// A colour the screen gives it instead of the dialog file's.
+    pub ink: Option<[u8; 3]>,
 }
 
 impl StaticState {
     pub(crate) fn draw(&self, frame: &mut RgbaImage, paint: &Paint) {
         let Some(font) = paint.font_of(paint.control.font) else { return };
         let pointed = paint.pointed(Target::Control(paint.index)) && !self.quiet;
-        let [r, g, b] = paint.control.ink;
+        let [r, g, b] = self.ink.unwrap_or(paint.control.ink);
         let color = if pointed { TEXT_HOVER } else { Rgba([r, g, b, 255]) };
         draw_static(font, frame, paint.control, &self.text, color);
     }

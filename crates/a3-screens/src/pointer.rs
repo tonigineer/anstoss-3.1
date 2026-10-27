@@ -16,6 +16,8 @@ pub enum Grip {
     Control(usize),
     Row { control: usize, row: usize },
     Tile { control: usize, x: usize, y: usize },
+    /// An option of a group, as a right click finds it.
+    Option { control: usize, item: usize },
 }
 
 impl Grip {
@@ -27,6 +29,7 @@ impl Grip {
                 Some(Self::Row { control, row })
             }
             Target::Tile { control, x, y } => Some(Self::Tile { control, x, y }),
+            Target::Option { control, item } => Some(Self::Option { control, item }),
             _ => None,
         }
     }
@@ -37,6 +40,7 @@ impl Grip {
             Self::Control(c) => Target::Control(c),
             Self::Row { control, row } => Target::Row { control, row },
             Self::Tile { control, x, y } => Target::Tile { control, x, y },
+            Self::Option { control, item } => Target::Option { control, item },
         }
     }
 }

@@ -100,7 +100,8 @@ impl ControlView {
         let text = || control.text.clone();
         let state = match &control.kind {
             Kind::Static => {
-                ControlState::Static(StaticState { text: text(), clickable: false, quiet: false })
+                let state = StaticState { text: text(), clickable: false, quiet: false, ink: None };
+                ControlState::Static(state)
             }
             Kind::Button { .. } | Kind::States { .. } => {
                 ControlState::Button(ButtonState::default())

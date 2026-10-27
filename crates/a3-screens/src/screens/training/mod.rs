@@ -8,6 +8,7 @@
 //! club knows them. The same as pictures (dialog 513, `CTrainingKurzGrafik`),
 //! which "Grafik" and "Text" switch between.
 
+pub mod editor;
 pub mod individual;
 pub mod long;
 pub mod settings;
@@ -146,6 +147,8 @@ pub struct ShortTraining {
     /// for.
     open: [[bool; SESSIONS]; DAYS],
     choosing: Option<(usize, usize)>,
+    /// Whether the templates' editor is open.
+    editing: bool,
     /// Whether the whistle asks.
     whistle: bool,
 }
@@ -195,16 +198,7 @@ impl Screen for ShortTraining {
                 button.step = usize::from(on);
             }
         }
-        if let Some(c) = control(dialog, TEMPLATES) {
-            let names = season.manager().map(|m| &m.templates);
-            if let Some(options) = view.options_mut(c) {
-                for (i, label) in options.labels.iter_mut().enumerate() {
-                    *label =
-                        names.and_then(|t| t.get(i)).map_or_else(String::new, |t| t.name.clone());
-                }
-            }
-            view.set_chosen(c, NONE);
-        }
+        show_template_names(cx, view);
 
         let works = |target: Target| hub::on_bar(dialog, target).is_none_or(hub::bar_works);
         mark_inert(view, dialog, works);
@@ -256,6 +250,11 @@ impl Screen for ShortTraining {
                     self.show_opponent(cx, view);
                 }
             }
+            // A right click on a template edits it (`OnRButtonDown_0059a06d`).
+            Target::Menu(Grip::Option { control: c, item }) if id(c) == TEMPLATES => {
+                self.editing = true;
+                return Outcome::Popup(Request::with(editor::TEMPLATE_EDITOR, Args::Template(item)));
+            }
             Target::Option { control: c, item } if id(c) == TEMPLATES => {
                 let (week, day) = (today(cx) / DAYS, today(cx) % DAYS);
                 let template = cx
@@ -285,6 +284,11 @@ impl Screen for ShortTraining {
 
     /// The popup's unit, or the whistle's question: a yes ends the turn.
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        // The labels anew after the editor (`FUN_00599b39`).
+        if std::mem::take(&mut self.editing) {
+            show_template_names(cx, view);
+            return Outcome::Stay;
+        }
         if let Some((day, session)) = self.choosing.take() {
             if let Reply::Choice(unit) = reply {
                 change(cx, |t| t.set_unit(day, session, unit as u8));
@@ -428,6 +432,18 @@ impl ShortTraining {
             view.set_clickable(c, self.opponents.len() > 1);
         }
     }
+}
+
+/// The templates' names on their buttons, none chosen.
+fn show_template_names(cx: &Cx, view: &mut View) {
+    let Some(c) = control(cx.dialog, TEMPLATES) else { return };
+    let names = cx.state.season.as_ref().and_then(|s| s.manager()).map(|m| &m.templates);
+    if let Some(options) = view.options_mut(c) {
+        for (i, label) in options.labels.iter_mut().enumerate() {
+            *label = names.and_then(|t| t.get(i)).map_or_else(String::new, |t| t.name.clone());
+        }
+    }
+    view.set_chosen(c, NONE);
 }
 
 /// The popup of the units (dialog 362, `CTrainingseinheitAuswahl`): seven
