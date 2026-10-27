@@ -58,8 +58,8 @@ pub mod dialogs {
     pub const NATIONAL_OFFICE: u16 = 484;
     /// The grand office of the grandest clubs.
     pub const GRAND_OFFICE: u16 = 504;
-    /// The manager's page of notes (`CDiNotizen`); the office opens it
-    /// over itself when the manager left a note on it.
+    /// The manager's page of notes (`CDiNotizen`); a turn opens it over
+    /// its screen when the manager left a note on his page.
     pub const NOTEPAD: u16 = 397;
     /// The text menu of a manager who chose it.  Dialog 502, the national
     /// team's smaller variant, is not built yet.
