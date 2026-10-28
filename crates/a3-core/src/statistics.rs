@@ -1035,6 +1035,8 @@ pub const LAST_MATCHDAY_PAGE: i16 = 6;
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
 /// The Elf des Tages under 2975 (`FUN_00451e0d`).
 pub const DAY_ELEVEN_PAGE: i16 = 3;
+/// The Spielplan under 4747 (`FUN_0044edba`).
+pub const PLAN_PAGE: i16 = 0x11;
 
 /// The human club's runs (`FUN_00632de8`: 0x56 bytes at its extra block's
 /// +0xd88), as the Serien states them (`FUN_0044ffb3`): each run that has

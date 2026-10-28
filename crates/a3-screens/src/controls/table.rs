@@ -38,6 +38,10 @@ const FIRST_IN: i32 = 2;
 const PLAIN_IN: i32 = 3;
 /// How much of the rows' width the bar takes.
 const BAR_WIDE: i32 = 0x14;
+/// The lengths a bar's handle is made with (`CMyScrBar::FUN_007abfd2`),
+/// which the Spielplan's keeps: it moves as one of 0x10 would, and is
+/// drawn 0x14 long.
+const OWN_HANDLE: (i32, i32) = (0x10, 0x14);
 /// The cross-table's own cell (`FUN_0079c74a` with COLORREF 200), and
 /// how far down its bar's track stands.
 const ACROSS_BLUE: Rgba<u8> = Rgba([0, 0, 200, 255]);
@@ -85,6 +89,9 @@ pub struct Graph {
     pub steps: i32,
     /// The canvas's drawing, in its order; the bars are left out then.
     pub shapes: Vec<Shape>,
+    /// The Spielplan's own bar over the canvas (`FUN_006e0649`): the
+    /// last of its places, the table's scroll the one it stands at.
+    pub bar: Option<usize>,
 }
 
 /// What a page draws on the canvas, opaque in its colour: a box
@@ -115,15 +122,21 @@ pub struct TableRow {
 }
 
 impl TableState {
-    /// Whether there are more rows than fit, so the bar stands.
+    /// Whether there are more rows than fit, so the bar stands; the
+    /// Spielplan's always does.
     pub fn scrolls(&self) -> bool {
-        self.rows.len() > SHOWN
+        self.rows.len() > SHOWN || self.own_bar().is_some()
+    }
+
+    fn own_bar(&self) -> Option<usize> {
+        self.graph.as_ref().and_then(|g| g.bar)
     }
 
     /// Scrolls one row up or down, never past the last that fits
-    /// (`OnVScroll_006dfcde`'s line step).
+    /// (`OnVScroll_006dfcde`'s line step), or the Spielplan's bar one
+    /// place (`FUN_006e01e0`).
     pub fn scroll_by(&mut self, delta: i32) {
-        let last = self.rows.len().saturating_sub(SHOWN) as i32;
+        let last = self.own_bar().unwrap_or(self.rows.len().saturating_sub(SHOWN)) as i32;
         self.scroll = (self.scroll as i32 + delta).clamp(0, last) as usize;
     }
 
@@ -153,7 +166,16 @@ impl TableState {
     /// from the right and 16 from the bottom. Its arrows sit at its right
     /// and bottom, as a list's do; where the rows stand centred, the bar
     /// moves down with them, as far as the first row does.
+    /// The Spielplan's bar stands the window's whole height at its right
+    /// edge instead.
     pub(crate) fn bar_arrows(&self, rect: Rect) -> (Rect, Rect) {
+        if self.own_bar().is_some() {
+            let (left, bottom) = (rect.max.x - SCROLLBAR_WIDTH, rect.max.y - SCROLLBAR_WIDTH);
+            return (
+                Rect::new(left, rect.min.y, rect.max.x, rect.min.y + SCROLLBAR_WIDTH),
+                Rect::new(left, bottom, rect.max.x, rect.max.y),
+            );
+        }
         let rows = self.rows.len() as i32;
         let down = if self.centred > 0 && rows <= self.centred {
             self.layout(rect.height() as i32).0 as f32
@@ -247,6 +269,9 @@ impl TableState {
                 self.graph_bars(&mut area, height as i32, graph, font);
             } else {
                 Self::canvas(&mut area, &graph.shapes, font);
+            }
+            if graph.bar.is_some() {
+                self.bar(&mut area, r, paint);
             }
             imageops::replace(frame, &area, i64::from(x0), i64::from(y0));
             return;
@@ -428,7 +453,8 @@ impl TableState {
 
     /// The bar over the rows' right edge: yellow, with a track and a
     /// handle as long as the rows shown are of all, moved down as the
-    /// table is scrolled (`FUN_007ae43e`, `FUN_007ad818`).
+    /// table is scrolled (`FUN_007ae43e`, `FUN_007ad818`). The
+    /// Spielplan's handle keeps the length the bar is made with.
     fn bar(&self, area: &mut RgbaImage, rect: Rect, paint: &Paint) {
         let (up, down) = self.bar_arrows(rect);
         let off = rect.min;
@@ -452,10 +478,15 @@ impl TableState {
         }
         if let Some(long) = paint.widget(HANDLES[4]) {
             let track = (down.min.y - up.max.y) as i32;
-            let length = (track * SHOWN as i32 / self.rows.len() as i32).max(MIN_HANDLE);
-            let last = self.rows.len() as i32 - SHOWN as i32;
+            let (length, drawn, last) = match self.own_bar() {
+                Some(last) => (OWN_HANDLE.0, OWN_HANDLE.1, last as i32),
+                None => {
+                    let length = (track * SHOWN as i32 / self.rows.len() as i32).max(MIN_HANDLE);
+                    (length, length, self.rows.len() as i32 - SHOWN as i32)
+                }
+            };
             let at = if last > 0 { self.scroll as i32 * (track - length) / last } else { 0 };
-            paste(area, &combo::cut(long, length as u32), Vec2::new(up.min.x, up.max.y + at as f32));
+            paste(area, &combo::cut(long, drawn as u32), Vec2::new(up.min.x, up.max.y + at as f32));
         }
     }
 }

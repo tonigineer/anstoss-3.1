@@ -5111,6 +5111,43 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// The Aktuelles category's Spielplan shows the league's pairs two
+    /// matchdays at a time, from the two the last one played falls in;
+    /// its bar steps two on.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_fixture_plan() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let texts = |runner: &Runner| -> Vec<((i32, i32), String)> {
+            let view = runner.host.view();
+            let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+            let shapes = &table.graph.as_ref().unwrap().shapes;
+            shapes
+                .iter()
+                .filter_map(|s| match s {
+                    Shape::Text { at, text, .. } => Some((*at, text.clone())),
+                    _ => None,
+                })
+                .collect()
+        };
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 6";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let plan = texts(&runner);
+        assert_eq!(plan.len(), 2 + 2 * 9 * 3);
+        assert_eq!(plan[0], ((0, 0), "3. Spieltag".to_owned()));
+        assert_eq!(plan[1], ((0, 20), "Bayer 04 Leverkusen".to_owned()));
+        assert_eq!(plan[3], ((150, 20), "1.FSV Mainz 05".to_owned()));
+        assert_eq!(plan[28], ((0, 180), "4. Spieltag".to_owned()));
+        let next = format!("{then}\nnow click at 629 412");
+        let Some(runner) = on_save(&game, "A", &next) else { return };
+        let plan = texts(&runner);
+        assert_eq!(plan[0].1, "5. Spieltag");
+        assert_eq!(plan[1].1, "VfL Wolfsburg");
+        assert_eq!(runner.host.view().table(control(dialog, 29999).unwrap()).unwrap().scroll, 2);
+    }
+
     /// The Aktuelles category's Serien states the club's runs that reached
     /// their marks and its biggest wins and defeats that scored.
     #[test]

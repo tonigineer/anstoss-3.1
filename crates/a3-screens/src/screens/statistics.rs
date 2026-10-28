@@ -228,6 +228,13 @@ const DAY_ELEVEN_PLACES: [(i32, i32); 11] = [
     (100, 0),
     (288, 0),
 ];
+/// The Spielplan's header (`FUN_0044edba`), its columns off the strip,
+/// so that nothing of it shows; a matchday's title (`FUN_006e09e6` with
+/// "%d%s Spieltag") and where a pair's three cells start (0x8a67b0).
+const PLAN_HEADER: u16 = 4747;
+const PLAN_HEADER_COLUMNS: [(u16, u16); 3] = [(10000, 40), (10100, 40), (10200, 40)];
+const PLAN_TITLE: u16 = 1529;
+const PLAN_CELLS: [i32; 3] = [0, 130, 150];
 /// The Letzter Spieltag's header and rows (`FUN_0045491f` with 0x87a1d8,
 /// and 0x87a1a0): the pairing, its result and half time, its gate.
 const LAST_MATCHDAY_HEADER: u16 = 3530;
@@ -1727,6 +1734,9 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(statistics::PLAN_PAGE) if self.category == AKTUELLES => {
+                self.plan_page(cx, view, None)
+            }
             Some(statistics::DAY_ELEVEN_PAGE) if self.category == AKTUELLES => {
                 self.day_eleven_page(cx, view)
             }
@@ -1935,7 +1945,7 @@ impl Statistics {
                 centred: -1,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars, steps: axis / 25, shapes: Vec::new() }),
+                graph: Some(Graph { bars, steps: axis / 25, shapes: Vec::new(), bar: None }),
             };
         }
         true
@@ -2183,7 +2193,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
             };
         }
         true
@@ -2226,7 +2236,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
             };
         }
         true
@@ -2425,7 +2435,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
             };
         }
         true
@@ -2505,7 +2515,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
             };
         }
         true
@@ -3272,7 +3282,61 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+            };
+        }
+        true
+    }
+
+    /// The Spielplan (`FUN_0044edba`): the league's pairs two matchdays at
+    /// a time, in a window of its own with its bar (`CScrSpielplanWnd`,
+    /// `FUN_006e0649`): from the two the last matchday played falls in,
+    /// or where the bar stands (`FUN_006e09e6`). Each matchday's title,
+    /// then a row for each pair, the rows closer the more clubs the
+    /// league has, and a row's gap after.
+    fn plan_page(&self, cx: &Cx, view: &mut View, at: Option<usize>) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(PLAN_HEADER).to_owned(), &PLAN_HEADER_COLUMNS);
+        let count = league.matchdays();
+        let played = league.played().clamp(1, count.max(1));
+        let at = at.unwrap_or((played - 1) / 2);
+        let step = match league.teams() {
+            24 => 13,
+            22 => 14,
+            20 => 15,
+            _ => 16,
+        };
+        let name = |place| game.club_name(Some(records), country as u8, league.team(place));
+        let (black, title) = ([0, 0, 0], game.text(PLAN_TITLE));
+        let mut shapes = Vec::new();
+        let mut y = 0;
+        for md in 2 * at..2 * at + 2 {
+            let text = title.replacen("%d", &(md + 1).to_string(), 1).replacen("%s", ".", 1);
+            shapes.push(Shape::Text { at: (PLAN_CELLS[0], y), text, colour: black });
+            y += 20;
+            for (home, away) in league.pairs(md) {
+                let cells = [name(home), "-".to_owned(), name(away)];
+                for (x, text) in PLAN_CELLS.into_iter().zip(cells) {
+                    shapes.push(Shape::Text { at: (x, y), text, colour: black });
+                }
+                y += step;
+            }
+            y += step;
+        }
+        if let Some(table) = view.table_mut(c) {
+            let bar = Some((count / 2).saturating_sub(1));
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
+                rows: Vec::new(),
+                width: ROW_WIDTH,
+                scroll: at,
+                cross: None,
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar }),
             };
         }
         true
@@ -4109,12 +4173,18 @@ impl Screen for Statistics {
                 self.row = r;
             }
             // A table page's bar scrolled one row: the view has moved it,
-            // the page keeps it when it draws anew.
+            // the page keeps it when it draws anew. The Spielplan's moved
+            // two matchdays on, which its window draws anew.
             Target::Scroll { .. } => {
                 if let Some(c) = control(cx.dialog, TABLE)
                     && let Some(t) = view.table(c)
                 {
                     self.scrolled = t.scroll;
+                }
+                let pages = &cx.game.rules.statistics.categories[self.category];
+                let code = self.page.and_then(|e| pages.get(e)).map(|p| p.code);
+                if self.category == AKTUELLES && code == Some(statistics::PLAN_PAGE) {
+                    self.plan_page(cx, view, Some(self.scrolled));
                 }
             }
             // The cross-table's window stepped one column over: its cells
