@@ -7,7 +7,10 @@
 //! With its `cross` set it is the season results' cross-table instead, the
 //! game's `CTabellenWnd`: twenty pixels down, ten columns at a time with
 //! their numbers over them and a bar to step across (`FUN_0072cec3`,
-//! `FUN_0072cc7e`).
+//! `FUN_0072cc7e`). With its `graph` set it is one of the goal pages'
+//! bars instead, the game's `CStatGFXWnd`: at most twenty bars on axes
+//! with arrowheads, semi-transparent from the left edge, their labels
+//! over them (`FUN_0071e017`).
 
 use a3_files::bitmap_font::BitmapFont;
 use bevy_math::{Rect, Vec2};
@@ -15,7 +18,7 @@ use image::{Rgba, RgbaImage, imageops};
 
 use super::{combo, slider};
 use super::list::{HANDLES, MIN_HANDLE, SCROLLBAR_WIDTH, TRACKS, TRACK_LEFT, TRACK_WIDTH};
-use crate::classic::{Paint, SCROLL_DOWN, SCROLL_UP, fill, paste};
+use crate::classic::{Paint, SCROLL_DOWN, SCROLL_UP, fill, line, paste};
 
 /// A row's height, and the most rows shown.
 const ROW: i32 = 14;
@@ -59,6 +62,20 @@ pub struct TableState {
     /// twenty pixels down at a pitch of as many as fit, every column has
     /// its number over the bar and its cell against itself a blue box.
     pub cross: Option<usize>,
+    /// The goal pages' graph: bars on axes where the rows would stand
+    /// (`CStatGFXWnd::FUN_0071e017`), one per row.
+    pub graph: Option<Graph>,
+}
+
+/// The goal pages' bars (`CStatGFXWnd`): the graph window's rows hold a
+/// length and a colour instead of cells, drawn semi-transparent from the
+/// left edge under a label.
+#[derive(Clone, Debug, Default)]
+pub struct Graph {
+    /// One per row: the bar's length in pixels (`+0x334`, capped to the
+    /// window's width less sixteen), green where the value is negative
+    /// (the colour at `+500` is then 0xff00).
+    pub bars: Vec<(i32, bool)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -126,6 +143,14 @@ impl TableState {
     /// Where the rows stand: the first one's top, and how far apart.
     fn layout(&self, height: i32) -> (i32, i32) {
         let rows = self.rows.len() as i32;
+        if self.graph.is_some() {
+            // `FUN_0071e017`: at most twenty bars share the window's
+            // height less sixteen one pixel apart, none higher than 40;
+            // the first stands ten down.
+            let bars = rows.min(0x14).max(1);
+            let high = ((height - 16 - (bars - 1)) / bars).min(0x28);
+            return (10, high + 1);
+        }
         if self.cross.is_some() {
             // `FUN_0072c918`: under the bar's twenty pixels, as many
             // apart as the rest gives to each row, no more than 21.
@@ -184,6 +209,11 @@ impl TableState {
         let (width, height) = (r.width() as u32, r.height() as u32);
         // It paints on a window of its own, and so not past its edges.
         let mut area = imageops::crop_imm(frame, x0 as u32, y0 as u32, width, height).to_image();
+        if let Some(graph) = &self.graph {
+            self.graph_bars(&mut area, height as i32, graph, font);
+            imageops::replace(frame, &area, i64::from(x0), i64::from(y0));
+            return;
+        }
         if self.scrolls() {
             self.bar(&mut area, r, paint);
         }
@@ -236,6 +266,47 @@ impl TableState {
             }
         }
         imageops::replace(frame, &area, i64::from(x0), i64::from(y0));
+    }
+
+    /// The goal pages' graph (`CStatGFXWnd::FUN_0071e017`): at most
+    /// twenty bars four pixels in, semi-transparent (`FUN_0079c633` with
+    /// alpha 0x60) black or — for a negative value — green, each labelled
+    /// three pixels further in over its start, then the axes: the standing
+    /// one at three with an arrowhead at its top, and the lying one under
+    /// the last bar's bottom, to the window's right edge and its
+    /// arrowhead. The tick marks' places are lost in the decompile; they
+    /// fall outside the window, so nothing of them is ever seen.
+    fn graph_bars(&self, area: &mut RgbaImage, height: i32, graph: &Graph, font: &BitmapFont) {
+        let black = Rgba([0, 0, 0, 255]);
+        let (first, pitch) = self.layout(height);
+        let high = pitch - 1;
+        // The axis lies where the loop has run past the last bar.
+        let bars = self.rows.len().min(0x14) as i32;
+        let axis_y = bars * pitch + 9;
+        let right = area.width() as i32 - 16;
+        for (i, (row, &(len, green))) in
+            self.rows.iter().zip(&graph.bars).take(0x14).enumerate()
+        {
+            let y = first + i as i32 * pitch;
+            let colour = if green { Rgba([0, 0xff, 0, 255]) } else { black };
+            let keep = 255 - 0x60;
+            for py in y..(y + high).min(area.height() as i32) {
+                for px in 4..(4 + len.min(right)).min(area.width() as i32) {
+                    let p = area.get_pixel_mut(px as u32, py as u32);
+                    for (c, t) in p.0[..3].iter_mut().zip(colour.0) {
+                        *c = ((u32::from(*c) * keep + u32::from(t) * 0x60) / 255) as u8;
+                    }
+                }
+            }
+            let [r, g, b] = row.ink;
+            font.draw(area, 7, y + 1, &row.text, Rgba([r, g, b, 255]), false);
+        }
+        line(area, (0, 7), (3, 1), black);
+        line(area, (3, 0), (7, 8), black);
+        line(area, (3, 0), (3, axis_y), black);
+        line(area, (3, axis_y), (right + 0xf, axis_y), black);
+        line(area, (right + 8, axis_y - 3), (right + 0xf, axis_y), black);
+        line(area, (right + 0xf, axis_y), (right + 7, axis_y + 4), black);
     }
 
     /// The numbers over the cross-table's columns, at the bar's height:

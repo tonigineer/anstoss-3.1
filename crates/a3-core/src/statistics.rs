@@ -247,6 +247,57 @@ pub fn cross_table(league: &League) -> Vec<Vec<Option<(u8, u8)>>> {
     cells
 }
 
+/// The goal pages' codes: Trefferübersicht, kassierte Tore, Tordifferenz
+/// and Tore total — all four `FUN_0044917a` draws as one graph under the
+/// header text 0xa50, only its array differing.
+pub const GOAL_PAGES: [i16; 4] = [0xa, 0x1e, 0x1f, 0x20];
+
+/// The four goal pages' sums (`FUN_00448c76`): over the league's played
+/// games, each club's goals scored, conceded, the difference and both
+/// together — the four short arrays its `local_a8`, `local_1234`,
+/// `local_78` and `local_44` fill, by the league's own places.
+pub fn goal_sums(league: &League) -> Vec<[i16; 4]> {
+    let mut sums = vec![[0i16; 4]; league.teams()];
+    for md in 0..league.played() {
+        for (hp, ap, result) in league.games(md) {
+            let Some([home, away, _, _]) = result else { continue };
+            let (home, away) = (i16::from(home), i16::from(away));
+            for (p, own, other) in [(hp, home, away), (ap, away, home)] {
+                if let Some(s) = sums.get_mut(p) {
+                    s[0] = s[0].wrapping_add(own);
+                    s[1] = s[1].wrapping_add(other);
+                    s[2] = s[2].wrapping_add(own.wrapping_sub(other));
+                    s[3] = s[3].wrapping_add(own.wrapping_add(other));
+                }
+            }
+        }
+    }
+    sums
+}
+
+/// `FUN_0044917a`'s graph order out of `goal_sums`' array `mode`: the
+/// clubs by descending value as its exchange sort leaves them — every
+/// place from the first up takes the first of the rest that beats it,
+/// swapping with it, so a tie keeps its place but a beaten club gets
+/// shuffled down — and the axis' end, the next full score of 25 over
+/// the greatest value, 25 where there is none. Its plot of 376 pixels
+/// stands against that end.
+pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
+    let mut order: Vec<usize> = (0..sums.len()).collect();
+    for i in 0..sums.len().saturating_sub(1) {
+        for j in i + 1..sums.len() {
+            if sums[order[i]][mode] < sums[order[j]][mode] {
+                order.swap(i, j);
+            }
+        }
+    }
+    let rows: Vec<(usize, i16)> =
+        order.iter().map(|&p| (p, sums[p][mode])).collect();
+    let top = i32::from(rows.first().map_or(0, |&(_, value)| value));
+    let axis = ((top + 24) / 25).max(1) * 25;
+    (rows, axis)
+}
+
 /// The table: with `rules` the penalty points and the point for three
 /// goals count.
 fn reckon(records: &Records, league: &League, kind: u8, rules: bool) -> Vec<Row> {
@@ -861,4 +912,27 @@ pub fn is_human(records: &Records, country: u8, club: i16) -> bool {
         records.globals.get::<u8>(at + 8 * k) == country
             && records.globals.get::<i16>(at + 8 * k + 2) == club
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn goal_graph_orders_and_scales() {
+        // Two clubs level at the top keep the league's places, as the
+        // exchange sort leaves them; the axis ends at the next 25.
+        let sums = [[1, 5, -4, 6], [5, 1, 4, 6], [5, 2, 3, 7]];
+        let (rows, axis) = goal_graph(&sums, 0);
+        assert_eq!(rows, [(1, 5), (2, 5), (0, 1)]);
+        assert_eq!(axis, 25);
+        // The difference counts the goals against in as well, and a
+        // negative best value still fills the first 25.
+        let (rows, axis) = goal_graph(&sums, 2);
+        assert_eq!(rows, [(1, 4), (2, 3), (0, -4)]);
+        assert_eq!(axis, 25);
+        let sums = [[-26, 0, -26, -26], [26, 0, 26, 26]];
+        assert_eq!(goal_graph(&sums, 2).1, 50);
+        assert_eq!(goal_graph(&[[-26, 0, -26, -26]], 2).1, 25);
+    }
 }

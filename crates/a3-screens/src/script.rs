@@ -4808,4 +4808,62 @@ mod tests {
         let table = view.table(control(dialog, 29999).unwrap()).unwrap();
         assert_eq!(table.rows[0].text, "Gruppe 5:");
     }
+
+    /// The archive's goal pages on A2.an3, where every club's statistics
+    /// department stands at level two: the four graphs of the Bundesliga
+    /// league — goals scored, conceded, the difference and both together
+    /// — each headed "Trefferübersicht", its clubs biggest first with
+    /// "name (value)" over a bar against an axis ending at 25, a
+    /// negative bar green, the own club Union red.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_statistics_show_the_goal_graphs() {
+        let game = game();
+        let open = "now click bar 14\nuntil dialog 18";
+        let dialog = &game.dialogs[&18];
+        let page = |row: usize| format!("{open}\nnow row 1284 {row}");
+        let tref = format!("{open}\nnow row 1284 9");
+        let Some(runner) = on_save(&game, "A2", &tref) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Trefferübersicht");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.cross, None);
+        let graph = table.graph.as_ref().expect("the goals' bars");
+        assert_eq!((table.rows.len(), graph.bars.len()), (18, 18));
+        assert!(graph.bars.iter().all(|&(_, green)| !green));
+        // Bayern and Mainz level at five, in the league's own places;
+        // five of twenty-five on a plot of 376 is a bar of 75.
+        assert!(table.rows[0].text.ends_with("(5)"));
+        assert!(table.rows[0].text.starts_with("FC Bayern"));
+        assert!(table.rows[1].text.ends_with("(5)"));
+        assert!(table.rows[2].text.ends_with("(4)"));
+        assert_eq!(graph.bars[0].0, 75);
+        let union = table.rows.iter().position(|r| r.text.contains("Union")).unwrap();
+        assert_eq!(table.rows[union].ink, [255, 0, 0]);
+        // The conceded goals: Werder and M'gladbach level at six.
+        let cass = page(10);
+        let Some(runner) = on_save(&game, "A2", &cass) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows[0].text.ends_with("(6)"));
+        assert!(table.rows[1].text.ends_with("(6)"));
+        // The difference runs down to Hamburg's minus two — a green bar
+        // of thirty, its value two of twenty-five on 376.
+        let diff = page(11);
+        let Some(runner) = on_save(&game, "A2", &diff) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows[0].text.ends_with("(4)"));
+        assert_eq!(table.rows[17].text, "Hamburger SV (-2)");
+        let graph = table.graph.as_ref().unwrap();
+        assert_eq!(graph.bars[17], (30, true));
+        // Both together: Werder and M'gladbach at ten, their bars 150.
+        let total = page(12);
+        let Some(runner) = on_save(&game, "A2", &total) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows[0].text.ends_with("(10)"));
+        let graph = table.graph.as_ref().unwrap();
+        assert_eq!(graph.bars[0].0, 150);
+    }
 }

@@ -145,7 +145,9 @@ AREAS = {
                                (7, 174), (8, 95)]]],
     # The archive's tables: the current one, at home, the 2. Bundesliga's
     # forecast one step along the strip, a cup's round, the Ligapokal's,
-    # the Europa League's.
+    # the Europa League's, the season's cross-table, and a goal graph on
+    # A2.an3, where the board raised the statistics department so those
+    # pages join the list.
     "statistics": [(*bar(15, 18), 18), (*bar(15, 18, "now row 1284 1"), 18),
                    (*bar(15, 18, "now click at 545 436", "now row 1284 6"), 18),
                    (*bar(15, 18, "now row 1284 7", "now click at 290 64"), 18),
@@ -154,7 +156,9 @@ AREAS = {
                    (*bar(15, 18, "now row 1284 15"), 18),
                    (*bar(15, 18, "now click at 545 436", "now row 1284 15",
                         "now click at 545 436"), 18),
-                   (*bar(15, 18, "now row 1284 16"), 18)],
+                   (*bar(15, 18, "now row 1284 16"), 18),
+                   ("A2.an3", ["now click bar 14", "until dialog 18", "now row 1284 9"],
+                    18)],
     "options": [(*bar(18, 302), 302), (*menu(18, 302, 4035, 3, 384), 384),
                 (*menu(18, 302, 4035, 4, 384), 384), (*menu(18, 302, 4035, 7, 511), 511),
                 (*menu(18, 302, 4035, 1, 259), 259), (*menu(18, 302, 4035, 6, 503), 503),

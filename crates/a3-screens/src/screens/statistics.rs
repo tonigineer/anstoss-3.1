@@ -27,7 +27,7 @@ use super::hub::{self, STATISTICS_SYMBOL};
 use super::squad::own_team;
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
 use crate::controls::slider;
-use crate::controls::table::{TableRow, TableState};
+use crate::controls::table::{Graph, TableRow, TableState};
 use crate::game::Game;
 use crate::pointer::Target;
 use crate::view::View;
@@ -145,6 +145,9 @@ const TABLE_CODES: std::ops::RangeInclusive<i16> = 0..=7;
 const FORECAST: i16 = 8;
 const CROSS: i16 = 9;
 const CROSS_WIDTH: i32 = 0x1dd;
+/// The goal pages' header, one text for all four (`FUN_0044917a`; the
+/// axis' own label 0xa51 stands empty and is never drawn).
+const GOAL_HEADER: u16 = 0xa50;
 /// The cup rows' columns (`FUN_006df48b` with 0x879428 and 0x879450): the
 /// two sides, the legs' scores in the right-pulled columns, and the note
 /// behind them. A side with no club reads "ohne Verein" (0xfef), the note
@@ -540,6 +543,9 @@ impl Statistics {
             }
             Some(FORECAST) if self.category == TABLES => self.forecast_page(cx, view),
             Some(CROSS) if self.category == TABLES => self.cross_page(cx, view),
+            Some(code) if self.category == TABLES && statistics::GOAL_PAGES.contains(&code) => {
+                self.goal_page(cx, view, code)
+            }
             Some(code) if self.category == TABLES && statistics::CUP_PAGES.contains(&code) => {
                 self.cup_page(cx, view, false)
             }
@@ -624,6 +630,7 @@ impl Statistics {
                 centred: -1,
                 scroll: self.scrolled,
                 cross: None,
+                graph: None,
             };
         }
         true
@@ -677,6 +684,49 @@ impl Statistics {
                 centred: -1,
                 scroll: 0,
                 cross: Some(self.across),
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The goal pages (`FUN_0044917a` over `FUN_00448c76`'s sums): the
+    /// league the strip stands on, its clubs by the goals they scored,
+    /// conceded, the difference or both together — biggest first, ties
+    /// keeping the league's places — each with a bar on the axis that
+    /// ends at the greatest value's next full score of 25, the plot
+    /// 376 pixels wide and the bar rounded to it; a negative bar green.
+    /// Every row is labelled "name (value)" (`FUN_0044917a`'s "%s
+    /// (%d)"), the own club's red. At most twenty rows are shown.
+    fn goal_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        set_header(view, dialog, game.text(GOAL_HEADER).to_owned(), &[(0, 0)]);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let mode = statistics::GOAL_PAGES.iter().position(|&c| c == code).unwrap_or(0);
+        let (order, axis) = statistics::goal_graph(&statistics::goal_sums(&league), mode);
+        let plot = 376.0 / axis as f32;
+        let mut rows = Vec::new();
+        let mut bars = Vec::new();
+        for (place, value) in order.into_iter().take(0x14) {
+            let team = league.team(place);
+            let name = game.club_name(Some(records), country as u8, team);
+            let text = format!("{name} ({value})");
+            let ink = if own == Some((country, team)) { OWN_INK } else { INK };
+            rows.push(TableRow { text, ink, mark: None, columns: None });
+            bars.push(((f32::from(value.unsigned_abs()) * plot + 0.5) as i32, value < 0));
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: vec![],
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: 0,
+                cross: None,
+                graph: Some(Graph { bars }),
             };
         }
         true
@@ -762,6 +812,7 @@ impl Statistics {
                     centred: -1,
                     scroll: self.scrolled,
                     cross: None,
+                    graph: None,
                 };
         }
         true
@@ -789,6 +840,7 @@ impl Statistics {
                     centred: -1,
                     scroll: self.scrolled,
                     cross: None,
+                    graph: None,
                 };
         }
         true
@@ -882,6 +934,7 @@ impl Statistics {
                     centred: -1,
                     scroll: self.scrolled,
                     cross: None,
+                    graph: None,
                 };
         }
         true
@@ -907,6 +960,7 @@ impl Statistics {
                     centred: 1,
                     scroll: self.scrolled,
                     cross: None,
+                    graph: None,
                 };
         }
         true
@@ -1009,6 +1063,7 @@ impl Statistics {
                 centred: -1,
                 scroll: 0,
                 cross: None,
+                graph: None,
             };
         }
         true
