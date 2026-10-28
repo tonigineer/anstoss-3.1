@@ -311,6 +311,15 @@ const PLAYERS_OUT_HEADER: u16 = 0x1292;
 const PLAYERS_HEADER_COLUMNS: [(u16, u16); 4] =
     [(R, 0x19), (0x1e, 0), (0xa0, 0), (C | 0x10e, 0x6e)];
 const PLAYERS_ROW_COLUMNS: [(u16, u16); 4] = [(R, 0x19), (0x1e, 0), (0x96, 0), (R | 0x136, 0x14)];
+/// The Tore nach Einwechsl.'s header (`FUN_0044fa30` with 0x879e40) and
+/// rows (0x879e60), set only once a row stands; without one a single row
+/// says so, text 0x1290, in a window left without columns.
+const SUB_GOALS_HEADER: u16 = 0x1291;
+const SUB_GOALS_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(R, 0x19), (0x1e, 0), (C | 0xc8, 0x32), (C | 0xfa, 0x50)];
+const SUB_GOALS_ROW_COLUMNS: [(u16, u16); 4] =
+    [(R, 0x19), (0x1e, 0), (R | 0xc8, 0x1e), (R | 0xfa, 0x2d)];
+const NO_SUB_GOALS: u16 = 0x1290;
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -773,7 +782,8 @@ impl Statistics {
                 code @ (statistics::TARGET_PAGE
                 | statistics::PENALTIES_PAGE
                 | statistics::SUBS_IN_PAGE
-                | statistics::SUBS_OUT_PAGE),
+                | statistics::SUBS_OUT_PAGE
+                | statistics::SUB_GOALS_PAGE),
             ) if self.category == LIGA => self.club_list_page(cx, view, code),
             Some(
                 code @ (statistics::OVERVIEW_PAGE
@@ -1236,17 +1246,18 @@ impl Statistics {
     /// "%d.\t%s\t%d\t" with a rank of its own that counts the rows
     /// drawn; and "%d.\t%s\t%d\t%d", the Erhaltene Elfmeter
     /// (`FUN_0044df6d`), the Häufigste Einwechsl. (`FUN_0044d9d1`, its
-    /// format with a tab more at the end) and Auswechsl. (`FUN_0044dc9f`).
+    /// format with a tab more at the end) and Auswechsl. (`FUN_0044dc9f`),
+    /// and the Tore nach Einwechsl. (`FUN_0044fa30`), which says when
+    /// there is none.
     fn club_list_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
-        let (header_columns, columns): (&[(u16, u16)], &[(u16, u16)]) =
-            if code == statistics::TARGET_PAGE {
-                (&TARGET_HEADER_COLUMNS, &TARGET_ROW_COLUMNS)
-            } else {
-                (&PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS)
-            };
+        let (header_columns, columns): (&[(u16, u16)], &[(u16, u16)]) = match code {
+            statistics::TARGET_PAGE => (&TARGET_HEADER_COLUMNS, &TARGET_ROW_COLUMNS),
+            statistics::SUB_GOALS_PAGE => (&SUB_GOALS_HEADER_COLUMNS, &SUB_GOALS_ROW_COLUMNS),
+            _ => (&PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS),
+        };
         let (header, list, end) = match code {
             statistics::TARGET_PAGE => {
                 (TARGET_HEADER, statistics::above_target(records, country, level), "")
@@ -1257,11 +1268,14 @@ impl Statistics {
             statistics::SUBS_OUT_PAGE => {
                 (SUBS_OUT_HEADER, statistics::substitutions_out(records, country, level), "")
             }
+            statistics::SUB_GOALS_PAGE => {
+                (SUB_GOALS_HEADER, statistics::substitute_goals(records, country, level), "")
+            }
             _ => (PENALTIES_HEADER, statistics::penalties_awarded(records, country, level), ""),
         };
         set_header(view, dialog, game.text(header).to_owned(), header_columns);
         let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
-        let rows = list
+        let mut rows: Vec<TableRow> = list
             .iter()
             .enumerate()
             .map(|(i, row)| {
@@ -1276,9 +1290,15 @@ impl Statistics {
                 TableRow { text, ink, mark: None, columns: None }
             })
             .collect();
+        let mut columns = columns.to_vec();
+        if code == statistics::SUB_GOALS_PAGE && rows.is_empty() {
+            let text = game.text(NO_SUB_GOALS).to_owned();
+            rows = vec![TableRow { text, ink: INK, mark: None, columns: None }];
+            columns.clear();
+        }
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {
-                columns: columns.to_vec(),
+                columns,
                 rows,
                 width: ROW_WIDTH,
                 centred: -1,

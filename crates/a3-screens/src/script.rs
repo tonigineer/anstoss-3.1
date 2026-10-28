@@ -5132,6 +5132,33 @@ mod tests {
         assert_eq!(table.rows[0].text, "1.\tMatsima\tFC Augsburg\t3");
     }
 
+    /// The Tore nach Einwechsl. lists the clubs whose substitutes scored,
+    /// and says so where none did.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_leagues_substitute_goals() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let page = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 16";
+        let Some(runner) = on_save(&game, "A", page) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Pl.\\tVerein\\tTore\\tLetzter Spieltag"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["1.\tBorussia Dortmund\t1\t1", "2.\tHamburger SV\t1\t1"]);
+        // Five steps along the strip, Ligue 1 has none yet.
+        let ligue = format!("{page}{}", "\nnow click at 545 436".repeat(5));
+        let Some(runner) = on_save(&game, "A", &ligue) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Ligue 1");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["Es fielen noch keine Tore durch Einwechselspieler!"]);
+    }
+
     /// The Erhaltene Elfmeter lists the clubs awarded a penalty as the
     /// game keeps them, with those they scored.
     #[test]

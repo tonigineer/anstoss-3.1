@@ -553,6 +553,8 @@ pub const PLAYERS_OUT_PAGE: i16 = 0x12;
 pub const PENALTIES_PAGE: i16 = 0x13;
 pub const SUBS_IN_PAGE: i16 = 0x1e;
 pub const SUBS_OUT_PAGE: i16 = 0x1f;
+/// Tore nach Einwechsl. under 0x1291 (`FUN_0044fa30`).
+pub const SUB_GOALS_PAGE: i16 = 0x1a;
 
 /// A club's figures as `FUN_00642cd4` gathers them for the club pages,
 /// an entry of 0x1c bytes each: its number, its strength in tenths (+2),
@@ -731,6 +733,10 @@ const SUBS_IN_CLUBS: &str = "0xae9830";
 /// places `FUN_00775fa0` reckons, below the target negative, the most
 /// first; `FUN_00722fa2` clears the list to −100 before each rebuild.
 const TARGET_CLUBS: &str = "0xaec210";
+/// The goals a club's substitutes scored (`DAT_00af1140`, of the
+/// penalties' shape): its team +0x33b, the most first, and +0x33c, those
+/// of the last matchday.
+const SUB_GOALS_CLUBS: &str = "0xaf1120";
 const NO_TARGET: i16 = -100;
 const SUBS_OUT_CLUBS: &str = "0xaea1b8";
 
@@ -812,6 +818,16 @@ pub fn above_target(records: &Records, country: u16, level: u8) -> Vec<ClubCount
         }
         rows.push(ClubCount { country: word(at) as u16, team: word(at + 2), values: [word(at + 4), 0] });
     }
+    rows
+}
+
+/// The Tore nach Einwechsl. (`FUN_0044fa30`): each club's goals by
+/// substitutes, in all and on the last matchday — no more entries than
+/// the league has clubs.
+pub fn substitute_goals(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    let teams = League::of(records, country, level).map_or(0, |l| l.teams());
+    let mut rows = club_list(records, country, level, SUB_GOALS_CLUBS, 8);
+    rows.truncate(teams);
     rows
 }
 

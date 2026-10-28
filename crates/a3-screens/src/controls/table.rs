@@ -34,6 +34,8 @@ const CENTRE: u16 = 0x4000;
 const RIGHT: u16 = 0x8000;
 /// The first cell stands this far in, and a left one this far more.
 const FIRST_IN: i32 = 2;
+/// Where a row stands in a window no page gave columns (`FUN_006df140`).
+const PLAIN_IN: i32 = 3;
 /// The cross-table's own cell (`FUN_0079c74a` with COLORREF 200), and
 /// how far down its bar's track stands.
 const ACROSS_BLUE: Rgba<u8> = Rgba([0, 0, 200, 255]);
@@ -238,6 +240,10 @@ impl TableState {
                 }
                 None => &cells,
             };
+            if cells.is_empty() {
+                font.draw(&mut area, PLAIN_IN, y, &row.text, ink, false);
+                continue;
+            }
             let place = self.scroll + i;
             for (k, (text, &(left, align, right))) in row.text.split('\t').zip(cells).enumerate()
             {
