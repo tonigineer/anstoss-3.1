@@ -5102,6 +5102,36 @@ mod tests {
         assert_eq!(table.rows[17].text, "18.\tBorussia M'gladbach\t-11\t");
     }
 
+    /// The Häufigste Einw. and Ausw. Spieler list the players most often
+    /// brought on and taken off, by their last names.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_leagues_substitutes() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let liga = "now click bar 14\nuntil dialog 18\nnow row 1283 2";
+        let Some(runner) = on_save(&game, "A", &format!("{liga}\nnow row 1284 13")) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Pl.\\tSpieler\\tVerein\\tEinwechslungen"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 20);
+        // The window is handed the three matchdays played and one more.
+        assert_eq!(table.centred, 4);
+        assert_eq!(table.rows[0].text, "1.\tBitshiabu\tRB Leipzig\t3");
+        assert_eq!(table.rows[19].text, "20.\tKumbedi\tVfL Wolfsburg\t1");
+        let Some(runner) = on_save(&game, "A", &format!("{liga}\nnow row 1284 14")) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Pl.\\tSpieler\\tVerein\\tAuswechslungen"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tMatsima\tFC Augsburg\t3");
+    }
+
     /// The Erhaltene Elfmeter lists the clubs awarded a penalty as the
     /// game keeps them, with those they scored.
     #[test]

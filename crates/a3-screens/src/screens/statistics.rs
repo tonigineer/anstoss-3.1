@@ -303,6 +303,14 @@ const PENALTIES_ROW_COLUMNS: [(u16, u16); 4] =
 const TARGET_HEADER: u16 = 0x1288;
 const TARGET_HEADER_COLUMNS: [(u16, u16); 3] = [(R, 0x19), (0x1e, 0), (C | 0xb4, 0xa0)];
 const TARGET_ROW_COLUMNS: [(u16, u16); 3] = [(R, 0x19), (0x1e, 0), (C | 0xfa, 0x14)];
+/// The Häufigste Einw. and Ausw. Spieler's header and rows, both pages
+/// alike (`FUN_0044e53f`, `FUN_0044e839` with 0x879d00, and 0x879d20):
+/// rank, the player's last name, his club and his count.
+const PLAYERS_IN_HEADER: u16 = 0x1289;
+const PLAYERS_OUT_HEADER: u16 = 0x1292;
+const PLAYERS_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(R, 0x19), (0x1e, 0), (0xa0, 0), (C | 0x10e, 0x6e)];
+const PLAYERS_ROW_COLUMNS: [(u16, u16); 4] = [(R, 0x19), (0x1e, 0), (0x96, 0), (R | 0x136, 0x14)];
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -755,6 +763,11 @@ impl Statistics {
             }
             Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
                 self.chance_page(cx, view)
+            }
+            Some(code @ (statistics::PLAYERS_IN_PAGE | statistics::PLAYERS_OUT_PAGE))
+                if self.category == LIGA =>
+            {
+                self.substitutes_page(cx, view, code == statistics::PLAYERS_OUT_PAGE)
             }
             Some(
                 code @ (statistics::TARGET_PAGE
@@ -1269,6 +1282,46 @@ impl Statistics {
                 rows,
                 width: ROW_WIDTH,
                 centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Häufigste Einw. or Ausw. Spieler (`FUN_0044e53f`,
+    /// `FUN_0044e839`): the league's list of players most often brought on
+    /// or taken off, "%d.\t%s\t%s\t%d" with the last name only, the own
+    /// club red. The window is handed the matchdays played and one more as
+    /// its row count (the league copy's +0x1a), so the rows stand centred
+    /// while they are no more than that.
+    fn substitutes_page(&self, cx: &Cx, view: &mut View, out: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let header = if out { PLAYERS_OUT_HEADER } else { PLAYERS_IN_HEADER };
+        set_header(view, dialog, game.text(header).to_owned(), &PLAYERS_HEADER_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let rows = statistics::player_substitutions(records, country, level, out)
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let club = game.club_name(Some(records), row.country, row.team);
+                let text =
+                    format!("{}.\t{}\t{club}\t{}", i + 1, records.name(row.last), row.count);
+                let ink =
+                    if own == Some((u16::from(row.country), row.team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        let played = League::of(records, country, level).map_or(0, |l| l.played() as i32);
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: PLAYERS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: played + 1,
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,

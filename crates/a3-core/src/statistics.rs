@@ -546,6 +546,10 @@ pub const FOREIGN_PAGE: i16 = 0xe;
 /// Einwechsl. and Auswechsl. under 0x1285 and 0x1286 (`FUN_0044d9d1`,
 /// `FUN_0044dc9f`).
 pub const TARGET_PAGE: i16 = 0x10;
+/// Häufigste Einw. and Ausw. Spieler under 0x1289 and 0x1292
+/// (`FUN_0044e53f`, `FUN_0044e839`).
+pub const PLAYERS_IN_PAGE: i16 = 0x11;
+pub const PLAYERS_OUT_PAGE: i16 = 0x12;
 pub const PENALTIES_PAGE: i16 = 0x13;
 pub const SUBS_IN_PAGE: i16 = 0x1e;
 pub const SUBS_OUT_PAGE: i16 = 0x1f;
@@ -752,6 +756,43 @@ fn club_list(records: &Records, country: u16, level: u8, list: &str, entry: usiz
 /// and scored.
 pub fn penalties_awarded(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
     club_list(records, country, level, PENALTY_CLUBS, 8)
+}
+
+/// A player of the rebuilt player lists: his last name's id in the pool,
+/// his club's country and number, and his count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerCount {
+    pub last: u16,
+    pub country: u8,
+    pub team: i16,
+    pub count: i16,
+}
+
+/// The players most often brought on and taken off (`DAT_00aee3a0` and
+/// `DAT_00aeef08`, 0x124 a league, 20 entries of 12 the save keeps): his
+/// id, his names' pool ids, his count (`L+0x55` and `L+0x56`), his club's
+/// country byte and number, the most first. Only players with match bit 2
+/// get into the first, with bit 4 and neither of 0x30 into the second.
+const PLAYERS_IN: &str = "0xaee380";
+const PLAYERS_OUT: &str = "0xaeeee8";
+
+/// The Häufigste Einw. or Ausw. Spieler (`FUN_0044e53f`, `FUN_0044e839`):
+/// the league's list as long as an entry holds a player.
+pub fn player_substitutions(records: &Records, country: u16, level: u8, out: bool) -> Vec<PlayerCount> {
+    let list = if out { PLAYERS_OUT } else { PLAYERS_IN };
+    let Some(index) = league_of(records, country, level) else { return Vec::new() };
+    let Some(b) = records.block(&format!("{list}[{index}]")) else { return Vec::new() };
+    let word = |at: usize| b.get(at..at + 2).map_or(0, |w| u16::from_le_bytes([w[0], w[1]]));
+    (0..20)
+        .map(|i| i * 12)
+        .take_while(|&at| word(at) != 0)
+        .map(|at| PlayerCount {
+            last: word(at + 4),
+            country: b.get(at + 8).copied().unwrap_or(0),
+            team: word(at + 0xa) as i16,
+            count: word(at + 6) as i16,
+        })
+        .collect()
 }
 
 /// The Plätze über Saisonziel (`FUN_0044e23b`): each club's places above
