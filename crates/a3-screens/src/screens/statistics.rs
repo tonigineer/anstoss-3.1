@@ -267,6 +267,11 @@ const FAIRNESS_ROW_COLUMNS: [(u16, u16); 7] = [
 ];
 const FAIRNESS_RECORD: u16 = 0x825;
 const RECORD_COLUMNS: [(u16, u16); 2] = [(0, 0x8c), (0xc8, 0)];
+/// The Mannschaftsübersicht's header and rows (`FUN_0044c9c7` with
+/// 0x879b40, and 0x879b28): rank, club and strength.
+const OVERVIEW_HEADER: u16 = 0xaa3;
+const OVERVIEW_HEADER_COLUMNS: [(u16, u16); 3] = [(R, 0x14), (0x19, 0), (C | 0xc8, 0x3c)];
+const OVERVIEW_ROW_COLUMNS: [(u16, u16); 3] = [(R, 0x14), (0x19, 0), (R | 0xc8, 0x28)];
 /// The Durchschnittsalter's header and rows, one block for both
 /// (`FUN_0044cd71`, 0x879b58 and 0x879b80 alike): rank, club, the mean
 /// age, the players under 22 and over 30.
@@ -735,7 +740,11 @@ impl Statistics {
             Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
                 self.chance_page(cx, view)
             }
-            Some(code @ (statistics::AGE_PAGE | statistics::FOREIGN_PAGE))
+            Some(
+                code @ (statistics::OVERVIEW_PAGE
+                | statistics::AGE_PAGE
+                | statistics::FOREIGN_PAGE),
+            )
                 if self.category == LIGA =>
             {
                 self.squad_page(cx, view, code)
@@ -1122,40 +1131,51 @@ impl Statistics {
     }
 
     /// The pages of the squads' figures, from the top of the window, the
-    /// own club red: the Durchschnittsalter (`FUN_0044cd71`), the youngest
-    /// squad first, "%d.\t%s\t%3.1f\t%d\t%d"; the Ausländer
-    /// (`FUN_0044d117`), the most foreigners first, "%d.\t%s\t%d\t%d".
+    /// own club red: the Mannschaftsübersicht (`FUN_0044c9c7`), the
+    /// strongest first, "%d.\t%s\t%3.1f" of the tenths; the
+    /// Durchschnittsalter (`FUN_0044cd71`), the youngest squad first,
+    /// "%d.\t%s\t%3.1f\t%d\t%d"; the Ausländer (`FUN_0044d117`), the
+    /// most foreigners first, "%d.\t%s\t%d\t%d".
     fn squad_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(today) = cx.state.season.as_ref().map(|s| s.date()) else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
-        let ages = code == statistics::AGE_PAGE;
-        let (header, header_columns, columns) = if ages {
-            (AGE_HEADER, &AGE_COLUMNS, &AGE_COLUMNS)
-        } else {
-            (FOREIGN_HEADER, &FOREIGN_HEADER_COLUMNS, &FOREIGN_ROW_COLUMNS)
+        let (header, header_columns, columns): (u16, &[(u16, u16)], &[(u16, u16)]) = match code {
+            statistics::OVERVIEW_PAGE => {
+                (OVERVIEW_HEADER, &OVERVIEW_HEADER_COLUMNS, &OVERVIEW_ROW_COLUMNS)
+            }
+            statistics::AGE_PAGE => (AGE_HEADER, &AGE_COLUMNS, &AGE_COLUMNS),
+            _ => (FOREIGN_HEADER, &FOREIGN_HEADER_COLUMNS, &FOREIGN_ROW_COLUMNS),
         };
         set_header(view, dialog, game.text(header).to_owned(), header_columns);
         let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
         let figures = statistics::club_figures(records, country, level, today);
-        let sorted =
-            if ages { statistics::by_age(figures) } else { statistics::by_foreigners(figures) };
+        let sorted = match code {
+            statistics::OVERVIEW_PAGE => statistics::by_strength(figures),
+            statistics::AGE_PAGE => statistics::by_age(figures),
+            _ => statistics::by_foreigners(figures),
+        };
         let rows = sorted
             .iter()
             .enumerate()
             .map(|(i, row)| {
                 let club = game.club_name(Some(records), country as u8, row.team);
-                let text = if ages {
-                    format!(
+                let text = match code {
+                    statistics::OVERVIEW_PAGE => format!(
+                        "{}.\t{club}\t{}.{}",
+                        i + 1,
+                        row.strength / 10,
+                        row.strength % 10
+                    ),
+                    statistics::AGE_PAGE => format!(
                         "{}.\t{club}\t{}\t{}\t{}",
                         i + 1,
                         one_place(row.average_age),
                         row.under_22,
                         row.over_30
-                    )
-                } else {
-                    format!("{}.\t{club}\t{}\t{}", i + 1, row.foreigners, row.nations)
+                    ),
+                    _ => format!("{}.\t{club}\t{}\t{}", i + 1, row.foreigners, row.nations),
                 };
                 let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
                 TableRow { text, ink, mark: None, columns: None }

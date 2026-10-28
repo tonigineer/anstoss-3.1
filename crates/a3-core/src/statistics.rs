@@ -536,19 +536,22 @@ pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
 }
 
 /// The Liga's club pages from Mannschaftsübersicht on, by their codes:
-/// Durchschnittsalter under 0xdd9 (`FUN_0044cd71`), Ausländer under 0xe75
-/// (`FUN_0044d117`).
+/// Mannschaftsübersicht under 0xaa3 (`FUN_0044c9c7`), Durchschnittsalter
+/// under 0xdd9 (`FUN_0044cd71`), Ausländer under 0xe75 (`FUN_0044d117`).
+pub const OVERVIEW_PAGE: i16 = 0xb;
 pub const AGE_PAGE: i16 = 0xc;
 pub const FOREIGN_PAGE: i16 = 0xe;
 
 /// A club's figures as `FUN_00642cd4` gathers them for the club pages,
-/// an entry of 0x1c bytes each: its number, its squad, their mean age
+/// an entry of 0x1c bytes each: its number, its strength in tenths (+2),
+/// its squad, their mean age
 /// (a float at +8), how many are under 22 and over 30 (+0xe, +0x10), the
 /// foreigners among them (+0x14) and the other nations they come from
 /// (+0x16).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ClubFigures {
     pub team: i16,
+    pub strength: i16,
     pub players: i16,
     pub average_age: f32,
     pub under_22: i16,
@@ -577,6 +580,7 @@ pub fn club_figures(records: &Records, country: u16, level: u8, today: NaiveDate
             let Some(record) = u16::try_from(team).ok().and_then(|t| records.team(country, t)) else {
                 return figures;
             };
+            figures.strength = strength(records, record);
             let ids = record.players();
             let mut sum = 0i16;
             let mut seen = [false; NATIONS];
@@ -606,6 +610,60 @@ pub fn club_figures(records: &Records, country: u16, level: u8, today: NaiveDate
             figures
         })
         .collect()
+}
+
+/// How many of each kind of position a team's strength counts
+/// (`FUN_007779e4`): its best two keepers, six defenders, five
+/// midfielders and three strikers, by their main position — 1 the keeper,
+/// 2 to 5 the defence, 6 to 9 the midfield, 10 the attack.
+const STRENGTH_COUNTS: [usize; 4] = [2, 6, 5, 3];
+
+/// A team's strength in tenths (`FUN_007779e4`): every player put into
+/// his kind's list by his value (`FUN_00777544`) — ten times his strength,
+/// five more for the traits of +0x1ca bit 1 or +0x1c8 bits 0x101, one more
+/// for each of the eleven abilities he is good at — and the mean of each
+/// list's best, ten times over, cut to a whole number; 1 when no list has
+/// one. A list's slots start empty at 0, so a value of 0 never counts.
+pub fn strength(records: &Records, team: &Team) -> i16 {
+    let mut kinds: [Vec<i16>; 4] = Default::default();
+    for player in team.players().iter().filter_map(|&id| records.player(id)) {
+        let kind = match player.positions()[0] {
+            1 => 0,
+            2..=5 => 1,
+            6..=9 => 2,
+            10 => 3,
+            _ => continue,
+        };
+        let [first, second] = player.traits();
+        let mut value = u16::from(player.strength()) * 10;
+        if second & 1 != 0 || first & 0x101 != 0 {
+            value += 5;
+        }
+        value += (player.good() & 0x7ff).count_ones() as u16;
+        kinds[kind].push(value as i16);
+    }
+    let (mut sum, mut count) = (0i16, 0i32);
+    for (values, &best) in kinds.iter_mut().zip(&STRENGTH_COUNTS) {
+        values.sort_unstable_by(|a, b| b.cmp(a));
+        for &v in values.iter().filter(|&&v| v > 0).take(best) {
+            sum = sum.wrapping_add(v);
+            count += 1;
+        }
+    }
+    if count < 1 { 1 } else { (i32::from(sum) * 10 / count) as i16 }
+}
+
+/// The Mannschaftsübersicht's order (`FUN_0044c9c7`): the strongest team
+/// first, by the page's exchange sort.
+pub fn by_strength(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            if rows[i].strength < rows[j].strength {
+                rows.swap(i, j);
+            }
+        }
+    }
+    rows
 }
 
 /// The Durchschnittsalter's order (`FUN_0044cd71`): the youngest squad

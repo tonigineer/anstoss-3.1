@@ -5012,6 +5012,28 @@ mod tests {
         assert_eq!(table.rows[19].columns, Some(vec![(0, 0x8c), (0xc8, 0)]));
     }
 
+    /// The Mannschaftsübersicht ranks the league's teams by their
+    /// strength, the mean of their best players by position.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_leagues_strengths() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 9";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tVerein\\tStärke"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.rows[0].text, "1.\tFC Bayern München\t108.0");
+        assert_eq!(table.rows[8].text, "9.\t1.FC Union Berlin\t88.6");
+        assert_eq!(table.rows[8].ink, [255, 0, 0]);
+        assert_eq!(table.rows[17].text, "18.\tFC St. Pauli\t83.2");
+    }
+
     /// The Durchschnittsalter ranks the league's squads by their mean
     /// age on the day, the youngest first.
     #[test]
