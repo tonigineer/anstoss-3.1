@@ -276,6 +276,44 @@ const GRADES_ROW_COLUMNS: [(u16, u16); 6] = [
     (R | 0x10e, 0x1e),
     (R | 0x12c, 0x1e),
 ];
+/// The Wer kam? Wer ging?'s header and rows (`FUN_0046ad89` with
+/// 0x87e3a0, and 0x87e360): year, week, kind, name, club, strength,
+/// position and fee. The kinds' words (0x87e33c), "SB" for the season's
+/// start, the clubs of kinds 5 to 8, "Ausland" for a club of no country,
+/// "ablösefrei", the total and the line of a manager without a transfer.
+const TRANSFERS_HEADER: u16 = 2628;
+const TRANSFERS_HEADER_COLUMNS: [(u16, u16); 8] = [
+    (5, 0x19),
+    (C | 0x1e, 0x12),
+    (C | 0x33, 0x1c),
+    (0x51, 0),
+    (0xde, 0),
+    (C | 0x14f, 0xf),
+    (C | 0x15e, 0x14),
+    (C | 0x16d, 0x5a),
+];
+const TRANSFERS_ROW_COLUMNS: [(u16, u16); 8] = [
+    (0, 0x1e),
+    (R | 0x18, 0x14),
+    (R | 0x32, 0x16),
+    (0x50, 0),
+    (0xde, 0),
+    (R | 0x14f, 0xc),
+    (C | 0x15e, 0x14),
+    (R | 0x172, 0x5a),
+];
+const TRANSFER_KINDS: [u16; 9] = [0, 2695, 2696, 2697, 2698, 2699, 2700, 2701, 2702];
+const SEASON_START: u16 = 3035;
+const SEASON_START_WEEK: u8 = 0xff;
+const LEFT_FOR: [(u8, u16); 4] = [(5, 2705), (6, 2704), (7, 2706), (8, 2707)];
+const ABROAD: u16 = 3492;
+const FREE_TRANSFER: u16 = 2703;
+const TRANSFER_TOTAL: u16 = 2086;
+const NO_TRANSFER: u16 = 3690;
+/// The kinds that bring money in: sold and loaned out.
+const TRANSFER_INCOME: [u8; 2] = [2, 3];
+/// The most rows shown, the newest.
+const TRANSFERS_SHOWN: usize = 90;
 /// The Spielereigenschaften's header and rows (`FUN_00471109` with
 /// 0x87e6d0, and 0x87e6f0): name, position, strength and traits.
 const TRAITS_HEADER: u16 = 4739;
@@ -1153,6 +1191,9 @@ impl Statistics {
             Some(statistics::SQUAD_TRAITS_PAGE) if self.category == MANNSCHAFT => {
                 self.traits_page(cx, view)
             }
+            Some(statistics::SQUAD_TRANSFERS_PAGE) if self.category == MANNSCHAFT => {
+                self.transfers_page(cx, view)
+            }
             Some(statistics::SQUAD_GRADES_PAGE) if self.category == MANNSCHAFT => {
                 self.grades_page(cx, view)
             }
@@ -1547,6 +1588,85 @@ impl Statistics {
             *table = TableState {
                 columns: page.columns.to_vec(),
                 centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Wer kam? Wer ging? (`FUN_0046ad89`): the club's transfers under
+    /// its manager, the last ninety, oldest first, from the top of the
+    /// window, "%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s" — the week one more than
+    /// stored, the names spelled out, the club as the kind has it, the fee
+    /// a thousand times as money. A separator, then the total, the fees of
+    /// sales and loans out less all others; without a transfer an empty
+    /// row before the separator and a line that says so.
+    fn transfers_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(TRANSFERS_HEADER).to_owned(),
+            &TRANSFERS_HEADER_COLUMNS,
+        );
+        let transfers = statistics::transfers(records, team);
+        let first = transfers.len().saturating_sub(TRANSFERS_SHOWN);
+        let mut total = 0i64;
+        let mut rows: Vec<TableRow> = transfers[first..]
+            .iter()
+            .map(|t| {
+                if TRANSFER_INCOME.contains(&t.kind) {
+                    total += i64::from(t.fee);
+                } else {
+                    total -= i64::from(t.fee);
+                }
+                let week = if t.week == SEASON_START_WEEK {
+                    game.text(SEASON_START).to_owned()
+                } else {
+                    (u16::from(t.week) + 1).to_string()
+                };
+                let kind = TRANSFER_KINDS.get(usize::from(t.kind)).map_or("", |&id| game.text(id));
+                let club = match LEFT_FOR.iter().find(|(k, _)| *k == t.kind) {
+                    Some(&(_, id)) => game.text(id).to_owned(),
+                    None if t.country == 0 => game.text(ABROAD).to_owned(),
+                    None => game.club_name(Some(records), t.country, t.club),
+                };
+                let position = game.rules.pitch.abbreviations.get(usize::from(t.position));
+                let position = game.text(position.copied().unwrap_or(0) as u16);
+                let fee = if t.fee == 0 {
+                    game.text(FREE_TRANSFER).to_owned()
+                } else {
+                    super::playerinfo::money(game, i64::from(t.fee) * 1000)
+                };
+                let text = format!(
+                    "{}\t{week}\t{kind}\t{}\t{club}\t{}\t{position}\t{fee}",
+                    t.year,
+                    spelled(records, t.first, t.last),
+                    t.strength
+                );
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        let closing = if transfers.is_empty() {
+            rows.push(TableRow { text: String::new(), ink: INK, mark: None, columns: None });
+            game.text(NO_TRANSFER).to_owned()
+        } else {
+            let sum = super::playerinfo::money(game, total * 1000);
+            super::finances::printf(game.text(TRANSFER_TOTAL), &[&sum])
+        };
+        // `FUN_006df44c`: the closing line in a column of its own.
+        let columns = Some(GROUP_COLUMNS.to_vec());
+        rows.push(TableRow { text: closing, ink: INK, mark: None, columns });
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: TRANSFERS_ROW_COLUMNS.to_vec(),
+                centred: -1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

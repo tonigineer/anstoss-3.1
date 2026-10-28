@@ -4962,6 +4962,36 @@ mod tests {
         assert_eq!(table.rows[12].text, "13.\tLeopold Querfeld\t0\t0\t0\t0\t1\t0");
     }
 
+    /// The Mannschaft category's Wer kam? Wer ging? lists the club's
+    /// transfers under its manager and their total.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_clubs_transfers() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 14";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Jahr\\tW\\tArt\\tName\\tVerein\\tSt\\tPos\\tAblöse"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 8);
+        assert_eq!(
+            table.rows[0].text,
+            "2025\t2\tZug\tGabriel Moscardo\tSporting Braga\t7\tDM\t4.35 Mio €"
+        );
+        assert_eq!(
+            table.rows[4].text,
+            "2025\t9\tVerl\tAndrej Ilic\tSV Werder Bremen\t8\tST\t850.000 €"
+        );
+        // Sales and loans out bring 5.568 thousand, the two who came cost
+        // 11.350 thousand.
+        assert_eq!(table.rows[7].text, "Transfersumme total: - 5.78 Mio €");
+        assert_eq!(table.rows[7].columns, Some(vec![(0, 0)]));
+    }
+
     /// The Mannschaft category's Notenschnitt Spieler ranks the squad by
     /// its mean grade, at home and away beside, those without a grade
     /// last.

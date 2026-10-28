@@ -322,6 +322,8 @@ pub const SQUAD_TRAITS_PAGE: i16 = 0x1d;
 pub const SQUAD_FIXTURES_PAGE: i16 = 0x19;
 /// The Notenschnitt Spieler under 3043 (`FUN_0046e649`).
 pub const SQUAD_GRADES_PAGE: i16 = 0xf;
+/// The Wer kam? Wer ging? under 2628 (`FUN_0046ad89`).
+pub const SQUAD_TRANSFERS_PAGE: i16 = 8;
 
 /// The own squad by the names its players go by (`FUN_00471109`): the
 /// same exchange sort, a place swapping with the first of the rest whose
@@ -426,6 +428,57 @@ pub fn all_time_matches(records: &Records, team: &Team) -> (usize, Vec<AllTimeMa
         })
         .collect();
     (held, rows)
+}
+
+/// A transfer under the club's manager (`FUN_00632f5f`: a count at the
+/// human club's extra +0xdde and a hundred entries of 0x14 from +0xde0):
+/// the year and week — 0xff at the season's start — the kind (1 came, 2
+/// sold, 3 loaned out, 4 loaned, 5 to the youth, 6 to the amateurs, 7
+/// career's end, 8 invalid), the player's names, the other club's
+/// country and number, his strength and position, and the fee in
+/// thousands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Transfer {
+    pub year: i16,
+    pub week: u8,
+    pub kind: u8,
+    pub first: u16,
+    pub last: u16,
+    pub country: u8,
+    pub club: i16,
+    pub strength: u8,
+    pub position: u8,
+    pub fee: i32,
+}
+
+const TRANSFERS_COUNT: usize = 0xdde;
+const TRANSFERS: usize = 0xde0;
+const TRANSFER_ENTRY: usize = 0x14;
+const TRANSFERS_MOST: usize = 100;
+
+/// The club's transfers under its manager, the oldest first.
+pub fn transfers(records: &Records, team: &Team) -> Vec<Transfer> {
+    let Some(slot) = usize::from(team.human()).checked_sub(1) else { return Vec::new() };
+    let Some(extra) = records.extras.get(slot) else { return Vec::new() };
+    let count = usize::try_from(extra.get::<i16>(TRANSFERS_COUNT)).unwrap_or(0);
+    (0..count.min(TRANSFERS_MOST))
+        .map(|k| {
+            let e: [u8; TRANSFER_ENTRY] = extra.get(TRANSFERS + k * TRANSFER_ENTRY);
+            let word = |at: usize| u16::from_le_bytes([e[at], e[at + 1]]);
+            Transfer {
+                year: word(0) as i16,
+                week: e[2],
+                kind: e[3],
+                first: word(4),
+                last: word(6),
+                country: e[8],
+                club: word(0xa) as i16,
+                strength: e[0xc],
+                position: e[0xd],
+                fee: i32::from_le_bytes([e[0x10], e[0x11], e[0x12], e[0x13]]),
+            }
+        })
+        .collect()
 }
 
 /// A squad player's grades in this season's league matches
