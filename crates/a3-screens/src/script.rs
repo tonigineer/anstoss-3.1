@@ -4867,6 +4867,31 @@ mod tests {
         assert_eq!(graph.bars[0].0, 150);
     }
 
+    /// The Mannschaft category's Torjägerliste ranks the own squad by its
+    /// league goals, with the cup's and the European cups' beside.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_squads_scorers() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 1";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tName\\tTore\\tPokal\\tEuropapokal"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let state = runner.host.state();
+        // 1.FC Union Berlin, the own club.
+        let squad = state.records.as_ref().unwrap().team(14, 84).unwrap().players().len();
+        assert_eq!(table.rows.len(), squad);
+        assert_eq!(table.centred, squad as i32);
+        assert_eq!(table.rows[0].text, "1.\tJosip Juranovic\t1\t0\t0");
+        assert_eq!(table.rows[3].text, "4.\tToni Lubiniecki\t1\t1\t0");
+        assert!(table.rows.iter().all(|r| r.ink == [0, 0, 0]));
+    }
+
     /// The Liga category names its players and counts their goals,
     /// assists, free kicks and penalties.
     #[test]

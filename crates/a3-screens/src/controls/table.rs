@@ -128,8 +128,16 @@ impl TableState {
 
     /// The bar's window: it ends short of the table's own edges, 21 pixels
     /// from the right and 16 from the bottom. Its arrows sit at its right
-    /// and bottom, as a list's do.
-    pub(crate) fn bar_arrows(rect: Rect) -> (Rect, Rect) {
+    /// and bottom, as a list's do; where the rows stand centred, the bar
+    /// moves down with them, as far as the first row does.
+    pub(crate) fn bar_arrows(&self, rect: Rect) -> (Rect, Rect) {
+        let rows = self.rows.len() as i32;
+        let down = if self.centred > 0 && rows <= self.centred {
+            self.layout(rect.height() as i32).0 as f32
+        } else {
+            0.0
+        };
+        let rect = Rect::new(rect.min.x, rect.min.y + down, rect.max.x, rect.max.y + down);
         let (right, bottom) = (rect.max.x - 21.0, rect.max.y - 16.0);
         (
             Rect::new(right - SCROLLBAR_WIDTH, rect.min.y, right, rect.min.y + SCROLLBAR_WIDTH),
@@ -358,7 +366,7 @@ impl TableState {
     /// handle as long as the rows shown are of all, moved down as the
     /// table is scrolled (`FUN_007ae43e`, `FUN_007ad818`).
     fn bar(&self, area: &mut RgbaImage, rect: Rect, paint: &Paint) {
-        let (up, down) = Self::bar_arrows(rect);
+        let (up, down) = self.bar_arrows(rect);
         let off = rect.min;
         let move_ = |q: Rect| {
             Rect::new(q.min.x - off.x, q.min.y - off.y, q.max.x - off.x, q.max.y - off.y)

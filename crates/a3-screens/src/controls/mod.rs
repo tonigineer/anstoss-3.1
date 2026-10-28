@@ -311,7 +311,7 @@ impl ControlState {
             Self::Table(t) => {
                 out.push((Target::Control(index), geometry.rect(control)));
                 if t.scrolls() {
-                    let (up, down) = TableState::bar_arrows(control.rect);
+                    let (up, down) = t.bar_arrows(control.rect);
                     out.push((Target::Scroll { control: index, up: true }, geometry.map(up)));
                     out.push((Target::Scroll { control: index, up: false }, geometry.map(down)));
                 }

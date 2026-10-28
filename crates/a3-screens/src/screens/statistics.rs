@@ -150,6 +150,15 @@ const CROSS_WIDTH: i32 = 0x1dd;
 /// The goal pages' header, one text for all four (`FUN_0044917a`; the
 /// axis' own label 0xa51 stands empty and is never drawn).
 const GOAL_HEADER: u16 = 0xa50;
+/// The Mannschaft category, over the own squad: the Torjägerliste's
+/// header (text 2413, `FUN_00469f05` with 0x87e1d8) and rows (0x87e160) —
+/// rank, name, league, cup and European goals.
+const MANNSCHAFT: usize = 1;
+const SQUAD_SCORERS_HEADER: u16 = 2413;
+const SQUAD_SCORERS_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(C, 0x14), (0x19, 0), (C | 0xd2, 0x1e), (C | 0x102, 0x1e), (C | 0x127, 0x3c)];
+const SQUAD_SCORERS_ROW_COLUMNS: [(u16, u16); 5] =
+    [(R, 0x14), (0x19, 0), (R | 0xc8, 0x1e), (R | 0xfa, 0x1e), (R | 0x12c, 0x1e)];
 /// The Liga category and its two player pages' header texts (2713 and
 /// 2715) with their header's and rows' columns (`FUN_00449bd6`'s blocks
 /// at 0x879708 and 0x87972c, `FUN_0044a3fa`'s at 0x8797e8 and 0x879808).
@@ -815,6 +824,9 @@ impl Statistics {
             {
                 self.liga_page(cx, view, code)
             }
+            Some(code @ statistics::SQUAD_SCORERS_PAGE) if self.category == MANNSCHAFT => {
+                self.squad_stats_page(cx, view, code)
+            }
             Some(statistics::FAIRNESS_PAGE) if self.category == LIGA => {
                 self.fairness_page(cx, view)
             }
@@ -1163,6 +1175,45 @@ impl Statistics {
                 rows,
                 width: ROW_WIDTH,
                 centred,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Mannschaft category's pages over the own squad (`FUN_004677f5`),
+    /// all rows black, the window handed the squad's size: the
+    /// Torjägerliste (`FUN_00469f05(0)`), the players by their league
+    /// goals, "%d.\t%s\t%d\t%d\t%d" with their cup and European goals.
+    fn squad_stats_page(&self, cx: &Cx, view: &mut View, _code: i16) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(SQUAD_SCORERS_HEADER).to_owned(),
+            &SQUAD_SCORERS_HEADER_COLUMNS,
+        );
+        let ids = statistics::squad_by(records, team, |p| i32::from(p.goals()[0]));
+        let rows: Vec<TableRow> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| {
+                let name = records.known_as(id).unwrap_or_default();
+                let [league, cup, europe] = records.player(id).map_or([0; 3], |p| p.goals());
+                let text = format!("{}.\t{name}\t{league}\t{cup}\t{europe}", i + 1);
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: SQUAD_SCORERS_ROW_COLUMNS.to_vec(),
+                centred: rows.len() as i32,
+                rows,
+                width: ROW_WIDTH,
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,

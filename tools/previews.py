@@ -157,6 +157,7 @@ AREAS = {
                    (*bar(15, 18, "now click at 545 436", "now row 1284 15",
                         "now click at 545 436"), 18),
                    (*bar(15, 18, "now row 1284 16"), 18),
+                   (*bar(15, 18, "now row 1283 1", "now row 1284 1"), 18),
                    (*bar(15, 18, "now row 1283 2"), 18),
                    (*bar(15, 18, "now row 1283 2", "now row 1284 1"), 18),
                    (*bar(15, 18, "now row 1283 2", "now row 1284 2"), 18),

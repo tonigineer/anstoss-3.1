@@ -17,7 +17,7 @@ use chrono::NaiveDate;
 
 use crate::opponent::{CUPS_AT, League, PAIRING, PAIRINGS};
 use crate::random::Random;
-use crate::records::{Manager, Records, Team};
+use crate::records::{Manager, Player, Records, Team};
 
 pub const CATEGORIES: usize = 8;
 /// The categories' names: Tabellen, Mannschaft, Liga, Aktuelles,
@@ -298,6 +298,28 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
     let top = i32::from(rows.first().map_or(0, |&(_, value)| value));
     let axis = ((top + 24) / 25).max(1) * 25;
     (rows, axis)
+}
+
+/// The Mannschaft category's pages over the own squad (`FUN_004677f5`):
+/// the Torjägerliste under text 2413 (`FUN_00469f05(0)`).
+pub const SQUAD_SCORERS_PAGE: i16 = 0;
+
+/// The own squad in a page's order (`FUN_0046767e`'s exchange sort over
+/// the indexes `FUN_00467645` lays out): the players as the club lists
+/// them, every place from the first up swapping with the first of the
+/// rest whose key is greater.
+pub fn squad_by(records: &Records, team: &Team, key: impl Fn(&Player) -> i32) -> Vec<u16> {
+    let ids = team.players();
+    let keys: Vec<i32> = ids.iter().map(|&id| records.player(id).map_or(0, &key)).collect();
+    let mut order: Vec<usize> = (0..ids.len()).collect();
+    for i in 0..order.len() {
+        for j in i + 1..order.len() {
+            if keys[order[i]] < keys[order[j]] {
+                order.swap(i, j);
+            }
+        }
+    }
+    order.iter().map(|&k| ids[k]).collect()
 }
 
 /// The Liga category's first two pages: the Torjägerliste and the
