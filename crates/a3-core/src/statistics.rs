@@ -333,6 +333,10 @@ pub const SQUAD_GRADES_PAGE: i16 = 0xf;
 pub const SQUAD_TRANSFERS_PAGE: i16 = 8;
 /// The Spielertrends under 2421 (`FUN_0046dbe2`).
 pub const SQUAD_TRENDS_PAGE: i16 = 7;
+/// The Angstgegner and the Lieblingsgegner under 3040 and 3039
+/// (`FUN_0046cb0e`, `FUN_0046c518`).
+pub const SQUAD_FOES_PAGE: i16 = 9;
+pub const SQUAD_FAVOURITES_PAGE: i16 = 0xa;
 
 /// The own squad by the names its players go by (`FUN_00471109`): the
 /// same exchange sort, a place swapping with the first of the rest whose
@@ -488,6 +492,83 @@ pub fn transfers(records: &Records, team: &Team) -> Vec<Transfer> {
             }
         })
         .collect()
+}
+
+/// The club's league record against one club of its country
+/// (`FUN_0040c97b`'s entries of seven words): its number, the games, the
+/// points the club took and gave, the goals for and against and their
+/// difference.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Opponent {
+    pub team: i16,
+    pub games: i16,
+    pub points: i16,
+    pub given: i16,
+    pub goals: i16,
+    pub against: i16,
+    pub diff: i16,
+}
+
+/// Which of the club's matches `opponents` counts: at home, away, both.
+pub const HOME_MATCHES: u8 = 1;
+pub const AWAY_MATCHES: u8 = 2;
+
+/// The club's league record against every club of its country
+/// (`FUN_0040c97b`), the matches of `mode` this season counted — three
+/// points a win, one each a draw (`FUN_0040d1a1`) — and sorted with the
+/// exchange sort: the most points taken over given first, then the more
+/// taken, the better difference, the more goals. The original adds the
+/// seasons before from its league archive (`DAT_00b21adc`, the last
+/// `seasons` − 1 of ten) — not read here, as in a first season.
+pub fn opponents(
+    records: &Records,
+    calendar: &crate::calendar::Calendar,
+    team: &Team,
+    mode: u8,
+) -> Vec<Opponent> {
+    let country = team.country();
+    let count = usize::try_from(records.countries.team_count(country.into())).unwrap_or(0);
+    let mut table: Vec<Opponent> =
+        (0..count).map(|n| Opponent { team: n as i16, ..Opponent::default() }).collect();
+    let league = League::of(records, country.into(), team.level());
+    let place = usize::from(team.league_place());
+    let fixtures = crate::opponent::fixture_days(records, calendar, team);
+    for (i, f) in fixtures.iter().enumerate() {
+        let counted = mode & if f.home { HOME_MATCHES } else { AWAY_MATCHES } != 0;
+        let result = league.as_ref().and_then(|l| l.result(i + 1, place));
+        let (Some((_, _, Some((home, away)))), true) = (result, counted) else { continue };
+        let Some(e) = usize::try_from(f.opponent).ok().and_then(|n| table.get_mut(n)) else {
+            continue;
+        };
+        let (own, other) = if f.home { (home, away) } else { (away, home) };
+        let (own, other) = (i16::from(own), i16::from(other));
+        e.games += 1;
+        match own.cmp(&other) {
+            std::cmp::Ordering::Greater => e.points += 3,
+            std::cmp::Ordering::Equal => {
+                e.points += 1;
+                e.given += 1;
+            }
+            std::cmp::Ordering::Less => e.given += 3,
+        }
+        e.goals += own;
+        e.against += other;
+    }
+    for e in &mut table {
+        e.diff = e.goals - e.against;
+    }
+    let better = |a: &Opponent, b: &Opponent| {
+        let key = |e: &Opponent| (e.points - e.given, e.points, e.diff, e.goals);
+        key(b) > key(a)
+    };
+    for i in 0..table.len() {
+        for j in i + 1..table.len() {
+            if better(&table[i], &table[j]) {
+                table.swap(i, j);
+            }
+        }
+    }
+    table
 }
 
 /// How many matchdays the club's league has (`FUN_00692997`): the

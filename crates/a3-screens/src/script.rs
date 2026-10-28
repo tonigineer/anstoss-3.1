@@ -4962,6 +4962,59 @@ mod tests {
         assert_eq!(table.rows[12].text, "13.\tLeopold Querfeld\t0\t0\t0\t0\t1\t0");
     }
 
+    /// The Mannschaft category's Angstgegner and Lieblingsgegner name the
+    /// clubs the own club lost and won against, at home, away and in all.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_names_the_clubs_foes_and_favourites() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let page = |row: u32| {
+            format!("now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 {row}")
+        };
+        let Some(runner) = on_save(&game, "A", &page(15)) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Angstgegner\\tSpiele\\tPkt\\tDiff\\tTore"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "Heimbegegnungen",
+                "Borussia Dortmund\t1\t0\t-1\t1\t:\t2",
+                "",
+                "Auswärtsbegegnungen",
+                "VfL Wolfsburg\t1\t0\t-2\t0\t:\t2",
+                "",
+                "Alle Ligaspiele",
+                "VfL Wolfsburg\t1\t0\t-2\t0\t:\t2",
+                "Borussia Dortmund\t1\t0\t-1\t1\t:\t2",
+                ""
+            ]
+        );
+        assert_eq!(table.rows[0].ink, [0xaa, 0, 0]);
+        assert_eq!(table.rows[0].columns, Some(vec![(0, 0)]));
+        let Some(runner) = on_save(&game, "A", &page(16)) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        // No win at home yet: that section is left out.
+        assert_eq!(
+            texts,
+            [
+                "Auswärtsbegegnungen",
+                "Hamburger SV\t1\t3\t3\t3\t:\t0",
+                "",
+                "Alle Ligaspiele",
+                "Hamburger SV\t1\t3\t3\t3\t:\t0",
+                ""
+            ]
+        );
+    }
+
     /// The Mannschaft category's Spielertrends groups the squad by its
     /// chances of a downgrade or an upgrade, the goals still needed beside.
     #[test]

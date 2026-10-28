@@ -314,6 +314,34 @@ const NO_TRANSFER: u16 = 3690;
 const TRANSFER_INCOME: [u8; 2] = [2, 3];
 /// The most rows shown, the newest.
 const TRANSFERS_SHOWN: usize = 90;
+/// The Angstgegner's and Lieblingsgegner's header and rows (0x87e530 and
+/// 0x87e4f0 for both): club, games, points, difference, goals and the
+/// goals against behind a colon; the sections at home, away and in all
+/// (texts 2708 to 2710), and the line of a club with none (2711, 2712).
+const FOES_HEADER: u16 = 3040;
+const FAVOURITES_HEADER: u16 = 3039;
+const OPPONENTS_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(0, 0), (C | 0xa0, 0x28), (C | 0xc8, 0x1e), (C | 0xee, 0x19), (C | 0x10c, 0x19)];
+const OPPONENTS_ROW_COLUMNS: [(u16, u16); 7] = [
+    (0, 0),
+    (R | 0x96, 0x23),
+    (R | 0xbe, 0x1e),
+    (R | 0xe6, 0x19),
+    (R | 0x104, 0x19),
+    (0x11f, 0),
+    (0x124, 0),
+];
+const OPPONENT_SECTIONS: [(u8, u16); 3] = [
+    (statistics::HOME_MATCHES, 2708),
+    (statistics::AWAY_MATCHES, 2709),
+    (statistics::HOME_MATCHES | statistics::AWAY_MATCHES, 2710),
+];
+const NO_FOES: u16 = 2711;
+const NO_FAVOURITES: u16 = 2712;
+/// The most opponents a section names, and how far into the table the
+/// favourites are looked for.
+const OPPONENTS_SHOWN: usize = 5;
+const FAVOURITES_SOUGHT: usize = 10;
 /// The Spielertrends' header and rows (`FUN_0046dbe2` with 0x87e638, and
 /// 0x87e600): name, age, position, strength, form, D-Form and the goals
 /// still needed for an upgrade; each group under its heading, texts 2147
@@ -1217,6 +1245,11 @@ impl Statistics {
             Some(statistics::SQUAD_TRAITS_PAGE) if self.category == MANNSCHAFT => {
                 self.traits_page(cx, view)
             }
+            Some(code @ (statistics::SQUAD_FOES_PAGE | statistics::SQUAD_FAVOURITES_PAGE))
+                if self.category == MANNSCHAFT =>
+            {
+                self.opponents_page(cx, view, code == statistics::SQUAD_FOES_PAGE)
+            }
             Some(statistics::SQUAD_TRENDS_PAGE) if self.category == MANNSCHAFT => {
                 self.trends_page(cx, view)
             }
@@ -1617,6 +1650,83 @@ impl Statistics {
             *table = TableState {
                 columns: page.columns.to_vec(),
                 centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Angstgegner (`FUN_0046cb0e`) or the Lieblingsgegner
+    /// (`FUN_0046c518`): for the matches at home, away and in all the
+    /// club's record against each club (`FUN_0040c97b`), and of those it
+    /// played, not itself, up to five who took more points than they gave
+    /// from the table's end (`FUN_0046c8d8`) — or who gave more, among the
+    /// table's first ten (`FUN_0046c2e6`). A section stands after a
+    /// separator under its heading in COLORREF 0xaa,
+    /// "%s\t%d\t%d\t%d\t%d\t:\t%d" its rows, an empty row after; with no
+    /// section at all one column says so. From the top of the window.
+    fn opponents_page(&self, cx: &Cx, view: &mut View, foes: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let header = if foes { FOES_HEADER } else { FAVOURITES_HEADER };
+        set_header(view, dialog, game.text(header).to_owned(), &OPPONENTS_HEADER_COLUMNS);
+        let own = i16::from(team.number());
+        let country = team.country();
+        let mut rows = Vec::new();
+        for &(mode, heading) in &OPPONENT_SECTIONS {
+            let table = statistics::opponents(records, &game.calendar, team, mode);
+            let counts = |e: &&statistics::Opponent| e.games != 0 && e.team != own;
+            let picked: Vec<statistics::Opponent> = if foes {
+                table
+                    .iter()
+                    .rev()
+                    .filter(counts)
+                    .filter(|e| e.given > e.points)
+                    .take(OPPONENTS_SHOWN)
+                    .copied()
+                    .collect()
+            } else {
+                table
+                    .iter()
+                    .take(FAVOURITES_SOUGHT)
+                    .filter(counts)
+                    .filter(|e| e.points > e.given)
+                    .take(OPPONENTS_SHOWN)
+                    .copied()
+                    .collect()
+            };
+            if picked.is_empty() {
+                continue;
+            }
+            let text = game.text(heading).to_owned();
+            let columns = Some(GROUP_COLUMNS.to_vec());
+            rows.push(TableRow { text, ink: HEADING_INK, mark: None, columns });
+            for e in &picked {
+                let club = game.club_name(Some(records), country, e.team);
+                let text = format!(
+                    "{club}\t{}\t{}\t{}\t{}\t:\t{}",
+                    e.games, e.points, e.diff, e.goals, e.against
+                );
+                rows.push(TableRow { text, ink: INK, mark: None, columns: None });
+            }
+            rows.push(TableRow { text: String::new(), ink: INK, mark: None, columns: None });
+        }
+        let mut columns = OPPONENTS_ROW_COLUMNS.to_vec();
+        if rows.is_empty() {
+            let text = game.text(if foes { NO_FOES } else { NO_FAVOURITES }).to_owned();
+            rows.push(TableRow { text, ink: INK, mark: None, columns: None });
+            rows.push(TableRow { text: String::new(), ink: INK, mark: None, columns: None });
+            columns = GROUP_COLUMNS.to_vec();
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns,
+                centred: -1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,
