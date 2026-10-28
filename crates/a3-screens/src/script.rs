@@ -5056,6 +5056,33 @@ mod tests {
         assert_eq!(rows.len(), 9);
     }
 
+    /// The Aktuelles category's Tab. sonstige Länder names the top three of
+    /// each country the game does not play in full.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_tops_the_other_countries_tables() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 8";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Pl.\\tVerein\\tPunkte");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().take(6).map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "Portugal",
+                "",
+                "1.\tBenfica Lissabon\t9",
+                "2.\tGD Estoril Praia\t9",
+                "3.\tFC Rio Ave\t9",
+                ""
+            ]
+        );
+        assert_eq!(table.rows[2].ink, [255, 0, 0]);
+    }
+
     /// The Aktuelles category shows the European club ranking the game
     /// keeps, and the newspaper's headlines — none yet on this save.
     #[test]

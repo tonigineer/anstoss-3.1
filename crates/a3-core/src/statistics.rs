@@ -58,7 +58,13 @@ pub const PAST_SEASONS: std::ops::RangeInclusive<u16> = 0x65..=0x6e;
 pub struct Pages {
     pub categories: Vec<Vec<Page>>,
     pub upgrade: Vec<u8>,
+    /// The countries the Tab. sonstige Länder names when not played
+    /// (`DAT_008a3820`).
+    pub other_countries: Vec<u16>,
 }
+
+const OTHER_COUNTRIES_AT: u32 = 0x8a3820;
+const OTHER_COUNTRIES: usize = 11;
 
 const UPGRADE_AT: u32 = 0x876d86;
 const UPGRADE_BUCKETS: usize = 7;
@@ -84,7 +90,8 @@ impl Pages {
             })
             .collect();
         let upgrade = exe.bytes(UPGRADE_AT, UPGRADE_BUCKETS * UPGRADE_BUCKET)?.to_vec();
-        Ok(Self { categories, upgrade })
+        let other_countries = exe.u16s(OTHER_COUNTRIES_AT, OTHER_COUNTRIES)?;
+        Ok(Self { categories, upgrade, other_countries })
     }
 }
 
@@ -1016,6 +1023,31 @@ pub const REFEREES_PAGE: i16 = 0x14;
 /// The Zeitungsmeldungen under 4709 (`FUN_004571ee`) and the europ.
 /// Vereinsrangliste under 4717 (`FUN_00457b04`).
 pub const NEWSPAPER_PAGE: i16 = 0x12;
+/// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
+pub const OTHER_TABLES_PAGE: i16 = 0x13;
+
+/// The table of a country the game does not play in full (`DAT_00b9f918`,
+/// 0xc a country the save keeps: the country, the matchdays it has drawn
+/// lots for, and the points of its eight clubs, `FUN_0068127b`), as
+/// `FUN_00681520` lays it out: the clubs' numbers with their points, by
+/// the bubble sort (`FUN_0072b9b9` with `FUN_0072bc49`) the most points
+/// first, ties in the clubs' order — unsorted before the first matchday.
+pub fn other_table(records: &Records, country: u16) -> Vec<(i16, i32)> {
+    const TABLES: &str = "0xb9f8f8";
+    const ENTRY: usize = 0xc;
+    const CLUBS: usize = 8;
+    let Some(e) = records.block(TABLES).and_then(|b| {
+        b.get(usize::from(country) * ENTRY..(usize::from(country) + 1) * ENTRY)
+    }) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(i16, i32)> =
+        (0..CLUBS).map(|k| (k as i16, i32::from(e[4 + k]))).collect();
+    if i16::from_le_bytes([e[2], e[3]]) != 0 {
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+    }
+    rows
+}
 pub const CLUB_RANKING_PAGE: i16 = 0x15;
 
 /// A club of the European club ranking (`DAT_00b080d8`, thirty entries of

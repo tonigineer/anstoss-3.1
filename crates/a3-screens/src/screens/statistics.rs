@@ -184,6 +184,12 @@ const CLUB_RANKING_SHOWN: usize = 25;
 const NEWSPAPER_HEADER: u16 = 4709;
 const NEWSPAPER_COLUMNS: [(u16, u16); 2] = [(0, 0), (0x37, 0)];
 const SHORT_DATE: u16 = 1997;
+/// The Tab. sonstige Länder's header and rows (`FUN_00457449` with
+/// 0x87a458, and 0x87a470), the top three of each, the first red.
+const OTHER_TABLES_HEADER: u16 = 4711;
+const OTHER_TABLES_HEADER_COLUMNS: [(u16, u16); 3] = [(0, 0), (0x1e, 0), (C | 0xe6, 0x32)];
+const OTHER_TABLES_ROW_COLUMNS: [(u16, u16); 3] = [(0, 0), (0x1e, 0), (R | 0xe6, 0x20)];
+const OTHER_TABLES_SHOWN: usize = 3;
 const GOALS_PER_MATCHDAY_HEADER: u16 = 3700;
 const GOALS_PER_MATCHDAY_HEADER_COLUMNS: [(u16, u16); 3] =
     [(C | 3, 0x32), (C | 0x50, 0x28), (C | 0xa0, 0x28)];
@@ -1652,6 +1658,9 @@ impl Statistics {
             Some(statistics::CLUB_RANKING_PAGE) if self.category == AKTUELLES => {
                 self.club_ranking_page(cx, view)
             }
+            Some(statistics::OTHER_TABLES_PAGE) if self.category == AKTUELLES => {
+                self.other_tables_page(cx, view)
+            }
             Some(statistics::NEWSPAPER_PAGE) if self.category == AKTUELLES => {
                 self.newspaper_page(cx, view)
             }
@@ -2981,6 +2990,45 @@ impl Statistics {
             *table = TableState {
                 columns: CLUB_RANKING_ROW_COLUMNS.to_vec(),
                 centred: CLUB_RANKING_SHOWN as i32,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Tab. sonstige Länder (`FUN_00457449`): for each country of its
+    /// list the game does not play in full, its name, an empty row, its
+    /// top three "%d.\t%s\t%d" — the first red — and another empty row;
+    /// from the top of the window.
+    fn other_tables_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let header = game.text(OTHER_TABLES_HEADER).to_owned();
+        set_header(view, dialog, header, &OTHER_TABLES_HEADER_COLUMNS);
+        let line = |text: String, ink| TableRow { text, ink, mark: None, columns: None };
+        let mut rows = Vec::new();
+        for &country in &game.rules.statistics.other_countries {
+            if records.globals.played(country as i16) {
+                continue;
+            }
+            rows.push(line(game.world.nation(country).to_owned(), INK));
+            rows.push(line(String::new(), INK));
+            let table = statistics::other_table(records, country);
+            for (i, &(club, points)) in table.iter().take(OTHER_TABLES_SHOWN).enumerate() {
+                let name = game.club_name(Some(records), country as u8, club);
+                let ink = if i == 0 { OWN_INK } else { INK };
+                rows.push(line(format!("{}.\t{name}\t{points}", i + 1), ink));
+            }
+            rows.push(line(String::new(), INK));
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: OTHER_TABLES_ROW_COLUMNS.to_vec(),
+                centred: -1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,
