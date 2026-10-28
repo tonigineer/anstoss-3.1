@@ -329,6 +329,24 @@ const HOME_GOALS_INK: [u8; 3] = [0xfa, 0, 0];
 const AWAY_GOALS_INK: [u8; 3] = [0, 0, 0xff];
 /// The minutes that count to the first half.
 const FIRST_HALF_MINUTES: usize = 45;
+/// The Formverlauf's texts: header, the line's legend, the axes' labels
+/// ("Woche", "Formpunkte/20"); its scale of 20 over 300 pixels.
+const FORM_HEADER: u16 = 2420;
+const FORM_LEGEND: u16 = 3048;
+const WEEK_LABEL: u16 = 3047;
+const FORM_LABEL: u16 = 3049;
+/// The Mannschaftswerte's: header, the six lines' legends, the value
+/// axis' label ("Punkte/10%"); a scale of 10 over 300 pixels.
+const VALUES_HEADER: u16 = 3495;
+const VALUES_LEGENDS: [u16; 6] = [2528, 2529, 2530, 2531, 2532, 3294];
+const VALUES_LABEL: u16 = 2533;
+/// The six lines' colours (COLORREF 0xff, 0xff0000, 0xff00, 0, 0x808080,
+/// 0xffff), the Formverlauf's line the first.
+const LINE_INKS: [[u8; 3]; 6] =
+    [[255, 0, 0], [0, 0, 255], [0, 255, 0], [0, 0, 0], [128, 128, 128], [255, 255, 0]];
+/// How many pixels a stored point is worth (`DAT_0080db2c`, 1.5).
+const POINT_PIXELS: f64 = 1.5;
+const GRAPH_HEIGHT: i32 = 300;
 /// The Angstgegner's and Lieblingsgegner's header and rows (0x87e530 and
 /// 0x87e4f0 for both): club, games, points, difference, goals and the
 /// goals against behind a colon; the sections at home, away and in all
@@ -1018,6 +1036,115 @@ fn per_matchday(points: i16, played: i16) -> String {
     format!("{}.{:02}", hundredths / 100, hundredths % 100)
 }
 
+/// A line of the graph window (`FUN_0071dec5`'s two lists and
+/// `FUN_0071df4c`'s legend): its points in pixels above the axis, its
+/// colour, its legend.
+struct GraphLine {
+    values: Vec<i32>,
+    colour: [u8; 3],
+    label: String,
+}
+
+/// The graph window's lines as its paint draws them (`FUN_0071e017`), in
+/// a window of `size`: the graph as wide as the window less sixteen and
+/// `height` high, at most the window's less sixteen (`FUN_0071dc15`).
+/// Under it the legend, a coloured box and the label for each line, a
+/// row of them under five lines, two rows of four from five on — and
+/// were the window too low for both, the graph shrunk to make room. The
+/// axes with their arrowheads; a tick on the value axis every
+/// `height` / `y_max` pixels from the bottom, rounded; a tick for each
+/// point along the other, (width − 10) / the longest line apart; each
+/// line from its first point on, a pixel above its value; the axes'
+/// labels at the right end below and at the top left.
+fn line_graph(
+    game: &Game,
+    size: (i32, i32),
+    height: i32,
+    y_max: i32,
+    lines: &[GraphLine],
+    (x_label, y_label): (&str, &str),
+) -> Vec<Shape> {
+    let fonts = game.fonts();
+    let plain = fonts.get(a3_files::rch::PLAIN_FONT);
+    let text_high = plain.map_or(13, |f| f.height() as i32);
+    let width_of = |t: &str| plain.map_or(0, |f| f.width(t, false) as i32);
+    let round = |v: f64| (v + 0.5) as i32;
+    let w = size.0 - 16;
+    let full = if height < 0 || height > size.1 - 16 { size.1 - 16 } else { height };
+    let (mut high, mut span, mut lift) = (full, full, 0);
+    let mut step = span as f32 / y_max as f32;
+    let mut scale = 1.0f32;
+    let black = [0, 0, 0];
+    let mut shapes = Vec::new();
+    let shown = lines.iter().filter(|l| !l.values.is_empty()).count() as i32;
+    if shown > 0 {
+        let (across, legend) =
+            if shown < 5 { (w / shown, text_high + 4) } else { (w / 4, 2 * text_high + 8) };
+        if size.1 < high + legend {
+            scale = (high - legend) as f32 / high as f32;
+            high -= legend;
+            lift = round(f64::from(lift) * f64::from(scale));
+            step *= scale;
+            span = round(f64::from(span) * f64::from(scale));
+        }
+        for (i, line) in lines.iter().take(shown as usize).enumerate() {
+            let i = i as i32;
+            let (x, y) = if i < 4 {
+                (4 + across * i, high + 9)
+            } else {
+                (4 + across * (i - 4), high + legend / 2 + 9)
+            };
+            shapes.push(Shape::Fill { at: (x, y + 4), size: (6, text_high), colour: line.colour });
+            shapes.push(Shape::Text { at: (x + 8, y + 4), text: line.label.clone(), colour: black });
+        }
+    }
+    let mut pen = |from: (i32, i32), to: (i32, i32), colour: [u8; 3]| {
+        if from != to {
+            shapes.push(Shape::Pen { from, to, colour });
+        }
+    };
+    let bottom = full + 9 - lift;
+    pen((3, 7), (6, 1), black);
+    pen((6, 0), (10, 8), black);
+    pen((6, 0), (6, full + 9), black);
+    pen((6, full + 9), (6, bottom), black);
+    pen((6, bottom), (w + 6, bottom), black);
+    pen((w - 1, bottom - 3), (w + 6, bottom), black);
+    pen((w + 6, bottom), (w - 2, bottom + 4), black);
+    let base = 9 + span - lift;
+    let (mut y, mut k) = (base, 0);
+    while y >= 9 {
+        pen((0, y), (6, y), black);
+        y = base - round(f64::from(k) * f64::from(step));
+        k += 1;
+    }
+    let most = lines.iter().map(|l| l.values.len()).max().unwrap_or(0);
+    if most > 0 {
+        let across = (w - 10) as f32 / most as f32;
+        let x_of = |k: usize| round(k as f64 * f64::from(across)) + 6;
+        for k in 0..most {
+            pen((x_of(k), base - 3), (x_of(k), base + 3), black);
+        }
+        let y_of = |v: i32| base - (round(f64::from(v) * f64::from(scale)) + 1);
+        for line in lines.iter().filter(|l| !l.values.is_empty()) {
+            let mut at = (6, y_of(line.values[0]));
+            for (k, &v) in line.values.iter().enumerate().skip(1) {
+                let to = (x_of(k), y_of(v));
+                pen(at, to, line.colour);
+                at = to;
+            }
+        }
+    }
+    if !x_label.is_empty() {
+        let at = (w - width_of(x_label), full - lift + 16);
+        shapes.push(Shape::Text { at, text: x_label.to_owned(), colour: black });
+    }
+    if !y_label.is_empty() {
+        shapes.push(Shape::Text { at: (12, 0), text: y_label.to_owned(), colour: black });
+    }
+    shapes
+}
+
 /// A name from the pool's ids as `FUN_00637cbb` spells it, "%s %s", or
 /// just one of the two where the other's id is 0.
 fn spelled(records: &Records, first: u16, last: u16) -> String {
@@ -1265,6 +1392,11 @@ impl Statistics {
             {
                 self.opponents_page(cx, view, code == statistics::SQUAD_FOES_PAGE)
             }
+            Some(code @ (statistics::SQUAD_FORM_PAGE | statistics::SQUAD_VALUES_PAGE))
+                if self.category == MANNSCHAFT =>
+            {
+                self.weekly_graph_page(cx, view, code == statistics::SQUAD_FORM_PAGE)
+            }
             Some(statistics::SQUAD_GOAL_MINUTES_PAGE) if self.category == MANNSCHAFT => {
                 self.goal_minutes_page(cx, view)
             }
@@ -1482,7 +1614,7 @@ impl Statistics {
                 centred: -1,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars, shapes: Vec::new() }),
+                graph: Some(Graph { bars, steps: axis / 25, shapes: Vec::new() }),
             };
         }
         true
@@ -1678,6 +1810,52 @@ impl Statistics {
         true
     }
 
+    /// The Formverlauf (`FUN_0046f282`) or the Mannschaftswerte
+    /// (`FUN_0046f51d`): the club's weeks as lines in the graph window —
+    /// its form, or its six values, each byte worth one and a half pixels,
+    /// cut — the respect's line starting a week later — under one header
+    /// column.
+    fn weekly_graph_page(&self, cx: &Cx, view: &mut View, form: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        let pixels = |b: u8| (f64::from(b) * POINT_PIXELS) as i32;
+        let (header, lines, y_max, value_label) = if form {
+            let values = statistics::weekly_form(records, team).into_iter().map(pixels).collect();
+            let line =
+                GraphLine { values, colour: LINE_INKS[0], label: game.text(FORM_LEGEND).to_owned() };
+            (FORM_HEADER, vec![line], 20, FORM_LABEL)
+        } else {
+            let weeks = statistics::weekly_values(records, team);
+            let lines = (0..VALUES_LEGENDS.len())
+                .map(|k| GraphLine {
+                    values: weeks.iter().skip(usize::from(k == 5)).map(|w| pixels(w[k])).collect(),
+                    colour: LINE_INKS[k],
+                    label: game.text(VALUES_LEGENDS[k]).to_owned(),
+                })
+                .collect();
+            (VALUES_HEADER, lines, 10, VALUES_LABEL)
+        };
+        set_header(view, dialog, game.text(header).to_owned(), &[(0, 0)]);
+        let rect = dialog.controls[c].rect;
+        let size = (rect.width() as i32, rect.height() as i32);
+        let labels = (game.text(WEEK_LABEL), game.text(value_label));
+        let shapes = line_graph(game, size, GRAPH_HEIGHT, y_max, &lines, labels);
+        if let Some(table) = view.table_mut(c) {
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
+                rows: Vec::new(),
+                width: ROW_WIDTH,
+                scroll: 0,
+                cross: None,
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+            };
+        }
+        true
+    }
+
     /// The Trefferverteilung (`FUN_004704ea`): no table, but the graph
     /// window as a canvas — for the club's goals over the upper axis and
     /// the goals against over the lower (half the height below its top
@@ -1751,7 +1929,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), shapes }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
             };
         }
         true

@@ -4962,6 +4962,55 @@ mod tests {
         assert_eq!(table.rows[12].text, "13.\tLeopold Querfeld\t0\t0\t0\t0\t1\t0");
     }
 
+    /// The Mannschaft category's Formverlauf and Mannschaftswerte draw
+    /// the club's weeks as lines in the graph window, with their legends.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_draws_the_clubs_weeks() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let page = |row: u32| {
+            format!("now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 {row}")
+        };
+        let texts = |shapes: &[Shape]| -> Vec<String> {
+            shapes
+                .iter()
+                .filter_map(|s| match s {
+                    Shape::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let Some(runner) = on_save(&game, "A", &page(12)) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Formverlauf");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        assert_eq!(texts(shapes), ["Mannschaftsform", "Woche", "Formpunkte/20"]);
+        // Nine weeks of form: eight red segments.
+        let red = shapes
+            .iter()
+            .filter(|s| matches!(s, Shape::Pen { colour: [255, 0, 0], .. }))
+            .count();
+        assert_eq!(red, 8);
+        let Some(runner) = on_save(&game, "A", &page(11)) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Verlauf Mannschaftswerte");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        assert_eq!(
+            texts(shapes)[..6],
+            ["Siegeswille", "Stimmung", "Eingespieltheit", "Kondition", "Frische", "Respekt"]
+        );
+        // The respect's line starts a week later: seven segments.
+        let yellow = shapes
+            .iter()
+            .filter(|s| matches!(s, Shape::Pen { colour: [255, 255, 0], .. }))
+            .count();
+        assert_eq!(yellow, 7);
+    }
+
     /// The Mannschaft category's Trefferverteilung draws the club's goals
     /// and those against it minute by minute, and counts them by half.
     #[test]

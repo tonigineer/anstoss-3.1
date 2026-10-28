@@ -333,6 +333,10 @@ pub const SQUAD_GRADES_PAGE: i16 = 0xf;
 pub const SQUAD_TRANSFERS_PAGE: i16 = 8;
 /// The Trefferverteilung under 2415 (`FUN_004704ea`).
 pub const SQUAD_GOAL_MINUTES_PAGE: i16 = 0xb;
+/// The Formverlauf and the Mannschaftswerte, line graphs under 2420 and
+/// 3495 (`FUN_0046f282`, `FUN_0046f51d`).
+pub const SQUAD_FORM_PAGE: i16 = 0x11;
+pub const SQUAD_VALUES_PAGE: i16 = 0x10;
 /// The Spielertrends under 2421 (`FUN_0046dbe2`).
 pub const SQUAD_TRENDS_PAGE: i16 = 7;
 /// The Angstgegner and the Lieblingsgegner under 3040 and 3039
@@ -511,6 +515,32 @@ pub fn goal_minutes(records: &Records, team: &Team) -> [[[u8; 2]; 100]; 2] {
         }
     }
     minutes
+}
+
+/// The weeks a human club keeps of itself in its extra block, at most
+/// fifty: its form week by week (`FUN_006325ca`, a count at +0xb5c and the
+/// bytes from +0xb5e), and the team's values (`FUN_00632833`, a count at
+/// +0xb90 and seven bytes a week from +0xb92 — will to win, mood,
+/// cohesion, condition, freshness, respect and one more).
+pub fn weekly_form(records: &Records, team: &Team) -> Vec<u8> {
+    weekly(records, team, 0xb5c, 1).into_iter().map(|w| w[0]).collect()
+}
+
+pub fn weekly_values(records: &Records, team: &Team) -> Vec<[u8; 7]> {
+    weekly(records, team, 0xb90, 7)
+        .into_iter()
+        .map(|w| std::array::from_fn(|k| w.get(k).copied().unwrap_or(0)))
+        .collect()
+}
+
+fn weekly(records: &Records, team: &Team, at: usize, size: usize) -> Vec<Vec<u8>> {
+    const MOST: usize = 50;
+    let Some(slot) = usize::from(team.human()).checked_sub(1) else { return Vec::new() };
+    let Some(extra) = records.extras.get(slot) else { return Vec::new() };
+    let count = usize::try_from(extra.get::<i16>(at)).unwrap_or(0).min(MOST);
+    (0..count)
+        .map(|k| (0..size).map(|b| extra.get::<u8>(at + 2 + k * size + b)).collect())
+        .collect()
 }
 
 /// The club's league record against one club of its country

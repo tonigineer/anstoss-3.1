@@ -18,7 +18,7 @@ use image::{Rgba, RgbaImage, imageops};
 
 use super::{combo, slider};
 use super::list::{HANDLES, MIN_HANDLE, SCROLLBAR_WIDTH, TRACKS, TRACK_LEFT, TRACK_WIDTH};
-use crate::classic::{Paint, SCROLL_DOWN, SCROLL_UP, fill, line, paste};
+use crate::classic::{Paint, SCROLL_DOWN, SCROLL_UP, fill, line, paste, pen_line};
 
 /// A row's height, and the most rows shown.
 const ROW: i32 = 14;
@@ -81,6 +81,8 @@ pub struct Graph {
     /// window's width less sixteen), green where the value is negative
     /// (the colour at `+500` is then 0xff00).
     pub bars: Vec<(i32, bool)>,
+    /// How many steps the axis has (`+0xf0`), a tick at each end of one.
+    pub steps: i32,
     /// The canvas's drawing, in its order; the bars are left out then.
     pub shapes: Vec<Shape>,
 }
@@ -88,11 +90,14 @@ pub struct Graph {
 /// What a page draws on the canvas, opaque in its colour: a box
 /// (`FUN_0071f9d8`, nothing where it has no width or height), a line from
 /// the pen's place (`FUN_0071f8df`, `FUN_0071f904`) and a text in the
-/// plain font (`FUN_0071fa93`).
+/// plain font (`FUN_0071fa93`); and the line graph's lines, which its own
+/// paint draws with the window's pen as the goal graph's axes, stopping
+/// short of their end (`FUN_0079d9ec`, `FUN_0079da0b`).
 #[derive(Clone, Debug)]
 pub enum Shape {
     Fill { at: (i32, i32), size: (i32, i32), colour: [u8; 3] },
     Line { from: (i32, i32), to: (i32, i32), colour: [u8; 3] },
+    Pen { from: (i32, i32), to: (i32, i32), colour: [u8; 3] },
     Text { at: (i32, i32), text: String, colour: [u8; 3] },
 }
 
@@ -329,6 +334,7 @@ impl TableState {
                     line(area, *from, *to, ink(*colour));
                     fill(area, to.0, to.1, 1, 1, ink(*colour));
                 }
+                Shape::Pen { from, to, colour } => pen_line(area, *from, *to, ink(*colour)),
                 Shape::Text { at: (x, y), text, colour } => {
                     font.draw(area, *x, *y, text, ink(*colour), false);
                 }
@@ -361,12 +367,19 @@ impl TableState {
             let [r, g, b] = row.ink;
             font.draw(area, 7, y + 1, &row.text, Rgba([r, g, b, 255]), false);
         }
-        line(area, (0, 7), (3, 1), black);
-        line(area, (3, 0), (7, 8), black);
-        line(area, (3, 0), (3, axis_y), black);
-        line(area, (3, axis_y), (right + 0xf, axis_y), black);
-        line(area, (right + 8, axis_y - 3), (right + 0xf, axis_y), black);
-        line(area, (right + 0xf, axis_y), (right + 7, axis_y + 4), black);
+        pen_line(area, (0, 7), (3, 1), black);
+        pen_line(area, (3, 0), (7, 8), black);
+        pen_line(area, (3, 0), (3, axis_y), black);
+        pen_line(area, (3, axis_y), (right + 0xf, axis_y), black);
+        pen_line(area, (right + 8, axis_y - 3), (right + 0xf, axis_y), black);
+        pen_line(area, (right + 0xf, axis_y), (right + 7, axis_y + 4), black);
+        // A tick down from the axis at each step's end, the width shared
+        // out among the steps in a float and rounded.
+        let step = if graph.steps > 0 { right as f32 / graph.steps as f32 } else { 0.0 };
+        for k in 0..=graph.steps.max(0) {
+            let x = (f64::from(k) * f64::from(step) + 0.5) as i32 + 3;
+            pen_line(area, (x, axis_y), (x, axis_y + 7), black);
+        }
     }
 
     /// The numbers over the cross-table's columns, at the bar's height:
