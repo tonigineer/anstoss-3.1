@@ -315,6 +315,9 @@ pub const ELFMETER_PAGE: i16 = 4;
 /// Chancenverwertung between them list clubs instead, under 0xaa1 and
 /// 0xaa2 (`FUN_0044bb6d`, `FUN_0044c08e`).
 pub const KILLER_PAGE: i16 = 5;
+/// The Treter under 0xaa0 (`FUN_0044b6e0`), shown from the second
+/// department on.
+pub const TRETER_PAGE: i16 = 9;
 pub const FAIRNESS_PAGE: i16 = 6;
 pub const CHANCEN_PAGE: i16 = 7;
 pub const EIGENTORE_PAGE: i16 = 8;
@@ -329,7 +332,7 @@ pub struct LigaRow {
     pub last: u16,
     /// The club's number in its country.
     pub team: i16,
-    pub values: [u8; 6],
+    pub values: [u16; 6],
 }
 
 /// The block holding this season's player lists (`DAT_00b0b6b8`): the
@@ -394,7 +397,7 @@ pub fn torjaeger(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
                 first: u16::from_le_bytes([e[2], e[3]]),
                 last: u16::from_le_bytes([e[4], e[5]]),
                 team: i16::from(e[7]),
-                values: [e[8], e[10], e[11], e[12], e[13], e[14]],
+                values: [e[8], e[10], e[11], e[12], e[13], e[14]].map(u16::from),
             })
         })
         .collect()
@@ -419,7 +422,7 @@ fn short_list(records: &Records, country: u16, level: u8, which: usize) -> Vec<L
                 first: u16::from_le_bytes([e[0], e[1]]),
                 last: u16::from_le_bytes([e[2], e[3]]),
                 team: i16::from(e[4]),
-                values: [e[5], e[6], e[7], e[8], e[9], 0],
+                values: [e[5], e[6], e[7], e[8], e[9], 0].map(u16::from),
             })
         })
         .collect()
@@ -457,7 +460,7 @@ pub fn elfmeterkiller(records: &Records, country: u16, level: u8) -> Vec<LigaRow
                 first: u16::from_le_bytes([e[0], e[1]]),
                 last: u16::from_le_bytes([e[2], e[3]]),
                 team: i16::from(e[4]),
-                values: [e[5], e[6], 0, 0, 0, 0],
+                values: [e[5], e[6], 0, 0, 0, 0].map(u16::from),
             })
         })
         .collect()
@@ -477,7 +480,7 @@ pub fn eigentore(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
                 first: u16::from_le_bytes([e[4], e[5]]),
                 last: u16::from_le_bytes([e[6], e[7]]),
                 team: i16::from(e[0]),
-                values: [e[1], 0, 0, 0, 0, 0],
+                values: [e[1], 0, 0, 0, 0, 0].map(u16::from),
             })
         })
         .collect()
@@ -887,6 +890,33 @@ pub fn chancen(records: &Records, country: u16, level: u8) -> Vec<ChanceRow> {
     rows
 }
 
+/// The card collectors' list (`DAT_00b1283e`): twenty entries of 10 as
+/// the keepers', his red, yellow-red and yellow cards behind the club's
+/// number (`L+0x33`, `L+0x34`, `L+0x32`).
+const TRETER_LIST: usize = 0x7186;
+
+/// The Treter (`FUN_0044b6e0`): the players with a card, their points
+/// reckoned on the page — five a red card, three a yellow-red, one a
+/// yellow — in the list's order, then the three counts.
+pub fn treter(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    let Some(b) = list_bytes(records, country, level, TRETER_LIST, 200, 10, 0x14) else {
+        return Vec::new();
+    };
+    (0..0x14)
+        .filter_map(|i| {
+            let e = &b[i * 10..i * 10 + 10];
+            let [red, yellow_red, yellow] = [e[5], e[6], e[7]].map(u16::from);
+            let points = red * 5 + yellow_red * 3 + yellow;
+            (points != 0).then(|| LigaRow {
+                first: u16::from_le_bytes([e[0], e[1]]),
+                last: u16::from_le_bytes([e[2], e[3]]),
+                team: i16::from(e[4]),
+                values: [points, red, yellow_red, yellow, 0, 0],
+            })
+        })
+        .collect()
+}
+
 /// The league's scorers and assisters this season (`FUN_0044a3fa`): the
 /// saved list's twenty entries; his point, goals, the matchdays he
 /// scored and assisted on and his assists stand in the columns.
@@ -901,7 +931,7 @@ pub fn scorers(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
                 first: u16::from_le_bytes([e[0], e[1]]),
                 last: u16::from_le_bytes([e[2], e[3]]),
                 team: i16::from(e[4]),
-                values: [e[5], e[6], e[7], e[8], e[9], 0],
+                values: [e[5], e[6], e[7], e[8], e[9], 0].map(u16::from),
             })
         })
         .collect()

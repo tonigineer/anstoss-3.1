@@ -4984,6 +4984,28 @@ mod tests {
         assert!(table.rows.is_empty());
     }
 
+    /// The Treter, open with the statistics department raised, weighs each
+    /// player's cards as the Fairneß does a club's.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_weighs_the_leagues_players_cards() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 9";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tPkt\\tRot\\tGeR\\tGelb"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 20);
+        assert_eq!(table.centred, -1);
+        assert_eq!(table.rows[0].text, "1.\tMuheim, M\tHamburger SV\t7\t1\t0\t2");
+        assert_eq!(table.rows[2].text, "3.\tLeite, D\t1.FC Union Berlin\t5\t1\t0\t0");
+        assert_eq!(table.rows[2].ink, [0, 0, 255]);
+    }
+
     /// The Fairneß ranks the league's clubs by their cards' points and
     /// closes with the season's record for one match.
     #[test]

@@ -234,6 +234,28 @@ const KILLER_COLUMNS: [(u16, u16); 5] = [
     (C | 0x10e, 0x32),
     (C | 0x14a, 0x32),
 ];
+/// The Treter's header and rows (`FUN_0044b6e0` with 0x8799f0, and
+/// 0x8799b8): rank, name, club, points and the three kinds of cards, the
+/// last centred.
+const TRETER_HEADER: u16 = 0xaa0;
+const TRETER_HEADER_COLUMNS: [(u16, u16); 7] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0x82, 0),
+    (C | 0x102, 0x1e),
+    (C | 0x122, 0x1e),
+    (C | 0x140, 0x1e),
+    (C | 0x15e, 0x28),
+];
+const TRETER_ROW_COLUMNS: [(u16, u16); 7] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0x82, 0),
+    (R | 0xfa, 0x1e),
+    (R | 0x118, 0x1e),
+    (R | 0x136, 0x1e),
+    (C | 0x15e, 0x28),
+];
 const EIGENTORE_COLUMNS: [(u16, u16); 4] = [
     (R, 0x14),
     (0x19, 0),
@@ -762,6 +784,7 @@ impl Statistics {
             }
             Some(code @ (statistics::TOR_PAGE..=statistics::ELFMETER_PAGE
                 | statistics::KILLER_PAGE
+                | statistics::TRETER_PAGE
                 | statistics::EIGENTORE_PAGE))
                 if self.category == LIGA =>
             {
@@ -1044,6 +1067,15 @@ impl Statistics {
                 statistics::elfmeterkiller(records, country, level),
                 2,
                 true,
+                false,
+            ),
+            statistics::TRETER_PAGE => (
+                TRETER_HEADER,
+                &TRETER_HEADER_COLUMNS[..],
+                &TRETER_ROW_COLUMNS[..],
+                statistics::treter(records, country, level),
+                4,
+                false,
                 false,
             ),
             statistics::EIGENTORE_PAGE => (
