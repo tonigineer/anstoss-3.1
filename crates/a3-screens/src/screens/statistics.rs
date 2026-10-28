@@ -273,6 +273,15 @@ const RECORD_COLUMNS: [(u16, u16); 2] = [(0, 0x8c), (0xc8, 0)];
 const AGE_HEADER: u16 = 0xdd9;
 const AGE_COLUMNS: [(u16, u16); 5] =
     [(R, 0x14), (0x19, 0), (C | 0xc8, 0x32), (C | 0xfa, 0x32), (C | 0x12c, 0x32)];
+/// The Ausländer's header and rows (`FUN_0044d117` with 0x879ba8 and
+/// 0x879bc8): rank, club, foreigners and nations — and a fifth column
+/// the page declares over blocks of four, its place and width read from
+/// the next block's first words; no text ever stands in it.
+const FOREIGN_HEADER: u16 = 0xe75;
+const FOREIGN_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(R, 0x14), (0x19, 0), (R | 0xc8, 0x37), (R | 0xff, 0x3c), (0x14, 0x8000)];
+const FOREIGN_ROW_COLUMNS: [(u16, u16); 5] =
+    [(R, 0x14), (0x19, 0), (R | 0xc8, 0x32), (R | 0xfa, 0x32), (0x14, 0x8000)];
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -726,7 +735,11 @@ impl Statistics {
             Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
                 self.chance_page(cx, view)
             }
-            Some(statistics::AGE_PAGE) if self.category == LIGA => self.age_page(cx, view),
+            Some(code @ (statistics::AGE_PAGE | statistics::FOREIGN_PAGE))
+                if self.category == LIGA =>
+            {
+                self.squad_page(cx, view, code)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -1108,37 +1121,49 @@ impl Statistics {
         true
     }
 
-    /// The Durchschnittsalter (`FUN_0044cd71`): the league's clubs by
-    /// their squads' mean age, the youngest first,
-    /// "%d.\t%s\t%3.1f\t%d\t%d" from the top of the window, the own club
-    /// red.
-    fn age_page(&self, cx: &Cx, view: &mut View) -> bool {
+    /// The pages of the squads' figures, from the top of the window, the
+    /// own club red: the Durchschnittsalter (`FUN_0044cd71`), the youngest
+    /// squad first, "%d.\t%s\t%3.1f\t%d\t%d"; the Ausländer
+    /// (`FUN_0044d117`), the most foreigners first, "%d.\t%s\t%d\t%d".
+    fn squad_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(today) = cx.state.season.as_ref().map(|s| s.date()) else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
-        set_header(view, dialog, game.text(AGE_HEADER).to_owned(), &AGE_COLUMNS);
+        let ages = code == statistics::AGE_PAGE;
+        let (header, header_columns, columns) = if ages {
+            (AGE_HEADER, &AGE_COLUMNS, &AGE_COLUMNS)
+        } else {
+            (FOREIGN_HEADER, &FOREIGN_HEADER_COLUMNS, &FOREIGN_ROW_COLUMNS)
+        };
+        set_header(view, dialog, game.text(header).to_owned(), header_columns);
         let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
         let figures = statistics::club_figures(records, country, level, today);
-        let rows = statistics::by_age(figures)
+        let sorted =
+            if ages { statistics::by_age(figures) } else { statistics::by_foreigners(figures) };
+        let rows = sorted
             .iter()
             .enumerate()
             .map(|(i, row)| {
                 let club = game.club_name(Some(records), country as u8, row.team);
-                let text = format!(
-                    "{}.\t{club}\t{}\t{}\t{}",
-                    i + 1,
-                    one_place(row.average_age),
-                    row.under_22,
-                    row.over_30
-                );
+                let text = if ages {
+                    format!(
+                        "{}.\t{club}\t{}\t{}\t{}",
+                        i + 1,
+                        one_place(row.average_age),
+                        row.under_22,
+                        row.over_30
+                    )
+                } else {
+                    format!("{}.\t{club}\t{}\t{}", i + 1, row.foreigners, row.nations)
+                };
                 let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
                 TableRow { text, ink, mark: None, columns: None }
             })
             .collect();
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {
-                columns: AGE_COLUMNS.to_vec(),
+                columns: columns.to_vec(),
                 rows,
                 width: ROW_WIDTH,
                 centred: -1,

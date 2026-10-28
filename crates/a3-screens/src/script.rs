@@ -5035,6 +5035,29 @@ mod tests {
         assert_eq!(table.rows[17].text, "18.\tFC Bayern München\t26.7\t3\t4");
     }
 
+    /// The Ausländer counts each squad's foreigners and their nations.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_counts_the_leagues_foreigners() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 11";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tVerein\\tAnzahl\\tNationen"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.rows[0].text, "1.\tBayer 04 Leverkusen\t22\t12");
+        // Equal foreigners part by their nations.
+        assert_eq!(table.rows[1].text, "2.\tSV Werder Bremen\t21\t15");
+        assert_eq!(table.rows[7].text, "8.\t1.FC Union Berlin\t18\t15");
+        assert_eq!(table.rows[7].ink, [255, 0, 0]);
+        assert_eq!(table.rows[17].text, "18.\t1.FC Heidenheim\t4\t3");
+    }
+
     /// The Chancenverwertung reckons each club's quote of goals from its
     /// chances and ranks the league by it.
     #[test]

@@ -536,8 +536,10 @@ pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
 }
 
 /// The Liga's club pages from Mannschaftsübersicht on, by their codes:
-/// Durchschnittsalter under 0xdd9 (`FUN_0044cd71`).
+/// Durchschnittsalter under 0xdd9 (`FUN_0044cd71`), Ausländer under 0xe75
+/// (`FUN_0044d117`).
 pub const AGE_PAGE: i16 = 0xc;
+pub const FOREIGN_PAGE: i16 = 0xe;
 
 /// A club's figures as `FUN_00642cd4` gathers them for the club pages,
 /// an entry of 0x1c bytes each: its number, its squad, their mean age
@@ -613,6 +615,20 @@ pub fn by_age(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
     for i in 0..rows.len() {
         for j in i + 1..rows.len() {
             if rows[j].average_age < rows[i].average_age {
+                rows.swap(i, j);
+            }
+        }
+    }
+    rows
+}
+
+/// The Ausländer's order (`FUN_0044d117`): the most foreigners first,
+/// on a tie the more nations, by the same exchange sort.
+pub fn by_foreigners(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            let (a, b) = (&rows[i], &rows[j]);
+            if a.foreigners < b.foreigners || a.foreigners == b.foreigners && a.nations < b.nations {
                 rows.swap(i, j);
             }
         }
