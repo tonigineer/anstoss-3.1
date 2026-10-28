@@ -4937,6 +4937,35 @@ mod tests {
         assert_eq!(texts, ["Abwehr", "Mittelfeld", "Sturm", "Woche", "Formpunkte/20"]);
     }
 
+    /// With the department raised the Mannschaft category's
+    /// Fairneßvergleich weighs each match's fair-play points, both sides.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_compares_the_matches_fairness() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 17";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Fairneßvergleich\\tPunkte\\tErgebnis"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "Hamburger SV\t-\t1.FC Union Berlin\t2\t:1\t0\t:3",
+                "1.FC Union Berlin\t-\tBorussia Dortmund\t3\t:0\t1\t:2",
+                "VfL Wolfsburg\t-\t1.FC Union Berlin\t0\t:6\t2\t:0",
+                "Punkte total :\t10\tAuswärts:\t7",
+                "Punkte Gäste:\t2\tG. Auswärts:\t0"
+            ]
+        );
+        assert_eq!(table.rows[1].ink, [255, 0, 0]);
+    }
+
     /// With the department raised the Mannschaft category's Chancen lists
     /// each match's chances and goals and the two sides' rates.
     #[test]

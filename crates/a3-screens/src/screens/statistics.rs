@@ -314,6 +314,30 @@ const NO_TRANSFER: u16 = 3690;
 const TRANSFER_INCOME: [u8; 2] = [2, 3];
 /// The most rows shown, the newest.
 const TRANSFERS_SHOWN: usize = 90;
+/// The Fairneßvergleich's header (`FUN_0046a76a` with 0x87e2f0), rows
+/// (0x87e2b0) and the totals' own columns (0x87e318), with their texts.
+const FAIR_MATCHES_HEADER: u16 = 2416;
+const FAIR_MATCHES_HEADER_COLUMNS: [(u16, u16); 3] =
+    [(0, 0), (C | 0x140, 0x37), (C | 0x17c, 0x37)];
+const FAIR_MATCHES_ROW_COLUMNS: [(u16, u16); 8] = [
+    (0, 0),
+    (0xa5, 8),
+    (0xaa, 0),
+    (R | 0x140, 0x1b),
+    (0x15e, 0x1e),
+    (R | 0x17c, 0x1b),
+    (0x19a, 0x1e),
+    (0, 0),
+];
+const FAIR_MATCHES_TOTAL_COLUMNS: [(u16, u16); 5] =
+    [(0, 0), (R | 0x78, 0x1e), (0xc8, 0), (R | 0x12c, 0x1e), (0, 0)];
+const FAIR_TOTAL: u16 = 2417;
+const FAIR_GUESTS: u16 = 2418;
+/// The own home matches' rows (COLORREF 0xff), the points' bits and the
+/// flag beside them.
+const FAIR_HOME_INK: [u8; 3] = [255, 0, 0];
+const FAIR_POINTS: u8 = 0x7f;
+const FAIR_FLAG: u8 = 0x80;
 /// The Chancen's header (`FUN_00469067` with 0x87e060), rows (0x87e020)
 /// and the two totals' own columns (0x87e0a0); the totals' texts, which
 /// carry their tabs as "\t".
@@ -1531,6 +1555,9 @@ impl Statistics {
             Some(statistics::SQUAD_TEAM_GRADES_PAGE) if self.category == MANNSCHAFT => {
                 self.team_grades_page(cx, view)
             }
+            Some(statistics::SQUAD_FAIRNESS_MATCHES_PAGE) if self.category == MANNSCHAFT => {
+                self.fair_matches_page(cx, view)
+            }
             Some(statistics::SQUAD_CHANCES_PAGE) if self.category == MANNSCHAFT => {
                 self.chances_page(cx, view)
             }
@@ -2025,8 +2052,9 @@ impl Statistics {
             .zip(TEAM_GRADES_LEGENDS.iter().zip(TEAM_GRADES_INKS))
             .map(|(grades, (&legend, colour))| {
                 let first = grades.first().copied().unwrap_or(0);
+                let points = std::iter::once(first).chain(grades.iter().copied());
                 GraphLine {
-                    values: std::iter::once(first).chain(grades.iter().copied()).map(point).collect(),
+                    values: points.map(point).collect(),
                     colour,
                     label: game.text(legend).to_owned(),
                 }
@@ -2045,6 +2073,70 @@ impl Statistics {
                 scroll: 0,
                 cross: None,
                 graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+            };
+        }
+        true
+    }
+
+    /// The Fairneßvergleich (`FUN_0046a76a`): each league match played,
+    /// "%s\t-\t%s\t%d\t:%d\t%d\t:%d" — the sides, their fair-play points
+    /// and goals, home first, the own home matches red — and two lines of
+    /// totals in five columns of their own, as coded: the club's points
+    /// and those of the matches its byte flags; then the opponents' points
+    /// in those, and in the others the opponents' whole bytes, flag and
+    /// all. The window is handed the season's fixtures and two more.
+    fn fair_matches_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let header = game.text(FAIR_MATCHES_HEADER).to_owned();
+        set_header(view, dialog, header, &FAIR_MATCHES_HEADER_COLUMNS);
+        let country = team.country();
+        let own = game.club_name(Some(records), country, i16::from(team.number()));
+        let mut rows: Vec<TableRow> = Vec::new();
+        let (mut own_all, mut own_flagged, mut theirs_flagged, mut theirs_other) = (0, 0, 0, 0);
+        for m in statistics::fair_matches(records, &game.calendar, team) {
+            let other = game.club_name(Some(records), country, m.opponent);
+            let [own_byte, their_byte] = m.points;
+            let (own_points, their_points) = (own_byte & FAIR_POINTS, their_byte & FAIR_POINTS);
+            let [h, a] = m.goals;
+            let (sides, points, ink) = if m.home {
+                ((&own, &other), (own_points, their_points), FAIR_HOME_INK)
+            } else {
+                ((&other, &own), (their_points, own_points), INK)
+            };
+            let text = format!(
+                "{}\t-\t{}\t{}\t:{}\t{h}\t:{a}",
+                sides.0, sides.1, points.0, points.1
+            );
+            rows.push(TableRow { text, ink, mark: None, columns: None });
+            own_all += i32::from(own_points);
+            if own_byte >= FAIR_FLAG {
+                own_flagged += i32::from(own_points);
+                theirs_flagged += i32::from(their_points);
+            } else {
+                theirs_other += i32::from(their_byte);
+            }
+        }
+        let text = |id: u16| game.text(id).replace("\\t", "\t");
+        let lines = [
+            super::finances::printf(&text(FAIR_TOTAL), &[&own_all, &own_flagged]),
+            super::finances::printf(&text(FAIR_GUESTS), &[&theirs_flagged, &theirs_other]),
+        ];
+        for line in lines {
+            let columns = Some(FAIR_MATCHES_TOTAL_COLUMNS.to_vec());
+            rows.push(TableRow { text: line, ink: INK, mark: None, columns });
+        }
+        let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team).len();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FAIR_MATCHES_ROW_COLUMNS.to_vec(),
+                centred: fixtures as i32 + 2,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
             };
         }
         true

@@ -322,6 +322,9 @@ pub const SQUAD_HOME_SCORERS_PAGE: i16 = 0x12;
 /// The Einsätze hintereinander under 2408 (`FUN_0046895a`), from the
 /// second department on.
 pub const SQUAD_IN_A_ROW_PAGE: i16 = 0x15;
+/// The Fairneßvergleich under 2416 (`FUN_0046a76a`), from the second
+/// department on.
+pub const SQUAD_FAIRNESS_MATCHES_PAGE: i16 = 0x16;
 /// The Chancen under 2410 (`FUN_00469067`), from the second department on.
 pub const SQUAD_CHANCES_PAGE: i16 = 0x14;
 /// The Notenschnitt Mannschaft, a line graph under 2419 (`FUN_0046ee67`),
@@ -604,6 +607,51 @@ pub fn chance_matches(records: &Records, team: &Team) -> Vec<ChanceMatch> {
                 home: at_home,
                 opponent: league.team(other),
                 chances: [chances_on(OWN_CHANCES, md), chances_on(THEIR_CHANCES, md)],
+                goals: [h, a],
+            })
+        })
+        .collect()
+}
+
+/// A league match of the club this season with its fair-play points
+/// (`FUN_0046a76a`): whether at home, the other club's number, the two
+/// bytes of the club's and the opponent's points that day (the extra
+/// block's +0xaa4 and +0xad2 by fixture, `FUN_006321fe`: the points in
+/// the low seven bits, a flag in the eighth) and the goals, home first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FairMatch {
+    pub home: bool,
+    pub opponent: i16,
+    pub points: [u8; 2],
+    pub goals: [u8; 2],
+}
+
+/// The club's fixtures (`FUN_0062af24`) as far as its league has played
+/// (the league copy's +0x1a), those with a result.
+pub fn fair_matches(
+    records: &Records,
+    calendar: &crate::calendar::Calendar,
+    team: &Team,
+) -> Vec<FairMatch> {
+    const OWN: usize = 0xaa4;
+    const THEIRS: usize = 0xad2;
+    let Some(league) = League::of(records, team.country().into(), team.level()) else {
+        return Vec::new();
+    };
+    let extra = usize::from(team.human()).checked_sub(1).and_then(|s| records.extras.get(s));
+    let byte = |at: usize, k: usize| extra.map_or(0, |e| e.get::<u8>(at + k));
+    let place = usize::from(team.league_place());
+    crate::opponent::fixture_days(records, calendar, team)
+        .iter()
+        .take(league.played())
+        .enumerate()
+        .filter_map(|(k, f)| {
+            let (_, _, goals) = league.result(k + 1, place)?;
+            let (h, a) = goals?;
+            Some(FairMatch {
+                home: f.home,
+                opponent: f.opponent,
+                points: [byte(OWN, k), byte(THEIRS, k)],
                 goals: [h, a],
             })
         })
