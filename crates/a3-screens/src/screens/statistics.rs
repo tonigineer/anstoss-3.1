@@ -28,6 +28,7 @@ use bevy_math::Rect;
 use super::hub::{self, STATISTICS_SYMBOL};
 use super::squad::own_team;
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
+use crate::controls::bitmap::Picture;
 use crate::controls::slider;
 use crate::controls::table::{Graph, Shape, TableRow, TableState};
 use crate::game::Game;
@@ -211,6 +212,22 @@ const QUALIFIER_PAIRS: usize = 3;
 const QUALIFIER_LINES: usize = 6;
 /// The Serien's header, one column.
 const SERIES_HEADER: u16 = 2928;
+/// The Elf des Tages' header, and each place's corner on the canvas, from
+/// the keeper at the bottom to the strikers at the top (`FUN_00451e0d`).
+const DAY_ELEVEN_HEADER: u16 = 2975;
+const DAY_ELEVEN_PLACES: [(i32, i32); 11] = [
+    (194, 305),
+    (194, 240),
+    (72, 200),
+    (318, 200),
+    (32, 140),
+    (356, 140),
+    (62, 55),
+    (338, 55),
+    (194, 100),
+    (100, 0),
+    (288, 0),
+];
 /// The Letzter Spieltag's header and rows (`FUN_0045491f` with 0x87a1d8,
 /// and 0x87a1a0): the pairing, its result and half time, its gate.
 const LAST_MATCHDAY_HEADER: u16 = 3530;
@@ -1709,6 +1726,9 @@ impl Statistics {
             }
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
+            }
+            Some(statistics::DAY_ELEVEN_PAGE) if self.category == AKTUELLES => {
+                self.day_eleven_page(cx, view)
             }
             Some(statistics::OTHER_TABLES_PAGE) if self.category == AKTUELLES => {
                 self.other_tables_page(cx, view)
@@ -3211,6 +3231,48 @@ impl Statistics {
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Elf des Tages (`FUN_00451e0d`): the league's team of the day on
+    /// the canvas, each player at his place with the crest of the club he
+    /// plays for now at its own size left of it (`FUN_00696161`), and in
+    /// black his name over the club he played for that day.
+    fn day_eleven_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(DAY_ELEVEN_HEADER).to_owned(), &[(0, 0)]);
+        let black = [0, 0, 0];
+        let mut shapes = Vec::new();
+        let eleven = statistics::day_eleven(records, country, level);
+        for (&(id, team), &(x, y)) in eleven.iter().zip(&DAY_ELEVEN_PLACES) {
+            let Some(player) = records.player(id) else { continue };
+            let [nation, number] = player.club();
+            let file = game.world.slot_of(nation.into()).and_then(|slot| {
+                game.rules.crest(&game.world, Some(records), (slot, usize::from(number)))
+            });
+            let crest = file.map(|file| Picture { black_clear: false, ..Picture::file(file) });
+            if let Some(image) = crest.and_then(|p| p.load(game).ok()) {
+                shapes.push(Shape::Image { at: (x - 32, y), image });
+            }
+            let text = records.known_as(id).unwrap_or_default();
+            shapes.push(Shape::Text { at: (x + 2, y + 2), text, colour: black });
+            let text = game.club_name(Some(records), country as u8, i16::from(team));
+            shapes.push(Shape::Text { at: (x + 2, y + 17), text, colour: black });
+        }
+        if let Some(table) = view.table_mut(c) {
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
+                rows: Vec::new(),
+                width: ROW_WIDTH,
+                scroll: 0,
+                cross: None,
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
             };
         }
         true

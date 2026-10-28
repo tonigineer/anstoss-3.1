@@ -1033,6 +1033,8 @@ pub const SERIES_PAGE: i16 = 1;
 pub const LAST_MATCHDAY_PAGE: i16 = 6;
 /// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
+/// The Elf des Tages under 2975 (`FUN_00451e0d`).
+pub const DAY_ELEVEN_PAGE: i16 = 3;
 
 /// The human club's runs (`FUN_00632de8`: 0x56 bytes at its extra block's
 /// +0xd88), as the Serien states them (`FUN_0044ffb3`): each run that has
@@ -1317,6 +1319,23 @@ pub fn goals_per_matchday(league: &League) -> Vec<i32> {
                 .sum()
         })
         .collect()
+}
+
+/// The league's Elf des Tages (`FUN_00451e0d`, `DAT_00b1300c` in the
+/// lists block, 0x2c a league): its eleven players' ids, 0 an empty
+/// place, each with the number of the club he played for that day.
+const DAY_ELEVEN: usize = 0x7954;
+const DAY_ELEVEN_LEAGUE: usize = 0x2c;
+
+pub fn day_eleven(records: &Records, country: u16, level: u8) -> [(u16, u8); 11] {
+    let mut eleven = [(0, 0); 11];
+    let b = list_bytes(records, country, level, DAY_ELEVEN, DAY_ELEVEN_LEAGUE, 0x2c, 1);
+    if let Some(b) = b {
+        for (i, place) in eleven.iter_mut().enumerate() {
+            *place = (u16::from_le_bytes([b[2 * i], b[2 * i + 1]]), b[0x16 + i]);
+        }
+    }
+    eleven
 }
 
 /// A referee of a country's list (`FUN_0072172c`: forty entries of 0x24

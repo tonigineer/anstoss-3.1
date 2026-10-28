@@ -5080,6 +5080,37 @@ mod tests {
         assert_eq!(table.rows[3].text, "1.\tSpanien\t5\t13\t9\t14\t:\t5");
     }
 
+    /// The Aktuelles category's Elf des Tages puts the league's team of
+    /// the day on the canvas: a crest left of each player, his name over
+    /// the club he played for, the keeper at the bottom.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_eleven_of_the_day() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 0";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Elf des Tages");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        let texts: Vec<_> = shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::Text { at, text, .. } => Some((*at, text.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts.len(), 22);
+        assert_eq!(texts[0], ((196, 307), "Alexander Nübel"));
+        assert_eq!(texts[1], ((196, 322), "VfB Stuttgart"));
+        assert_eq!(texts[21], ((290, 17), "VfB Stuttgart"));
+        let crests = shapes.iter().filter(|s| matches!(s, Shape::Image { .. })).count();
+        assert_eq!(crests, 11);
+        assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
+    }
+
     /// The Aktuelles category's Serien states the club's runs that reached
     /// their marks and its biggest wins and defeats that scored.
     #[test]

@@ -90,15 +90,17 @@ pub struct Graph {
 /// What a page draws on the canvas, opaque in its colour: a box
 /// (`FUN_0071f9d8`, nothing where it has no width or height), a line from
 /// the pen's place (`FUN_0071f8df`, `FUN_0071f904`) and a text in the
-/// plain font (`FUN_0071fa93`); and the line graph's lines, which its own
-/// paint draws with the window's pen as the goal graph's axes, stopping
-/// short of their end (`FUN_0079d9ec`, `FUN_0079da0b`).
+/// plain font (`FUN_0071fa93`), a picture at its own size
+/// (`FUN_0071fb43`); and the line graph's lines, which its own paint
+/// draws with the window's pen as the goal graph's axes, stopping short
+/// of their end (`FUN_0079d9ec`, `FUN_0079da0b`).
 #[derive(Clone, Debug)]
 pub enum Shape {
     Fill { at: (i32, i32), size: (i32, i32), colour: [u8; 3] },
     Line { from: (i32, i32), to: (i32, i32), colour: [u8; 3] },
     Pen { from: (i32, i32), to: (i32, i32), colour: [u8; 3] },
     Text { at: (i32, i32), text: String, colour: [u8; 3] },
+    Image { at: (i32, i32), image: RgbaImage },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -337,6 +339,9 @@ impl TableState {
                 Shape::Pen { from, to, colour } => pen_line(area, *from, *to, ink(*colour)),
                 Shape::Text { at: (x, y), text, colour } => {
                     font.draw(area, *x, *y, text, ink(*colour), false);
+                }
+                Shape::Image { at: (x, y), image } => {
+                    imageops::replace(area, image, i64::from(*x), i64::from(*y));
                 }
             }
         }
