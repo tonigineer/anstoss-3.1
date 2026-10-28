@@ -541,9 +541,11 @@ pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
 pub const OVERVIEW_PAGE: i16 = 0xb;
 pub const AGE_PAGE: i16 = 0xc;
 pub const FOREIGN_PAGE: i16 = 0xe;
-/// Erhaltene Elfmeter under 0x1287 (`FUN_0044df6d`); Häufigste
+/// Plätze über Saisonziel under 0x1288 (`FUN_0044e23b`); Erhaltene
+/// Elfmeter under 0x1287 (`FUN_0044df6d`); Häufigste
 /// Einwechsl. and Auswechsl. under 0x1285 and 0x1286 (`FUN_0044d9d1`,
 /// `FUN_0044dc9f`).
+pub const TARGET_PAGE: i16 = 0x10;
 pub const PENALTIES_PAGE: i16 = 0x13;
 pub const SUBS_IN_PAGE: i16 = 0x1e;
 pub const SUBS_OUT_PAGE: i16 = 0x1f;
@@ -720,6 +722,12 @@ const PENALTY_CLUBS: &str = "0xaeab40";
 /// scored, +0x33b — and out, +0x33a, its second figure always 0
 /// (`FUN_00722dda` writes it so); the most first.
 const SUBS_IN_CLUBS: &str = "0xae9830";
+/// How many places a club stands above its season's target (`DAT_00aec230`,
+/// 0xc4 a league, 24 entries of 6): its country and number, and the
+/// places `FUN_00775fa0` reckons, below the target negative, the most
+/// first; `FUN_00722fa2` clears the list to −100 before each rebuild.
+const TARGET_CLUBS: &str = "0xaec210";
+const NO_TARGET: i16 = -100;
 const SUBS_OUT_CLUBS: &str = "0xaea1b8";
 
 /// A league's rebuilt club list as the page copies it out (`FUN_00721008`
@@ -744,6 +752,26 @@ fn club_list(records: &Records, country: u16, level: u8, list: &str, entry: usiz
 /// and scored.
 pub fn penalties_awarded(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
     club_list(records, country, level, PENALTY_CLUBS, 8)
+}
+
+/// The Plätze über Saisonziel (`FUN_0044e23b`): each club's places above
+/// its target, the page passing over the entries still at −100 and
+/// stopping at the first without a country.
+pub fn above_target(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    let Some(index) = league_of(records, country, level) else { return Vec::new() };
+    let Some(b) = records.block(&format!("{TARGET_CLUBS}[{index}]")) else { return Vec::new() };
+    let word = |at: usize| b.get(at..at + 2).map_or(0, |w| i16::from_le_bytes([w[0], w[1]]));
+    let mut rows = Vec::new();
+    for at in (0..24).map(|i| i * 6) {
+        if word(at + 4) == NO_TARGET {
+            continue;
+        }
+        if word(at) == 0 {
+            break;
+        }
+        rows.push(ClubCount { country: word(at) as u16, team: word(at + 2), values: [word(at + 4), 0] });
+    }
+    rows
 }
 
 /// The Häufigste Einwechsl. (`FUN_0044d9d1`): each club's substitutes

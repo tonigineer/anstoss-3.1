@@ -298,6 +298,11 @@ const PENALTIES_HEADER_COLUMNS: [(u16, u16); 4] =
     [(R, 0x19), (0x1e, 0), (C | 0xc8, 0x32), (C | 0xfa, 0x3c)];
 const PENALTIES_ROW_COLUMNS: [(u16, u16); 4] =
     [(R, 0x19), (0x1e, 0), (R | 0xc8, 0x1e), (R | 0xff, 0x1e)];
+/// The Plätze über Saisonziel's header and rows (`FUN_0044e23b` with
+/// 0x879cd0, and 0x879ce8): rank, club and places, the figure centred.
+const TARGET_HEADER: u16 = 0x1288;
+const TARGET_HEADER_COLUMNS: [(u16, u16); 3] = [(R, 0x19), (0x1e, 0), (C | 0xb4, 0xa0)];
+const TARGET_ROW_COLUMNS: [(u16, u16); 3] = [(R, 0x19), (0x1e, 0), (C | 0xfa, 0x14)];
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -752,7 +757,8 @@ impl Statistics {
                 self.chance_page(cx, view)
             }
             Some(
-                code @ (statistics::PENALTIES_PAGE
+                code @ (statistics::TARGET_PAGE
+                | statistics::PENALTIES_PAGE
                 | statistics::SUBS_IN_PAGE
                 | statistics::SUBS_OUT_PAGE),
             ) if self.category == LIGA => self.club_list_page(cx, view, code),
@@ -1213,15 +1219,25 @@ impl Statistics {
 
     /// The pages of the club lists the game rebuilds for each league
     /// (`FUN_00724739`), drawn as saved, from the top of the window, the
-    /// own club red, "%d.\t%s\t%d\t%d": the Erhaltene Elfmeter
+    /// own club red: the Plätze über Saisonziel (`FUN_0044e23b`),
+    /// "%d.\t%s\t%d\t" with a rank of its own that counts the rows
+    /// drawn; and "%d.\t%s\t%d\t%d", the Erhaltene Elfmeter
     /// (`FUN_0044df6d`), the Häufigste Einwechsl. (`FUN_0044d9d1`, its
     /// format with a tab more at the end) and Auswechsl. (`FUN_0044dc9f`).
     fn club_list_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
-        let (header_columns, columns) = (&PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS);
+        let (header_columns, columns): (&[(u16, u16)], &[(u16, u16)]) =
+            if code == statistics::TARGET_PAGE {
+                (&TARGET_HEADER_COLUMNS, &TARGET_ROW_COLUMNS)
+            } else {
+                (&PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS)
+            };
         let (header, list, end) = match code {
+            statistics::TARGET_PAGE => {
+                (TARGET_HEADER, statistics::above_target(records, country, level), "")
+            }
             statistics::SUBS_IN_PAGE => {
                 (SUBS_IN_HEADER, statistics::substitutions_in(records, country, level), "\t")
             }
@@ -1238,7 +1254,11 @@ impl Statistics {
             .map(|(i, row)| {
                 let club = game.club_name(Some(records), row.country as u8, row.team);
                 let [first, second] = row.values;
-                let text = format!("{}.\t{club}\t{first}\t{second}{end}", i + 1);
+                let text = if code == statistics::TARGET_PAGE {
+                    format!("{}.\t{club}\t{first}\t", i + 1)
+                } else {
+                    format!("{}.\t{club}\t{first}\t{second}{end}", i + 1)
+                };
                 let ink = if own == Some((row.country, row.team)) { OWN_INK } else { INK };
                 TableRow { text, ink, mark: None, columns: None }
             })

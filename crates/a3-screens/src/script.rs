@@ -5080,6 +5080,28 @@ mod tests {
         assert_eq!(table.rows[17].text, "18.\t1.FC Heidenheim\t4\t3");
     }
 
+    /// The Plätze über Saisonziel lists the clubs by the places they stand
+    /// above their season's target, below it negative.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_measures_the_leagues_targets() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 12";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Pl.\\tVerein\\tPlätze über Saisonziel"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.rows[0].text, "1.\tTSG 1899 Hoffenheim\t4\t");
+        assert_eq!(table.rows[14].text, "15.\t1.FC Union Berlin\t-7\t");
+        assert_eq!(table.rows[14].ink, [255, 0, 0]);
+        assert_eq!(table.rows[17].text, "18.\tBorussia M'gladbach\t-11\t");
+    }
+
     /// The Erhaltene Elfmeter lists the clubs awarded a penalty as the
     /// game keeps them, with those they scored.
     #[test]

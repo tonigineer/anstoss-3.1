@@ -167,6 +167,7 @@ AREAS = {
                    (*bar(15, 18, "now row 1283 2", "now row 1284 9"), 18),
                    (*bar(15, 18, "now row 1283 2", "now row 1284 10"), 18),
                    (*bar(15, 18, "now row 1283 2", "now row 1284 11"), 18),
+                   (*bar(15, 18, "now row 1283 2", "now row 1284 12"), 18),
                    (*bar(15, 18, "now row 1283 2", "now row 1284 15"), 18),
                    (*bar(15, 18, "now row 1283 2", "now row 1284 17"), 18),
                    ("A2.an3", ["now click bar 14", "until dialog 18", "now row 1284 9"],
