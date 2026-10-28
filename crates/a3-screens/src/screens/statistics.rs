@@ -184,6 +184,9 @@ fn scorer_points(p: &Player) -> i32 {
 /// - the Scorer (`FUN_0046b87a`, 0x87e460 and 0x87e420): those with goals
 ///   or assists by their sum, each figure with the last match's in
 ///   brackets;
+/// - the Einsätze (`FUN_004681ce`, 0x87df08 and 0x87ded0): all by their
+///   league matches, then the fewer come on, then the fewer taken off,
+///   with the D-Form and its Tendenz;
 /// - the Fairneß (`FUN_004679ef`, 0x87de48 and 0x87de10): all by their
 ///   cards' points, the cards, the matchdays banned;
 /// - the Vorlagen (`FUN_0046b4cf`, 0x87e400 and 0x87e3e0): those with
@@ -242,6 +245,44 @@ fn squad_page(code: i16) -> Option<SquadPage> {
                     "{}\t({})\t{goals}\t({last_goals})\t{assists}\t({last_assists})",
                     u16::from(goals) + u16::from(assists),
                     u16::from(last_goals) + u16::from(last_assists)
+                )
+            },
+        },
+        statistics::SQUAD_MATCHES_PAGE => SquadPage {
+            header: 2406,
+            header_columns: &[
+                (C, 0x14),
+                (0x19, 0),
+                (C | 0xa0, 0x28),
+                (C | 0xc8, 0x28),
+                (C | 0xf0, 0x28),
+                (C | 0x11d, 0x37),
+                (C | 0x154, 0x3c),
+            ],
+            columns: &[
+                (R, 0x14),
+                (0x19, 0),
+                (R | 0x96, 0x28),
+                (R | 0xbe, 0x23),
+                (R | 0xe6, 0x23),
+                (R | 0x122, 0x28),
+                (R | 0x154, 0x28),
+            ],
+            centred: true,
+            keep: |_| true,
+            key: |p| {
+                let [came_on, taken_off] = p.league_less().map(i32::from);
+                i32::from(p.league_matches()) << 16 | (0xff - came_on) << 8 | (0xff - taken_off)
+            },
+            figures: |p| {
+                let [came_on, taken_off] = p.league_less();
+                let d_form = statistics::d_form(p);
+                format!(
+                    "{}\t{came_on}\t{taken_off}\t{}.{}\t{}",
+                    p.league_matches(),
+                    d_form / 10,
+                    d_form % 10,
+                    statistics::form_trend(p)
                 )
             },
         },

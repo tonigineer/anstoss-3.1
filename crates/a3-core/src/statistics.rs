@@ -307,9 +307,32 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
 /// 2405 (`FUN_00467de7`).
 pub const SQUAD_SCORERS_PAGE: i16 = 0;
 pub const SQUAD_POINTS_PAGE: i16 = 2;
+/// The Einsätze under 2406 (`FUN_004681ce`).
+pub const SQUAD_MATCHES_PAGE: i16 = 4;
 pub const SQUAD_FAIRNESS_PAGE: i16 = 6;
 pub const SQUAD_ASSISTS_PAGE: i16 = 0xc;
 pub const SQUAD_YELLOW_PAGE: i16 = 0xe;
+
+/// A player's D-Form (`FUN_006ff257`): the mean of his weekly forms this
+/// season, ten times over and cut to a whole number — the sum at R+0x1e0
+/// over the weeks at R+0x27b — or 100 before the first week.
+pub fn d_form(player: &Player) -> i32 {
+    match player.season_form_weeks() {
+        0 => 100,
+        weeks => i32::from(player.season_form()) * 10 / i32::from(weeks),
+    }
+}
+
+/// The Einsätze's Tendenz beside it: "+" while his form today
+/// (`FUN_006ff037`) stands above it, "-" below, a space level.
+pub fn form_trend(player: &Player) -> &'static str {
+    let now = crate::lineup::form(crate::load::fitness(player)) * 10;
+    match now.cmp(&d_form(player)) {
+        std::cmp::Ordering::Greater => "+",
+        std::cmp::Ordering::Less => "-",
+        std::cmp::Ordering::Equal => " ",
+    }
+}
 
 /// The own squad in a page's order (`FUN_0046767e`'s exchange sort over
 /// the indexes `FUN_00467645` lays out): the players as the club lists

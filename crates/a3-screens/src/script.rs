@@ -4892,6 +4892,27 @@ mod tests {
         assert!(table.rows.iter().all(|r| r.ink == [0, 0, 0]));
     }
 
+    /// The Mannschaft category's Einsätze counts the squad's league
+    /// matches and weighs its form this season against today's.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_counts_the_squads_matches() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 4";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tName\\tEinsätze\\tEinw.\\tAusw.\\tD-Form\\tTendenz"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 26);
+        assert_eq!(table.rows[0].text, "1.\tFrederik Rönnow\t3\t0\t0\t14.7\t+");
+        // Of equal matches, the fewer come on stand first.
+        assert_eq!(table.rows[11].text, "12.\tStanley Nsoki\t2\t1\t0\t14.2\t+");
+    }
+
     /// More of the Mannschaft category's lists over the own squad: the
     /// Scorer and the Vorlagen keep only the players with a figure, the
     /// Fairneß and the Gelbe Karten all of them.
