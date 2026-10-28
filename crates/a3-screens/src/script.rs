@@ -5111,6 +5111,40 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// The Aktuelles category's Spielbericht tells the club's last match:
+    /// the league and matchday, the pairing with the places, the goals,
+    /// the red card, the gate, the weather, the comparison and the money,
+    /// rating, referee, playing time and best player.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_reports_the_last_match() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 2";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Spielbericht");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts.len(), 18);
+        assert_eq!(texts[0], "\t1. Bundesliga, 3. Spieltag");
+        assert_eq!(
+            texts[1],
+            "Begegnung:\tVfL Wolfsburg (4. Platz) - 1.FC Union Berlin (11. Platz)   2:0 "
+        );
+        assert_eq!(texts[2], "Torschützen:\t1\t:\t0\tKilian Fischer\t(31.)");
+        assert_eq!(texts[3], "\t2\t:\t0\tMohamed Amoura\t(64.)");
+        assert_eq!(texts[4], "besondere Ereignisse:\tRote Karte für Diogo Leite (89.)");
+        assert_eq!(texts[5], "Zuschauerzahl:\t24589");
+        assert_eq!(texts[12], "Bruttoeinnahme:\t719.682 €");
+        assert_eq!(texts[13], "Prämienauszahlung:\t136.025 € (93.200 €)");
+        let referee = "Schiedsrichterleistung:\tSchiedsrichter Schmidt hatte keine Probleme";
+        assert_eq!(texts[15], referee);
+        assert_eq!(texts[17], "Bester Spieler:\tStanley Nsoki ");
+        assert_eq!(table.rows[2].columns.as_ref().map(Vec::len), Some(6));
+        assert_eq!(table.rows[7].columns.as_ref().map(Vec::len), Some(3));
+    }
+
     /// The Aktuelles category's Spielplan shows the league's pairs two
     /// matchdays at a time, from the two the last one played falls in;
     /// its bar steps two on.

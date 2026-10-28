@@ -1037,6 +1037,8 @@ pub const OTHER_TABLES_PAGE: i16 = 0x13;
 pub const DAY_ELEVEN_PAGE: i16 = 3;
 /// The Spielplan under 4747 (`FUN_0044edba`).
 pub const PLAN_PAGE: i16 = 0x11;
+/// The Spielbericht under 2977 (`FUN_004529f3`).
+pub const REPORT_PAGE: i16 = 0;
 
 /// The human club's runs (`FUN_00632de8`: 0x56 bytes at its extra block's
 /// +0xd88), as the Serien states them (`FUN_0044ffb3`): each run that has
@@ -1321,6 +1323,168 @@ pub fn goals_per_matchday(league: &League) -> Vec<i32> {
                 .sum()
         })
         .collect()
+}
+
+/// The human club's last match as the Spielbericht tells it
+/// (`FUN_0063f430`, 0x614 bytes): the report its manager's slot keeps
+/// (`DAT_00a53e38`, 0x634 a slot), which the save holds in the report's
+/// own layout; none before a first match.
+#[derive(Clone, Debug)]
+pub struct Report(Vec<u8>);
+
+/// A goal of the report: the scorer's id, the score after it, the minute
+/// and its kind (5 an own goal, 0 a penalty, 100 a penalty missed, more
+/// one without a minute).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReportGoal {
+    pub id: u16,
+    pub score: [u8; 2],
+    pub minute: u8,
+    pub kind: u8,
+}
+
+/// Something else that happened (`R+0x5c8`): its kind — a penalty saved,
+/// a second yellow, a red card, an injury, a manager sent to the stand —
+/// its minute and the two it was about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReportEvent {
+    pub kind: u8,
+    pub minute: u8,
+    pub ids: [i16; 2],
+}
+
+const REPORTS: u32 = 0xa53e38;
+const REPORT_SIZE: usize = 0x614;
+/// The away side's figures stand this far after the home side's.
+const AWAY_SIDE: usize = 0x1f4;
+
+pub fn match_report(records: &Records, team: &Team) -> Option<Report> {
+    let slot = usize::from(team.human()).checked_sub(1)?;
+    let b = records.block(&format!("{REPORTS:#x}[{slot}]"))?;
+    (b.len() >= REPORT_SIZE && b[0] != 0).then(|| Report(b.to_vec()))
+}
+
+impl Report {
+    fn byte(&self, at: usize) -> u8 {
+        self.0[at]
+    }
+
+    fn word(&self, at: usize) -> i16 {
+        i16::from_le_bytes([self.0[at], self.0[at + 1]])
+    }
+
+    fn long(&self, at: usize) -> i32 {
+        i32::from_le_bytes(self.0[at..at + 4].try_into().unwrap())
+    }
+
+    /// The two sides, home first: their country and number.
+    pub fn sides(&self) -> [(u8, i16); 2] {
+        [(self.byte(0), self.word(2)), (self.byte(4), self.word(6))]
+    }
+
+    /// The first leg's score, home side's first, where the match was a
+    /// second leg.
+    pub fn first_leg(&self) -> Option<[u8; 2]> {
+        (self.byte(0xc) & 0x10 != 0).then(|| [self.byte(9), self.byte(8)])
+    }
+
+    /// Whether it went to extra time, to penalties.
+    pub fn extra(&self) -> (bool, bool) {
+        let flags = self.byte(0xc);
+        (flags & 0x80 != 0, flags & 0x40 != 0)
+    }
+
+    pub fn goals(&self) -> [i16; 2] {
+        [self.word(0xe), self.word(0x10)]
+    }
+
+    /// What the match was: a league's below 0x3f, else a cup's by its
+    /// high bits.
+    pub fn competition(&self) -> u32 {
+        self.long(0x20) as u32
+    }
+
+    /// Whose ground it was played on: country and number.
+    pub fn venue(&self) -> (u16, u16) {
+        (self.word(0x28) as u16, self.word(0x2a) as u16)
+    }
+
+    pub fn attendance(&self) -> i32 {
+        self.long(0x34)
+    }
+
+    pub fn income(&self) -> i32 {
+        self.long(0x3c)
+    }
+
+    pub fn referee(&self) -> i16 {
+        self.word(0x44e)
+    }
+
+    pub fn weather(&self) -> u8 {
+        self.byte(0x466)
+    }
+
+    pub fn scorers(&self) -> Vec<ReportGoal> {
+        let count = usize::try_from(self.word(0x498)).unwrap_or(0).min(30);
+        (0..count)
+            .map(|k| 0x49c + 10 * k)
+            .map(|at| ReportGoal {
+                id: self.word(at) as u16,
+                score: [self.byte(at + 5), self.byte(at + 6)],
+                minute: self.byte(at + 7),
+                kind: self.byte(at + 8),
+            })
+            .collect()
+    }
+
+    pub fn events(&self) -> Vec<ReportEvent> {
+        let count = usize::try_from(self.word(0x49a)).unwrap_or(0).min(10);
+        (0..count)
+            .map(|k| 0x5c8 + 6 * k)
+            .map(|at| ReportEvent {
+                kind: self.byte(at),
+                minute: self.byte(at + 1),
+                ids: [self.word(at + 2), self.word(at + 4)],
+            })
+            .collect()
+    }
+
+    /// Each side's second yellows, yellows, corners and chances.
+    pub fn comparison(&self) -> [[i32; 2]; 4] {
+        let both = |f: &dyn Fn(usize) -> i32, at: usize| [f(at), f(at + AWAY_SIDE)];
+        let word = |at| i32::from(self.word(at));
+        let byte = |at| i32::from(self.byte(at));
+        [both(&word, 0x138), both(&word, 0x130), both(&word, 0x136), both(&byte, 0x95)]
+    }
+
+    /// Each side's bonuses paid, bonuses received and television money.
+    pub fn money(&self) -> [[i32; 2]; 3] {
+        [0x148, 0x144, 0x140].map(|at| [self.long(at), self.long(at + AWAY_SIDE)])
+    }
+
+    /// The referee's verdict and the match's rating, by their lists'
+    /// places; the minutes the ball was in play; the television's share
+    /// in percent; the best player's id.
+    pub fn verdict(&self) -> i16 {
+        self.word(0x608)
+    }
+
+    pub fn rating(&self) -> i16 {
+        self.word(0x60a)
+    }
+
+    pub fn minutes(&self) -> i16 {
+        self.word(0x60c)
+    }
+
+    pub fn tv_share(&self) -> u8 {
+        self.byte(0x60e)
+    }
+
+    pub fn best(&self) -> u16 {
+        self.word(0x610) as u16
+    }
 }
 
 /// The league's Elf des Tages (`FUN_00451e0d`, `DAT_00b1300c` in the

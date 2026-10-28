@@ -228,6 +228,58 @@ const DAY_ELEVEN_PLACES: [(i32, i32); 11] = [
     (100, 0),
     (288, 0),
 ];
+/// The Spielbericht's header and its rows' columns (`FUN_004529f3` with
+/// 0x87a190, 0x87a158 and 0x87a128): a label and its text; a label and
+/// the two sides' figures; a goal's label, score, scorer and minute.
+const REPORT_HEADER: u16 = 2977;
+const REPORT_TWO: [(u16, u16); 2] = [(0, 120), (120, 0)];
+const REPORT_THREE: [(u16, u16); 3] = [(0, 120), (120, 40), (160, 40)];
+const REPORT_GOAL: [(u16, u16); 6] =
+    [(0, 112), (R | 112, 15), (130, 0), (135, 15), (150, 0), (R | 300, 30)];
+/// Its texts: the league and matchday, the labels, the goals' and the
+/// other events' formats, the attendance sold out and not, the weather,
+/// the comparison, the money, the rating, the referee, the television's
+/// share, the playing time, the best player.
+const REPORT_LEAGUE: u16 = 2458;
+const REPORT_MATCH: u16 = 2978;
+const REPORT_FIRST_LEG: u16 = 2979;
+const REPORT_GOALS: u16 = 2980;
+const REPORT_MISSED: u16 = 2981;
+const REPORT_OWN_GOAL: u16 = 2607;
+const REPORT_PENALTY: u16 = 2608;
+const REPORT_EVENTS: u16 = 2982;
+const REPORT_SOLD_OUT: u16 = 2983;
+const REPORT_GATE: u16 = 2984;
+const REPORT_WEATHER: u16 = 2985;
+const REPORT_COMPARISON: u16 = 2986;
+const REPORT_INCOME: u16 = 2991;
+const REPORT_MONEY: u16 = 2992;
+const REPORT_RATING: u16 = 2995;
+const REPORT_REFEREE: u16 = 2996;
+const REPORT_REFEREE_LABEL: u16 = 2997;
+const REPORT_TV: u16 = 2998;
+const REPORT_TIME: u16 = 2999;
+const REPORT_BEST: u16 = 3000;
+/// "%1%2 Platz".
+const PLACE_TEXT: u16 = 1058;
+/// The other events' formats by kind (0x8a835c), a weather's text
+/// (0x8acfb4, the first two alike), a rating's (0x8a8298), a verdict's
+/// (0x8a82d8, in a row from 2551); and the names of the cups by the
+/// competition's high bits.
+const EVENT_TEXTS: [u16; 6] = [2581, 2602, 2603, 2604, 2605, 2606];
+const RATINGS: [u16; 15] =
+    [2585, 2586, 2587, 2588, 2589, 2590, 2599, 2591, 2592, 2593, 2594, 2595, 2596, 2597, 2598];
+const VERDICTS: u16 = 2551;
+const WEATHERS: u16 = 2537;
+const CUP_NAMES: [(u32, u16); 5] = [
+    (0x4000_0000, 2477),
+    (0x3000_0000, 2478),
+    (0x0100_0000, 3611),
+    (0x1000_0000, 2479),
+    (0x2000_0000, 2485),
+];
+/// A manager no slot holds (`FUN_006a537d`).
+const NO_MANAGER: u16 = 1996;
 /// The Spielplan's header (`FUN_0044edba`), its columns off the strip,
 /// so that nothing of it shows; a matchday's title (`FUN_006e09e6` with
 /// "%d%s Spieltag") and where a pair's three cells start (0x8a67b0).
@@ -1733,6 +1785,9 @@ impl Statistics {
             }
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
+            }
+            Some(statistics::REPORT_PAGE) if self.category == AKTUELLES => {
+                self.report_page(cx, view)
             }
             Some(statistics::PLAN_PAGE) if self.category == AKTUELLES => {
                 self.plan_page(cx, view, None)
@@ -3283,6 +3338,180 @@ impl Statistics {
                 scroll: 0,
                 cross: None,
                 graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+            };
+        }
+        true
+    }
+
+    /// The Spielbericht (`FUN_004529f3`): the own club's last match, row
+    /// by row in black, each row with columns of its own. The competition,
+    /// the pairing with the league places and the score, the first leg,
+    /// the goals, the other events, the attendance, the weather, the
+    /// comparison of the sides, the money, the rating, the referee, the
+    /// television's share, the playing time and the best player. Before
+    /// a first match only the header changes.
+    fn report_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        set_header(view, dialog, game.text(REPORT_HEADER).to_owned(), &[(0, 0)]);
+        let Some(report) = own_team(cx).and_then(|t| statistics::match_report(records, t)) else {
+            return true;
+        };
+        let text = |id: u16| game.text(id).replace("\\t", "\t");
+        // Each part in for the next "%s" or "%d", in their order.
+        let fill = |format: String, parts: &[&str]| {
+            let mut out = String::new();
+            let mut rest = format.as_str();
+            for part in parts {
+                let Some(at) = rest.find("%s").into_iter().chain(rest.find("%d")).min() else {
+                    break;
+                };
+                out.push_str(&rest[..at]);
+                out.push_str(part);
+                rest = &rest[at + 2..];
+            }
+            out + rest
+        };
+        let money = |v: i32| super::playerinfo::money(game, i64::from(v));
+        let name = |id: u16| records.known_as(id).unwrap_or_default();
+        let minute = |m: u8| format!("{m}.");
+        let mut rows = Vec::new();
+        let mut push = |text: String, columns: &[(u16, u16)]| {
+            rows.push(TableRow { text, ink: INK, mark: None, columns: Some(columns.to_vec()) });
+        };
+        let [(hc, hn), (ac, an)] = report.sides();
+        let club = |c: u8, n: i16| game.club_name(Some(records), c, n);
+        let (home, away) = (club(hc, hn), club(ac, an));
+        let competition = report.competition();
+        let pairing = if competition < 0x3f {
+            let team = |c: u8, n: i16| records.team(c.into(), n as u16);
+            let league = team(hc, hn).and_then(|t| League::of(records, hc.into(), t.level()));
+            let played = league.as_ref().map_or(0, League::played);
+            let league_name = league.map(|l| l.name()).unwrap_or_default();
+            let matchday = fill(text(REPORT_LEAGUE), &[&league_name, &minute(played as u8)]);
+            push(format!("\t{matchday}"), &REPORT_TWO);
+            let place = |c: u8, n: i16| {
+                let p = team(c, n).map_or(0, Team::table_place);
+                text(PLACE_TEXT).replacen("%1", &p.to_string(), 1).replacen("%2", ".", 1)
+            };
+            format!("{home} ({}) - {away} ({})", place(hc, hn), place(ac, an))
+        } else {
+            let [champions, uefa] = records.countries.cup_names();
+            let cup = match CUP_NAMES.iter().find(|&&(bits, _)| competition & 0x7f00_0000 == bits) {
+                Some(&(_, id)) => text(id),
+                None => match competition & 0x7f00_0700 {
+                    0x5000_0400 | 0x5000_0700 => champions,
+                    0x5000_0100 => uefa,
+                    0x5000_0200 => text(2481),
+                    0x7000_0000 => text(2483),
+                    0x6000_0000 => text(2484),
+                    _ => String::new(),
+                },
+            };
+            push(format!("\t{cup}"), &REPORT_TWO);
+            format!("{home} - {away}")
+        };
+        let [gh, ga] = report.goals();
+        let suffix = match report.extra() {
+            (true, _) => text(EXTRA_TIME),
+            (_, true) => text(PENALTIES),
+            _ => String::new(),
+        };
+        push(format!("{}{pairing}   {gh}:{ga} {suffix}", text(REPORT_MATCH)), &REPORT_TWO);
+        if let Some([h, a]) = report.first_leg() {
+            push(fill(text(REPORT_FIRST_LEG), &[&h.to_string(), &a.to_string()]), &REPORT_TWO);
+        }
+        // The label goes with the first goal, or with nothing where its
+        // scorer is none.
+        for (k, goal) in report.scorers().into_iter().enumerate() {
+            let label = if k == 0 { text(REPORT_GOALS) } else { "\t".to_owned() };
+            if goal.id == 0 {
+                continue;
+            }
+            let [h, a] = goal.score.map(|g| g.to_string());
+            let row = match goal.kind {
+                5 => fill(text(REPORT_OWN_GOAL), &[&h, &a, &name(goal.id), &minute(goal.minute)]),
+                0 => fill(text(REPORT_PENALTY), &[&h, &a, &name(goal.id), &minute(goal.minute)]),
+                ..100 => format!("{h}\t:\t{a}\t{}\t({})", name(goal.id), minute(goal.minute)),
+                100 => fill(text(REPORT_MISSED), &[&name(goal.id), ""]),
+                _ => format!("{h}\t:\t{a}\t{}", name(goal.id)),
+            };
+            push(label + &row, &REPORT_GOAL);
+        }
+        for (k, event) in report.events().into_iter().enumerate() {
+            let label = if k == 0 { text(REPORT_EVENTS) } else { "\t".to_owned() };
+            let format = EVENT_TEXTS.get(usize::from(event.kind)).map(|&id| text(id));
+            let [first, second] = event.ids;
+            let at = minute(event.minute);
+            let row = match (event.kind, format) {
+                (1, Some(f)) if first != 0 && second != 0 => {
+                    fill(f, &[&name(first as u16), &name(second as u16), &at])
+                }
+                (2 | 3, Some(f)) if first != 0 => fill(f, &[&name(first as u16), &at]),
+                (4, Some(f)) if first != 0 => fill(f, &[&name(first as u16)]),
+                (5, Some(f)) => {
+                    let slot = usize::try_from(first - 1).ok();
+                    let slots = records.globals.slots();
+                    let held = slot.filter(|&s| slots.get(s).is_some_and(|&n| n > 0));
+                    let manager = match held.and_then(|s| records.managers.get(s)) {
+                        Some(m) => format!("{} {}", m.first_name(), m.last_name()),
+                        None => text(NO_MANAGER),
+                    };
+                    fill(f, &[&manager, &at])
+                }
+                _ => String::new(),
+            };
+            if !row.is_empty() {
+                push(label + &row, &REPORT_TWO);
+            }
+        }
+        let (country, number) = report.venue();
+        let stadium = a3_core::opponent::stadium(records, country, number);
+        let capacity = stadium.map_or(0, |s| s.capacity);
+        let gate = if report.attendance() < capacity { REPORT_GATE } else { REPORT_SOLD_OUT };
+        push(fill(text(gate), &[&report.attendance().to_string()]), &REPORT_TWO);
+        let weather = match report.weather() {
+            0 | 1 => WEATHERS + 1,
+            w => WEATHERS + u16::from(w),
+        };
+        push(text(REPORT_WEATHER) + &text(weather), &REPORT_TWO);
+        push(text(REPORT_COMPARISON), &REPORT_THREE);
+        for (k, [h, a]) in report.comparison().into_iter().enumerate() {
+            let format = text(REPORT_COMPARISON + 1 + k as u16);
+            push(fill(format, &[&h.to_string(), &a.to_string()]), &REPORT_THREE);
+        }
+        push(fill(text(REPORT_INCOME), &[&money(report.income())]), &REPORT_TWO);
+        for (k, [h, a]) in report.money().into_iter().enumerate() {
+            if h == 0 && a == 0 {
+                continue;
+            }
+            let side = |v: i32| if v == 0 { "-".to_owned() } else { money(v) };
+            push(fill(text(REPORT_MONEY + k as u16), &[&side(h), &side(a)]), &REPORT_TWO);
+        }
+        let rating = usize::try_from(report.rating()).ok().and_then(|r| RATINGS.get(r));
+        let rating = rating.map_or(String::new(), |&id| text(id));
+        push(fill(text(REPORT_RATING), &[&rating]), &REPORT_TWO);
+        let referee = records.referee(report.referee()).map_or("", |(name, ..)| name);
+        let verdict = text(VERDICTS + report.verdict().max(0) as u16);
+        let judged = fill(text(REPORT_REFEREE), &[referee, &verdict]);
+        push(text(REPORT_REFEREE_LABEL) + &judged, &REPORT_TWO);
+        if report.tv_share() > 0 {
+            let share = text(REPORT_TV).replacen("%d", &report.tv_share().to_string(), 1);
+            push(share.replace("%%", "%"), &REPORT_TWO);
+        }
+        push(fill(text(REPORT_TIME), &[&report.minutes().to_string(), ""]), &REPORT_TWO);
+        if report.best() != 0 {
+            push(fill(text(REPORT_BEST), &[&name(report.best()), ""]), &REPORT_TWO);
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
             };
         }
         true
