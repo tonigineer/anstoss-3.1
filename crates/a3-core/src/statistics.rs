@@ -298,6 +298,112 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
     (rows, axis)
 }
 
+/// The Liga category's first two pages: the Torjägerliste and the
+/// Scorer, under the single header texts 0xa99 and 0xa9b.
+pub const TOR_PAGE: i16 = 0;
+pub const SCORER_PAGE: i16 = 1;
+
+/// One player of the Liga lists: the name pool's ids of the name as the
+/// list holds it, his club's number, with the figures the page shows in
+/// its columns' order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LigaRow {
+    /// His first and last name's ids in the pool.
+    pub first: u16,
+    pub last: u16,
+    /// The club's number in its country.
+    pub team: i16,
+    pub values: [u8; 6],
+}
+
+/// The block holding this season's player lists (`DAT_00b0b6b8`): the
+/// game keeps one list per league as the cycle plays and the archive
+/// draws just that — `FUN_00721dce` copies a league's list out, and the
+/// sorting itself, done by a threaded engine, belongs to the live game
+/// updating the lists match by match, never to the page. A top scorer's
+/// entry of 0x10 at `DAT_00b0b6f4` holds his id, his names, a flag, his
+/// club's number, his goals, a counter the page never shows, and the
+/// columns' free kicks, penalties, headers, goals from distance and cup
+/// goals; a scorer's entry of 0xc at `DAT_00b0fd46` holds his names, his
+/// club's number and the columns' point, goals, matchdays he scored and
+/// assisted on and his assists. A row is drawn once its first column
+/// stands above 0.
+const LISTS: &str = "0xb0b6b8";
+const TOR_LIST: usize = 0x3c;
+const TOR_LEAGUE: usize = 0x640;
+const SCORER_LIST: usize = 0x468e;
+const SCORER_LEAGUE: usize = 0xf0;
+
+/// Which league's list a page reads (`FUN_00677b07`): the main country's
+/// by its level, and the more countries' first leagues, behind the main
+/// country's six.
+fn league_of(records: &Records, country: u16, level: u8) -> Option<usize> {
+    let country = i16::try_from(country).ok()?;
+    let globals = &records.globals;
+    if globals.main_country() == country {
+        return (level < 6).then_some(usize::from(level));
+    }
+    let more = usize::try_from(globals.more_count()).unwrap_or(0);
+    (0..more)
+        .find(|&k| globals.more_countries()[k] == country)
+        .map(|k| k + 6)
+}
+
+/// A league's list in the block: its base, row and entry widths.
+fn list_bytes(
+    records: &Records,
+    country: u16,
+    level: u8,
+    at: usize,
+    row: usize,
+    entry: usize,
+    count: usize,
+) -> Option<&[u8]> {
+    let league = league_of(records, country, level)?;
+    let from = at + league * row;
+    records.block(LISTS)?.get(from..from + count * entry)
+}
+
+/// The league's top scorers this season (`FUN_00449bd6`): the saved
+/// list's hundred entries; his goals, free kicks, penalties, headers,
+/// goals from distance and cup goals stand in the columns.
+pub fn torjaeger(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    let Some(b) = list_bytes(records, country, level, TOR_LIST, TOR_LEAGUE, 0x10, 100) else {
+        return Vec::new();
+    };
+    (0..100)
+        .filter_map(|i| {
+            let e = &b[i * 0x10..i * 0x10 + 0x10];
+            (e[8] != 0).then(|| LigaRow {
+                first: u16::from_le_bytes([e[2], e[3]]),
+                last: u16::from_le_bytes([e[4], e[5]]),
+                team: i16::from(e[7]),
+                values: [e[8], e[10], e[11], e[12], e[13], e[14]],
+            })
+        })
+        .collect()
+}
+
+/// The league's scorers and assisters this season (`FUN_0044a3fa`): the
+/// saved list's twenty entries; his point, goals, the matchdays he
+/// scored and assisted on and his assists stand in the columns.
+pub fn scorers(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    let Some(b) = list_bytes(records, country, level, SCORER_LIST, SCORER_LEAGUE, 0xc, 0x14) else {
+        return Vec::new();
+    };
+    (0..0x14)
+        .filter_map(|i| {
+            let e = &b[i * 0xc..i * 0xc + 0xc];
+            (e[5] != 0).then(|| LigaRow {
+                first: u16::from_le_bytes([e[0], e[1]]),
+                last: u16::from_le_bytes([e[2], e[3]]),
+                team: i16::from(e[4]),
+                values: [e[5], e[6], e[7], e[8], e[9], 0],
+            })
+        })
+        .collect()
+}
+
 /// The table: with `rules` the penalty points and the point for three
 /// goals count.
 fn reckon(records: &Records, league: &League, kind: u8, rules: bool) -> Vec<Row> {

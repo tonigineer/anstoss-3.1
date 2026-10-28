@@ -12,7 +12,9 @@
 //! champion (`FUN_00445ded`); the season's results in a cross-table
 //! (`FUN_00445951`); the rounds of the national cups (`FUN_004469c0`); and
 //! the Europa League's round (`FUN_004483c7`) with the European Supercup's
-//! single pairing (`FUN_0044858a`). The others are crossed out.
+//! single pairing (`FUN_0044858a`); in the Liga category the league's goal
+//! scorers (`FUN_00449bd6`) and their scorer points (`FUN_0044a3fa`). The
+//! others are crossed out.
 
 use std::collections::HashMap;
 
@@ -148,6 +150,57 @@ const CROSS_WIDTH: i32 = 0x1dd;
 /// The goal pages' header, one text for all four (`FUN_0044917a`; the
 /// axis' own label 0xa51 stands empty and is never drawn).
 const GOAL_HEADER: u16 = 0xa50;
+/// The Liga category and its two player pages' header texts (2713 and
+/// 2715) with their header's and rows' columns (`FUN_00449bd6`'s blocks
+/// at 0x879708 and 0x87972c, `FUN_0044a3fa`'s at 0x8797e8 and 0x879808).
+/// The goal page's own club stands blue (COLORREF 0xff0000) among black
+/// rows; the scorer page inks as the tables do.
+const LIGA: usize = 2;
+const TOR_HEADER: u16 = 0xa99;
+const SCORER_HEADER: u16 = 0xa9b;
+const TOR_HEADER_COLUMNS: [(u16, u16); 9] = [
+    (R, 0x12),
+    (0x18, 0),
+    (0x82, 0),
+    (C | 250, 0x1e),
+    (C | 280, 0x14),
+    (C | 300, 0x14),
+    (C | 320, 0x14),
+    (C | 340, 0x14),
+    (C | 360, 0x14),
+];
+const TOR_ROW_COLUMNS: [(u16, u16); 9] = [
+    (R, 0x12),
+    (0x18, 0),
+    (0x82, 0),
+    (R | 250, 0x18),
+    (R | 275, 0x14),
+    (R | 295, 0x14),
+    (R | 315, 0x14),
+    (R | 335, 0x14),
+    (R | 355, 0x14),
+];
+const SCORER_HEADER_COLUMNS: [(u16, u16); 8] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0x82, 0),
+    (C | 0xf5, 0x28),
+    (C | 0x11d, 0x1e),
+    (C | 0x13b, 0x19),
+    (C | 0x159, 0x1e),
+    (C | 0x172, 0x1e),
+];
+const SCORER_ROW_COLUMNS: [(u16, u16); 8] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0x82, 0),
+    (R | 0xf0, 0x1e),
+    (R | 0x11d, 0x14),
+    (C | 0x13b, 0x19),
+    (R | 0x159, 0x14),
+    (R | 0x172, 0x14),
+];
+const TOR_OWN_INK: [u8; 3] = [0, 0, 255];
 /// The cup rows' columns (`FUN_006df48b` with 0x879428 and 0x879450): the
 /// two sides, the legs' scores in the right-pulled columns, and the note
 /// behind them. A side with no club reads "ohne Verein" (0xfef), the note
@@ -559,6 +612,10 @@ impl Statistics {
             Some(statistics::SUPERCUP_PAGE) if self.category == TABLES => {
                 self.supercup_page(cx, view)
             }
+            Some(statistics::TOR_PAGE) if self.category == LIGA => self.liga_page(cx, view, true),
+            Some(statistics::SCORER_PAGE) if self.category == LIGA => {
+                self.liga_page(cx, view, false)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -727,6 +784,100 @@ impl Statistics {
                 scroll: 0,
                 cross: None,
                 graph: Some(Graph { bars }),
+            };
+        }
+        true
+    }
+
+    /// The Liga category's player pages (`FUN_00449bd6` and
+    /// `FUN_0044a3fa`): the league the strip stands on draws the list
+    /// the game keeps for it as the season goes on and saves with the
+    /// game (`DAT_00b0b6b8`) — a hundred top scorers by their goals,
+    /// twenty scorers by their points; the page never sorts. Each row
+    /// reads "%d.\t%s\t%s…" (0x879ed8,
+    /// 0x879f04) with the player's name as "%s, %c" (0x879ed0): his
+    /// last name, a comma and his first name's initial, the club's
+    /// name, and his figures; the own club's row stands blue on the
+    /// goal page, red on the scorer page.
+    fn liga_page(&self, cx: &Cx, view: &mut View, tor: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let (header, header_columns, columns, list) = if tor {
+            (
+                TOR_HEADER,
+                &TOR_HEADER_COLUMNS[..],
+                &TOR_ROW_COLUMNS[..],
+                statistics::torjaeger(records, country, level),
+            )
+        } else {
+            (
+                SCORER_HEADER,
+                &SCORER_HEADER_COLUMNS[..],
+                &SCORER_ROW_COLUMNS[..],
+                statistics::scorers(records, country, level),
+            )
+        };
+        set_header(view, dialog, game.text(header).to_owned(), header_columns);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let rows: Vec<_> = list
+            .iter()
+            .enumerate()
+            .filter_map(|(i, row)| {
+                let last = records.name(row.last);
+                let name = match records.name(row.first).chars().next() {
+                    Some(initial) => format!("{last}, {initial}"),
+                    None => last.to_owned(),
+                };
+                let club = game.club_name(Some(records), country as u8, row.team);
+                let v = row.values;
+                let text = if tor {
+                    format!(
+                        "{}.\t{name}\t{club}\t{}\t{}\t{}\t{}\t{}\t{}",
+                        i + 1,
+                        v[0],
+                        v[1],
+                        v[2],
+                        v[3],
+                        v[4],
+                        v[5]
+                    )
+                } else {
+                    format!(
+                        "{}.\t{name}\t{club}\t{}\t{}\t{}\t{}\t{}",
+                        i + 1,
+                        v[0],
+                        v[1],
+                        v[2],
+                        v[3],
+                        v[4]
+                    )
+                };
+                let ink = if own == Some((country, row.team)) {
+                    if tor {
+                        TOR_OWN_INK
+                    } else {
+                        OWN_INK
+                    }
+                } else {
+                    INK
+                };
+                Some(TableRow { text, ink, mark: None, columns: None })
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            // The page hands its row count to the window (`FUN_00458c56`'s
+            // first parameter, the window's +0x10ec), so `FUN_006de7b0`
+            // stands the shown rows centred in its height.
+            let centred = i32::try_from(rows.len()).unwrap_or(-1);
+            *table = TableState {
+                columns: columns.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
             };
         }
         true

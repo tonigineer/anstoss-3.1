@@ -4866,4 +4866,47 @@ mod tests {
         let graph = table.graph.as_ref().unwrap();
         assert_eq!(graph.bars[0].0, 150);
     }
+
+    /// The Liga category names its players and counts their goals.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_leagues_players() {
+        let game = game();
+        let open = "now click bar 14\nuntil dialog 18";
+        let liga = format!("{open}\nnow row 1283 2");
+        let dialog = &game.dialogs[&18];
+        let Some(runner) = on_save(&game, "A", &liga) else { return };
+        let view = runner.host.view();
+        // The Torjägerliste stands first, on the own league's strip.
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tTore\\tFr\\tEl\\tKo\\tDi\\tPo"
+        );
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "1. Bundesliga");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        // The saved list's order, the page's figures its entry's bytes.
+        assert_eq!(table.rows[0].text, "1.\tKane, H\tFC Bayern München\t3\t1\t0\t0\t1\t1");
+        assert_eq!(table.rows[1].text, "2.\tBeier, M\tBorussia Dortmund\t2\t0\t0\t0\t0\t0");
+        assert_eq!(
+            table.rows[3].text,
+            "4.\tSchick, P\tBayer 04 Leverkusen\t2\t0\t0\t0\t2\t0"
+        );
+        // The own club's row blue.
+        let union = table.rows.iter().position(|r| r.ink == [0, 0, 255]).unwrap();
+        assert!(table.rows[union].text.contains("\tMoore, M\t1.FC Union Berlin\t"));
+        // The scorer page: goals plus assists, twenty at most, the own
+        // row red.
+        let sc = format!("{liga}\nnow row 1284 1");
+        let Some(runner) = on_save(&game, "A", &sc) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tPkt\\tTore\\tlSp\\tVorl.\\tlSp"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 20);
+        assert_eq!(table.rows[0].text, "1.\tKane, H\tFC Bayern München\t5\t3\t0\t2\t1");
+        let red = table.rows.iter().position(|r| r.ink == [255, 0, 0]).unwrap();
+        assert!(table.rows[red].text.starts_with("6.\tJuranovic, J\t1.FC Union Berlin"));
+    }
 }
