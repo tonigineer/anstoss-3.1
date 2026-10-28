@@ -5026,6 +5026,36 @@ mod tests {
         assert_eq!(table.rows[10].text, "11.\tStanley Nsoki\t1");
     }
 
+    /// The Aktuelles category counts the league's goals per matchday, and
+    /// names the country's best and worst referees.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_counts_goals_per_matchday_and_rates_the_referees() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let page = |row: u32| {
+            format!("now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 {row}")
+        };
+        let texts = |row: u32| -> Option<Vec<String>> {
+            let runner = on_save(&game, "A", &page(row))?;
+            let view = runner.host.view();
+            let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+            Some(table.rows.iter().map(|r| r.text.clone()).collect())
+        };
+        let Some(rows) = texts(5) else { return };
+        assert_eq!(
+            rows,
+            ["1.\t20\t2.2", "2.\t13\t1.4", "3.\t16\t1.8", "Schnitt/Spieltag 16.3"]
+        );
+        let Some(rows) = texts(9) else { return };
+        assert_eq!(rows[0], "Beste Schiedsrichter");
+        assert_eq!(rows[1], "1.\tFlorian Heft\t3\t1.5");
+        assert_eq!(rows[4], "");
+        assert_eq!(rows[5], "Schlechtester Schiedsrichter");
+        assert_eq!(rows[6], "1.\tLasse Koslowski\t1\t5.0");
+        assert_eq!(rows.len(), 9);
+    }
+
     /// The Mannschaft category's Torjägerliste ranks the own squad by its
     /// league goals, with the cup's and the European cups' beside.
     #[test]

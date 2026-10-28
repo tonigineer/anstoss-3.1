@@ -152,6 +152,32 @@ const CROSS_WIDTH: i32 = 0x1dd;
 const GOAL_HEADER: u16 = 0xa50;
 /// The Mannschaft category, over the own squad.
 const MANNSCHAFT: usize = 1;
+/// The Aktuelles category; its Tore pro Spieltag's header and rows
+/// (`FUN_00455d6c` with 0x87a350, and 0x87a338) and the closing mean in
+/// two columns of its own (0x87a368), text 3875; its Beste Schiris'
+/// (`FUN_00457711` with 0x87a488, and 0x87a4a8), the two lists' titles
+/// 4713 and 4734.
+const AKTUELLES: usize = 3;
+const GOALS_PER_MATCHDAY_HEADER: u16 = 3700;
+const GOALS_PER_MATCHDAY_HEADER_COLUMNS: [(u16, u16); 3] =
+    [(C | 3, 0x32), (C | 0x50, 0x28), (C | 0xa0, 0x28)];
+const GOALS_PER_MATCHDAY_ROW_COLUMNS: [(u16, u16); 3] =
+    [(R | 0xd, 0x19), (C | 0x50, 0x28), (C | 0xa0, 0x28)];
+const MATCHDAY_MEAN: u16 = 3875;
+const MATCHDAY_MEAN_COLUMNS: [(u16, u16); 2] = [(0, 0x12c), (0x12c, 0)];
+const REFEREES_HEADER: u16 = 4712;
+const REFEREES_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(0, 0), (0x1e, 0), (C | 0xbe, 0x32), (C | 0xfa, 0x5a)];
+const REFEREES_ROW_COLUMNS: [(u16, u16); 4] =
+    [(0, 0), (0x1e, 0), (R | 0xc8, 0x14), (R | 0x10e, 0x1e)];
+const BEST_REFEREES: u16 = 4713;
+const WORST_REFEREES: u16 = 4734;
+/// How many referees each list names; the best are read from the last
+/// entry down to the fourth, the worst from the first up to the fifth.
+const REFEREES_SHOWN: usize = 3;
+const BEST_LAST: usize = 39;
+const BEST_DOWN_TO: usize = 3;
+const WORST_UP_TO: usize = 5;
 
 /// A Mannschaft page: its header text, the header's and the rows'
 /// columns, whether it hands the window the squad's size (else
@@ -1585,6 +1611,12 @@ impl Statistics {
             Some(statistics::SQUAD_ALL_TIME_MATCHES_PAGE) if self.category == MANNSCHAFT => {
                 self.all_time_matches_page(cx, view)
             }
+            Some(statistics::GOALS_PER_MATCHDAY_PAGE) if self.category == AKTUELLES => {
+                self.goals_per_matchday_page(cx, view)
+            }
+            Some(statistics::REFEREES_PAGE) if self.category == AKTUELLES => {
+                self.referees_page(cx, view)
+            }
             Some(statistics::FAIRNESS_PAGE) if self.category == LIGA => {
                 self.fairness_page(cx, view)
             }
@@ -2826,6 +2858,99 @@ impl Statistics {
             *table = TableState {
                 columns: TRAITS_ROW_COLUMNS.to_vec(),
                 centred: team.players().len() as i32,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Tore pro Spieltag (`FUN_00455d6c`): the league of the strip,
+    /// each matchday played with its goals and their mean a pair —
+    /// "%d.\t%d\t%2.1f", the goals over half the clubs, cut — and, once a
+    /// matchday is played, "Schnitt/Spieltag %3.1f" in two columns of its
+    /// own; black, from the top of the window.
+    fn goals_per_matchday_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        let header = game.text(GOALS_PER_MATCHDAY_HEADER).to_owned();
+        set_header(view, dialog, header, &GOALS_PER_MATCHDAY_HEADER_COLUMNS);
+        let goals = statistics::goals_per_matchday(&league);
+        let pairs = (league.teams() / 2) as i32;
+        let mut rows: Vec<TableRow> = goals
+            .iter()
+            .enumerate()
+            .map(|(md, &g)| {
+                let mean = tenths(f64::from(g) / f64::from(pairs));
+                let text = format!("{}.\t{g}\t{mean}", md + 1);
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if !goals.is_empty() {
+            let total: i32 = goals.iter().sum();
+            let mean = tenths(f64::from(total) / goals.len() as f64);
+            let text = game.text(MATCHDAY_MEAN).replace("%3.1f", &mean);
+            let columns = Some(MATCHDAY_MEAN_COLUMNS.to_vec());
+            rows.push(TableRow { text, ink: INK, mark: None, columns });
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: GOALS_PER_MATCHDAY_ROW_COLUMNS.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Beste Schiris (`FUN_00457711`): the referees of the strip's
+    /// country as the game keeps them, the worst first — under "Beste
+    /// Schiedsrichter" up to three from the last entry down, under
+    /// "Schlechtester Schiedsrichter" after an empty row up to three from
+    /// the first up, each "%d.\t%s\t%d\t%1.1f" of the count, name,
+    /// matches and the grade over 20; entries without an id left out.
+    fn referees_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let globals = &records.globals;
+        let more = usize::try_from(globals.more_count()).unwrap_or(0);
+        let country = match self.chosen {
+            0 => globals.main_country(),
+            k if k > more => globals.main_country(),
+            k => globals.more_countries()[k - 1],
+        } as u16;
+        set_header(view, dialog, game.text(REFEREES_HEADER).to_owned(), &REFEREES_HEADER_COLUMNS);
+        let referees = statistics::referees(records, country);
+        let line = |text: String| TableRow { text, ink: INK, mark: None, columns: None };
+        let listed = |order: &mut dyn Iterator<Item = usize>| -> Vec<TableRow> {
+            order
+                .filter_map(|k| referees.get(k).filter(|r| r.id != 0))
+                .take(REFEREES_SHOWN)
+                .enumerate()
+                .map(|(n, r)| {
+                    let grade = tenths(f64::from(r.grade) / 20.0);
+                    line(format!("{}.\t{}\t{}\t{grade}", n + 1, r.name, r.matches))
+                })
+                .collect()
+        };
+        let mut rows = vec![line(game.text(BEST_REFEREES).to_owned())];
+        rows.extend(listed(&mut (BEST_DOWN_TO..=BEST_LAST).rev()));
+        rows.push(line(String::new()));
+        rows.push(line(game.text(WORST_REFEREES).to_owned()));
+        rows.extend(listed(&mut (0..WORST_UP_TO)));
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: REFEREES_ROW_COLUMNS.to_vec(),
+                centred: -1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

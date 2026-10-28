@@ -1008,6 +1008,62 @@ pub fn squad_by(
     order.iter().map(|&k| ids[k]).collect()
 }
 
+/// The Aktuelles category's pages (`FUN_0044fe45`): the Tore pro
+/// Spieltag under 3700 (`FUN_00455d6c`) and the Beste Schiris under 4712
+/// (`FUN_00457711`).
+pub const GOALS_PER_MATCHDAY_PAGE: i16 = 0xb;
+pub const REFEREES_PAGE: i16 = 0x14;
+
+/// The goals of each matchday the league has played, both sides' summed
+/// over its pairs (`FUN_00455d6c`).
+pub fn goals_per_matchday(league: &League) -> Vec<i32> {
+    (0..league.played())
+        .map(|md| {
+            league
+                .games(md)
+                .iter()
+                .filter_map(|&(_, _, result)| result)
+                .map(|[home, away, _, _]| i32::from(home) + i32::from(away))
+                .sum()
+        })
+        .collect()
+}
+
+/// A referee of a country's list (`FUN_0072172c`: forty entries of 0x24
+/// in the save's block of the country's slot, `DAT_00b08384`): his id,
+/// name, matches and his mean grade in twentieths, which the game keeps
+/// sorted from the worst down.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Referee {
+    pub id: i16,
+    pub name: String,
+    pub matches: i16,
+    pub grade: i16,
+}
+
+pub fn referees(records: &Records, country: u16) -> Vec<Referee> {
+    const LIST: u32 = 0xb08364;
+    const ENTRY: usize = 0x24;
+    const ENTRIES: usize = 40;
+    const NAME: usize = 30;
+    let slot = records.countries.slot(country.into());
+    let Some(b) = records.block(&format!("{LIST:#x}[{slot}]")) else { return Vec::new() };
+    (0..ENTRIES)
+        .filter_map(|k| b.get(k * ENTRY..(k + 1) * ENTRY))
+        .map(|e| {
+            let word = |at: usize| i16::from_le_bytes([e[at], e[at + 1]]);
+            let name = &e[2..2 + NAME];
+            let end = name.iter().position(|&c| c == 0).unwrap_or(NAME);
+            Referee {
+                id: word(0),
+                name: a3_files::sav::cp1252(&name[..end]),
+                matches: word(0x20),
+                grade: word(0x22),
+            }
+        })
+        .collect()
+}
+
 /// The Liga category's first two pages: the Torjägerliste and the
 /// Scorer, under the single header texts 0xa99 and 0xa9b; behind them
 /// the Vorlagen, the Freistoßschützen and the Elfmeterschützen, under
