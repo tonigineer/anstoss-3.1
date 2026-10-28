@@ -5056,6 +5056,30 @@ mod tests {
         assert_eq!(rows.len(), 9);
     }
 
+    /// The Aktuelles category's Letzter Spieltag shows the league's last
+    /// matchday: places before it, results, half time and gates.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_last_matchday() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 3";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Paarungen\\tZuschauer");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 9);
+        assert_eq!(
+            table.rows[3].text,
+            "VfL Wolfsburg (9.)\t- 1.FC Union Berlin (6.)\t2\t:0\t(1\t:0)\t24.589"
+        );
+        assert_eq!(table.rows[3].ink, [255, 0, 0]);
+        assert_eq!(
+            table.rows[6].text,
+            "FC Bayern München (1.)\t- Borussia Dortmund (10.)\t1\t:1\t(1\t:0)\t75.000"
+        );
+    }
+
     /// The Aktuelles category's Tab. sonstige Länder names the top three of
     /// each country the game does not play in full.
     #[test]

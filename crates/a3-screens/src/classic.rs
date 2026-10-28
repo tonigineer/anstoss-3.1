@@ -420,9 +420,12 @@ pub(crate) fn columns<'a>(
         let align =
             aligns.get(i).copied().flatten().map(|(a, w)| (a, if w == 0.0 { to_next } else { w }));
         match align {
+            // A centred title wider than its column is cut at its right
+            // edge (the Letzter Spieltag's "Zuschauer").
             Some((Align::Centre, width)) => {
                 let at = centred(left, width as i32, font.width(cell, false) as i32);
-                font.draw(frame, at, y, cell, color, false)
+                let clip = (left + width as i32).min(right);
+                font.draw_clipped(frame, at, y, cell, color, false, clip)
             }
             Some((Align::Right, width)) => {
                 font.draw(frame, left + spare(width), y, cell, color, false)

@@ -184,6 +184,19 @@ const CLUB_RANKING_SHOWN: usize = 25;
 const NEWSPAPER_HEADER: u16 = 4709;
 const NEWSPAPER_COLUMNS: [(u16, u16); 2] = [(0, 0), (0x37, 0)];
 const SHORT_DATE: u16 = 1997;
+/// The Letzter Spieltag's header and rows (`FUN_0045491f` with 0x87a1d8,
+/// and 0x87a1a0): the pairing, its result and half time, its gate.
+const LAST_MATCHDAY_HEADER: u16 = 3530;
+const LAST_MATCHDAY_HEADER_COLUMNS: [(u16, u16); 2] = [(C, 0xc8), (C | 0x172, 0x32)];
+const LAST_MATCHDAY_ROW_COLUMNS: [(u16, u16); 7] = [
+    (0, 0),
+    (0x8a, 0),
+    (R | 0x118, 0xe),
+    (0x127, 0),
+    (R | 0x145, 0xe),
+    (0x154, 0),
+    (R | 0x168, 0x32),
+];
 /// The Tab. sonstige Länder's header and rows (`FUN_00457449` with
 /// 0x87a458, and 0x87a470), the top three of each, the first red.
 const OTHER_TABLES_HEADER: u16 = 4711;
@@ -1658,6 +1671,9 @@ impl Statistics {
             Some(statistics::CLUB_RANKING_PAGE) if self.category == AKTUELLES => {
                 self.club_ranking_page(cx, view)
             }
+            Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
+                self.last_matchday_page(cx, view)
+            }
             Some(statistics::OTHER_TABLES_PAGE) if self.category == AKTUELLES => {
                 self.other_tables_page(cx, view)
             }
@@ -2990,6 +3006,68 @@ impl Statistics {
             *table = TableState {
                 columns: CLUB_RANKING_ROW_COLUMNS.to_vec(),
                 centred: CLUB_RANKING_SHOWN as i32,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Letzter Spieltag (`FUN_0045491f`): the league of the strip's
+    /// last matchday played, each pair "%s %s\t- %s %s\t%d\t:%d\t(%d\t:%d)\t%s"
+    /// — the sides with their places before it, "(%d.)" from the second
+    /// matchday on (`FUN_0069105e`), the result and half time as the matrix
+    /// holds them, and the home club's last gate (`FUN_00474005`) — red
+    /// where the own club plays; from the top of the window.
+    fn last_matchday_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        let header = game.text(LAST_MATCHDAY_HEADER).to_owned();
+        set_header(view, dialog, header, &LAST_MATCHDAY_HEADER_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let md = league.played().saturating_sub(1);
+        let place = |slot: usize| match league.place_before(slot) {
+            0 => String::new(),
+            p => format!("({p}.)"),
+        };
+        let gate = |team: i16| {
+            let g = u16::try_from(team)
+                .ok()
+                .and_then(|t| records.team(country, t))
+                .map_or(0, statistics::last_gate);
+            match g {
+                ..1000 => g.to_string(),
+                1000..1_000_000 => format!("{}.{:03}", g / 1000, g % 1000),
+                _ => format!("{}.{:03}.{:03}", g / 1_000_000, g % 1_000_000 / 1000, g % 1000),
+            }
+        };
+        let rows: Vec<TableRow> = league
+            .games(md)
+            .iter()
+            .map(|&(h, a, result)| {
+                let (home, away) = (league.team(h), league.team(a));
+                let [gh, ga, hh, ha] = result.unwrap_or([0xff; 4]);
+                let text = format!(
+                    "{} {}\t- {} {}\t{gh}\t:{ga}\t({hh}\t:{ha})\t{}",
+                    game.club_name(Some(records), country as u8, home),
+                    place(h),
+                    game.club_name(Some(records), country as u8, away),
+                    place(a),
+                    gate(home)
+                );
+                let ours = own == Some((country, home)) || own == Some((country, away));
+                TableRow { text, ink: if ours { OWN_INK } else { INK }, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: LAST_MATCHDAY_ROW_COLUMNS.to_vec(),
+                centred: -1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

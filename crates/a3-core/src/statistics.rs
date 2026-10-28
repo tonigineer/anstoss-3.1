@@ -1023,8 +1023,19 @@ pub const REFEREES_PAGE: i16 = 0x14;
 /// The Zeitungsmeldungen under 4709 (`FUN_004571ee`) and the europ.
 /// Vereinsrangliste under 4717 (`FUN_00457b04`).
 pub const NEWSPAPER_PAGE: i16 = 0x12;
+/// The Letzter Spieltag under 3530 (`FUN_0045491f`).
+pub const LAST_MATCHDAY_PAGE: i16 = 6;
 /// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
+
+/// A club's gate at its last home game (`FUN_0063f021`): of the gates its
+/// record keeps, the one its count of home games names, none past 23.
+pub fn last_gate(team: &Team) -> i32 {
+    match usize::from(team.home_games()) {
+        n @ 1..=23 => team.gates()[n - 1],
+        _ => 0,
+    }
+}
 
 /// The table of a country the game does not play in full (`DAT_00b9f918`,
 /// 0xc a country the save keeps: the country, the matchdays it has drawn
