@@ -159,6 +159,7 @@ const MANNSCHAFT: usize = 1;
 /// (`FUN_00457711` with 0x87a488, and 0x87a4a8), the two lists' titles
 /// 4713 and 4734.
 const AKTUELLES: usize = 3;
+const HISTORY: usize = 4;
 /// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
 /// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
 /// the European cups and the cup.
@@ -230,6 +231,23 @@ const DAY_ELEVEN_PLACES: [(i32, i32); 11] = [
     (100, 0),
     (288, 0),
 ];
+/// The Historisches' Ewige Torjägerliste (`FUN_0045f3c0`, page 0x18):
+/// place, name, club, "*" while he still plays in the country, games,
+/// goals and the third figure; the own club's in blue (COLORREF
+/// 0xff0000). Its Ewige Einsätze (`FUN_0045f0d4`, page 0x1b): place,
+/// name, games, cup games and caps, all black.
+const ALL_TIME_SCORERS_PAGE: i16 = 0x18;
+const ALL_TIME_SCORERS_HEADER: u16 = 3016;
+const ALL_TIME_SCORERS_HEADER_COLUMNS: [(u16, u16); 7] =
+    [(C, 25), (30, 0), (180, 0), (C | 304, 20), (C | 328, 30), (C | 361, 30), (C | 402, 30)];
+const ALL_TIME_SCORERS_ROW_COLUMNS: [(u16, u16); 7] =
+    [(R, 25), (30, 0), (180, 0), (C | 310, 10), (R | 320, 30), (R | 356, 30), (R | 392, 30)];
+const ALL_TIME_GAMES_PAGE: i16 = 0x1b;
+const ALL_TIME_GAMES_HEADER: u16 = 3015;
+const ALL_TIME_GAMES_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(R, 25), (30, 0), (C | 200, 40), (C | 242, 40), (C | 285, 50)];
+const ALL_TIME_GAMES_ROW_COLUMNS: [(u16, u16); 5] =
+    [(R, 25), (30, 0), (R | 200, 30), (R | 240, 30), (R | 280, 35)];
 /// The Mannschaftsvergleich's header and rows (`FUN_00450c3f` with
 /// 0x87a0d8 and 0x87a0f0): a label and a column for each club, the lines'
 /// rows three columns for each; its labels from 2957 on, the lines'
@@ -1867,6 +1885,11 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(code @ (ALL_TIME_SCORERS_PAGE | ALL_TIME_GAMES_PAGE))
+                if self.category == HISTORY =>
+            {
+                self.country_all_time_page(cx, view, code == ALL_TIME_SCORERS_PAGE)
+            }
             Some(statistics::COMPARISON_PAGE) if self.category == AKTUELLES => {
                 self.comparison_page(cx, view)
             }
@@ -3419,6 +3442,62 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Ewige Torjägerliste and the Ewige Einsätze of the country the
+    /// strip stands at (`FUN_0045f3c0`, `FUN_0045f0d4`): its first
+    /// league's twenty best by goals and by games, as the game keeps them.
+    fn country_all_time_page(&self, cx: &Cx, view: &mut View, scorers: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let country = self.strip_country(records);
+        let (header, header_columns, columns): (u16, &[(u16, u16)], &[(u16, u16)]) = if scorers {
+            (
+                ALL_TIME_SCORERS_HEADER,
+                &ALL_TIME_SCORERS_HEADER_COLUMNS,
+                &ALL_TIME_SCORERS_ROW_COLUMNS,
+            )
+        } else {
+            (ALL_TIME_GAMES_HEADER, &ALL_TIME_GAMES_HEADER_COLUMNS, &ALL_TIME_GAMES_ROW_COLUMNS)
+        };
+        set_header(view, dialog, game.text(header).to_owned(), header_columns);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), t.number()));
+        let list = if scorers {
+            statistics::all_time_scorers_of(records, country)
+        } else {
+            statistics::all_time_games_of(records, country)
+        };
+        let rows = list
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let name = spelled(records, a.names[0], a.names[1]);
+                let [first, second, third] = a.figures;
+                let (text, ink) = if scorers {
+                    let club = game.club_name(Some(records), country as u8, i16::from(a.team));
+                    let active = if a.active { "*" } else { " " };
+                    let ours = own == Some((country, a.team));
+                    let text =
+                        format!("{}.\t{name}\t{club}\t{active}\t{third}\t{first}\t{second}", i + 1);
+                    (text, if ours { STAR_INK } else { INK })
+                } else {
+                    (format!("{}.\t{name}\t{first}\t{second}\t{third}\t", i + 1), INK)
+                };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: columns.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
     }
 
     /// The Mannschaftsvergleich (`FUN_00450c3f`): the own club beside the

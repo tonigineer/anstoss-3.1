@@ -5111,6 +5111,28 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// The Historisches category's Ewige Torjägerliste and Ewige Einsätze
+    /// list the country's first league's twenty best scorers, with their
+    /// clubs, and its most fielded players.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_countrys_all_time_best() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 4\nnow row 1284 0";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 20);
+        assert_eq!(table.rows[0].text, "1.\tHarry Kane\tFC Bayern München\t*\t3\t3\t1");
+        let next = format!("{then}\nnow row 1284 1");
+        let Some(runner) = on_save(&game, "A", &next) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows[0].text.starts_with("1.\t"));
+        assert!(table.rows[0].text.ends_with("\t3\t1\t0\t"));
+    }
+
     /// With the department raised, the Aktuelles category's Elf des
     /// Jahres puts the country's team of the season on the canvas, each
     /// name with how often he made the day's eleven.

@@ -1512,6 +1512,62 @@ pub fn day_eleven(records: &Records, country: u16, level: u8) -> [(u16, u8); 11]
     eleven
 }
 
+/// A player of a country's all-time lists, kept for its first league
+/// (`FUN_005dbf39`, `FUN_005db9b7`): his names in the pool, whether he
+/// still plays in the country, his club's number there, and the list's
+/// figures — goals, the third column and games for the scorers, games,
+/// cup games and caps for the appearances.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllTime {
+    pub names: [u16; 2],
+    pub active: bool,
+    pub team: u8,
+    pub figures: [i16; 3],
+}
+
+/// The Ewige Torjägerliste (`FUN_0045f3c0`, `DAT_00b17b70` in the lists
+/// block, 0x140 a country by its slot) and the Ewige Einsätze
+/// (`FUN_0045f0d4`, `DAT_00b1a988`, 0x118 a slot): twenty entries each,
+/// those with a first figure.
+const COUNTRY_SCORERS: (usize, usize, usize) = (0xc4b8, 0x140, 0x10);
+const COUNTRY_GAMES: (usize, usize, usize) = (0xf2d0, 0x118, 0xe);
+const COUNTRY_ENTRIES: usize = 20;
+
+pub fn all_time_scorers_of(records: &Records, country: u16) -> Vec<AllTime> {
+    all_time(records, country, COUNTRY_SCORERS, |e, word| AllTime {
+        names: [word(0) as u16, word(2) as u16],
+        active: e[8] != 0,
+        team: e[9],
+        figures: [word(0xa), word(0xc), word(0xe)],
+    })
+}
+
+pub fn all_time_games_of(records: &Records, country: u16) -> Vec<AllTime> {
+    all_time(records, country, COUNTRY_GAMES, |e, word| AllTime {
+        names: [word(0) as u16, word(2) as u16],
+        active: e[8] != 0,
+        team: e[9],
+        figures: [word(0xa), i16::from(e[0xc]), i16::from(e[0xd])],
+    })
+}
+
+fn all_time(
+    records: &Records,
+    country: u16,
+    (at, per_slot, entry): (usize, usize, usize),
+    read: impl Fn(&[u8], &dyn Fn(usize) -> i16) -> AllTime,
+) -> Vec<AllTime> {
+    let from = at + usize::from(records.countries.slot(country.into())) * per_slot;
+    let Some(b) = records.block(LISTS).and_then(|b| b.get(from..from + per_slot)) else {
+        return Vec::new();
+    };
+    (0..COUNTRY_ENTRIES)
+        .map(|i| &b[i * entry..(i + 1) * entry])
+        .map(|e| read(e, &|at| i16::from_le_bytes([e[at], e[at + 1]])))
+        .filter(|a| a.figures[0] != 0)
+        .collect()
+}
+
 /// A club's column of the Mannschaftsvergleich (`FUN_00450c3f`), over
 /// its squad: its mean age in tenths, the young (under 22) and the old
 /// (over 32), the first-league appearances (`FUN_00704bfb` over the
