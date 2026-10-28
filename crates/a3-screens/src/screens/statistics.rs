@@ -288,8 +288,12 @@ const FOREIGN_HEADER_COLUMNS: [(u16, u16); 5] =
 const FOREIGN_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 0x14), (0x19, 0), (R | 0xc8, 0x32), (R | 0xfa, 0x32), (0x14, 0x8000)];
 /// The Erhaltene Elfmeter's header and rows (`FUN_0044df6d` with
-/// 0x879c90, and 0x879cb0): rank, club, penalties awarded and scored.
+/// 0x879c90, and 0x879cb0): rank, club, penalties awarded and scored; the
+/// Häufigste Einwechsl. and Auswechsl. take the same blocks (`FUN_0044d9d1`,
+/// `FUN_0044dc9f`).
 const PENALTIES_HEADER: u16 = 0x1287;
+const SUBS_IN_HEADER: u16 = 0x1285;
+const SUBS_OUT_HEADER: u16 = 0x1286;
 const PENALTIES_HEADER_COLUMNS: [(u16, u16); 4] =
     [(R, 0x19), (0x1e, 0), (C | 0xc8, 0x32), (C | 0xfa, 0x3c)];
 const PENALTIES_ROW_COLUMNS: [(u16, u16); 4] =
@@ -747,9 +751,11 @@ impl Statistics {
             Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
                 self.chance_page(cx, view)
             }
-            Some(statistics::PENALTIES_PAGE) if self.category == LIGA => {
-                self.club_list_page(cx, view)
-            }
+            Some(
+                code @ (statistics::PENALTIES_PAGE
+                | statistics::SUBS_IN_PAGE
+                | statistics::SUBS_OUT_PAGE),
+            ) if self.category == LIGA => self.club_list_page(cx, view, code),
             Some(
                 code @ (statistics::OVERVIEW_PAGE
                 | statistics::AGE_PAGE
@@ -1207,15 +1213,23 @@ impl Statistics {
 
     /// The pages of the club lists the game rebuilds for each league
     /// (`FUN_00724739`), drawn as saved, from the top of the window, the
-    /// own club red: the Erhaltene Elfmeter (`FUN_0044df6d`),
-    /// "%d.\t%s\t%d\t%d".
-    fn club_list_page(&self, cx: &Cx, view: &mut View) -> bool {
+    /// own club red, "%d.\t%s\t%d\t%d": the Erhaltene Elfmeter
+    /// (`FUN_0044df6d`), the Häufigste Einwechsl. (`FUN_0044d9d1`, its
+    /// format with a tab more at the end) and Auswechsl. (`FUN_0044dc9f`).
+    fn club_list_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
-        let (header, header_columns, columns) =
-            (PENALTIES_HEADER, &PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS);
-        let list = statistics::penalties_awarded(records, country, level);
+        let (header_columns, columns) = (&PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS);
+        let (header, list, end) = match code {
+            statistics::SUBS_IN_PAGE => {
+                (SUBS_IN_HEADER, statistics::substitutions_in(records, country, level), "\t")
+            }
+            statistics::SUBS_OUT_PAGE => {
+                (SUBS_OUT_HEADER, statistics::substitutions_out(records, country, level), "")
+            }
+            _ => (PENALTIES_HEADER, statistics::penalties_awarded(records, country, level), ""),
+        };
         set_header(view, dialog, game.text(header).to_owned(), header_columns);
         let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
         let rows = list
@@ -1224,7 +1238,7 @@ impl Statistics {
             .map(|(i, row)| {
                 let club = game.club_name(Some(records), row.country as u8, row.team);
                 let [first, second] = row.values;
-                let text = format!("{}.\t{club}\t{first}\t{second}", i + 1);
+                let text = format!("{}.\t{club}\t{first}\t{second}{end}", i + 1);
                 let ink = if own == Some((row.country, row.team)) { OWN_INK } else { INK };
                 TableRow { text, ink, mark: None, columns: None }
             })

@@ -5107,6 +5107,31 @@ mod tests {
         assert_eq!(table.rows[2].ink, [255, 0, 0]);
     }
 
+    /// The Häufigste Einwechsl. and Auswechsl. list the clubs by their
+    /// substitutions, as the game keeps them.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_leagues_substitutions() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let liga = "now click bar 14\nuntil dialog 18\nnow row 1283 2";
+        let Some(runner) = on_save(&game, "A", &format!("{liga}\nnow row 1284 17")) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Pl.\\tVerein\\tEinw.\\tTore");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        // The substitutes' page ends its rows with a tab.
+        assert_eq!(table.rows[0].text, "1.\tFC Augsburg\t9\t0\t");
+        assert_eq!(table.rows[17].text, "18.\t1.FC Union Berlin\t1\t0\t");
+        assert_eq!(table.rows[17].ink, [255, 0, 0]);
+        let Some(runner) = on_save(&game, "A", &format!("{liga}\nnow row 1284 18")) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Pl.\\tVerein\\tAusw.\\tTore");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tFC Augsburg\t9\t0");
+        assert_eq!(table.rows[17].text, "18.\t1.FC Union Berlin\t1\t0");
+    }
+
     /// The Chancenverwertung reckons each club's quote of goals from its
     /// chances and ranks the league by it.
     #[test]

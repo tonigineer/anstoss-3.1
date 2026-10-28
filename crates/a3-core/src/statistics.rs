@@ -541,8 +541,12 @@ pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
 pub const OVERVIEW_PAGE: i16 = 0xb;
 pub const AGE_PAGE: i16 = 0xc;
 pub const FOREIGN_PAGE: i16 = 0xe;
-/// Erhaltene Elfmeter under 0x1287 (`FUN_0044df6d`).
+/// Erhaltene Elfmeter under 0x1287 (`FUN_0044df6d`); Häufigste
+/// Einwechsl. and Auswechsl. under 0x1285 and 0x1286 (`FUN_0044d9d1`,
+/// `FUN_0044dc9f`).
 pub const PENALTIES_PAGE: i16 = 0x13;
+pub const SUBS_IN_PAGE: i16 = 0x1e;
+pub const SUBS_OUT_PAGE: i16 = 0x1f;
 
 /// A club's figures as `FUN_00642cd4` gathers them for the club pages,
 /// an entry of 0x1c bytes each: its number, its strength in tenths (+2),
@@ -711,6 +715,12 @@ pub struct ClubCount {
 /// club's country and number, then its club's +0xdea and +0xdeb, the
 /// most awarded first.
 const PENALTY_CLUBS: &str = "0xaeab40";
+/// The substitutions a club made (`DAT_00ae9850` and `DAT_00aea1d8`, of
+/// the same shape): in — its team +0x339, and the goals its substitutes
+/// scored, +0x33b — and out, +0x33a, its second figure always 0
+/// (`FUN_00722dda` writes it so); the most first.
+const SUBS_IN_CLUBS: &str = "0xae9830";
+const SUBS_OUT_CLUBS: &str = "0xaea1b8";
 
 /// A league's rebuilt club list as the page copies it out (`FUN_00721008`
 /// and its siblings, by the league's list index `FUN_00677b07`): its
@@ -734,6 +744,18 @@ fn club_list(records: &Records, country: u16, level: u8, list: &str, entry: usiz
 /// and scored.
 pub fn penalties_awarded(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
     club_list(records, country, level, PENALTY_CLUBS, 8)
+}
+
+/// The Häufigste Einwechsl. (`FUN_0044d9d1`): each club's substitutes
+/// brought on and the goals they scored.
+pub fn substitutions_in(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    club_list(records, country, level, SUBS_IN_CLUBS, 8)
+}
+
+/// The Häufigste Auswechsl. (`FUN_0044dc9f`): each club's players taken
+/// off.
+pub fn substitutions_out(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    club_list(records, country, level, SUBS_OUT_CLUBS, 8)
 }
 
 /// A club of the Chancenverwertung: its number, its quote in whole
