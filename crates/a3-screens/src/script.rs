@@ -5111,6 +5111,32 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// The Historisches category's ewige Tabellen rank the clubs of the
+    /// country's first league over all its seasons, this one's added: by
+    /// points, with Germany's two notes under them, and by points a game.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_all_time_tables() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 4\nnow row 1284 7";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert!(texts[0].starts_with("1.\tFC Bayern München\t2047\t4156\t"));
+        let last = texts.len() - 1;
+        assert_eq!(texts[last], "1993/94 wurden Dresden 4 Punkte abgezogen.");
+        assert_eq!(table.rows[last].columns, Some(vec![(0, 0)]));
+        let next = format!("{then}\nnow row 1284 8");
+        let Some(runner) = on_save(&game, "A", &next) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows[1].text.starts_with("2.\tRB Leipzig\t309\t1.83\t"));
+        assert!(table.rows[12].text.starts_with("13.\t1.FC Union Berlin\t207\t1.38\t"));
+        assert_eq!(table.rows[12].ink, [255, 0, 0]);
+    }
+
     /// The Historisches category's Häufigstes Ergebnis ranks the league's
     /// scores by how often they came out; its Trainerrauswürfe stay empty
     /// before a first sacking.

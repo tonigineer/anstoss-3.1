@@ -1037,6 +1037,9 @@ pub const OTHER_TABLES_PAGE: i16 = 0x13;
 /// (`FUN_00463a9b`) and Ligapokal/Supercup (`FUN_0046364c`).
 pub const FIVE_YEARS_PAGE: i16 = 0x17;
 pub const LEADERS_PAGE: i16 = 0x21;
+/// The Abs. and Rel. ewige Tabelle (`FUN_00460f97`, `FUN_00461ac7`).
+pub const ABSOLUTE_PAGE: i16 = 0x23;
+pub const RELATIVE_PAGE: i16 = 0x24;
 /// The Trainerrauswürfe (`FUN_00465cfa`) and the Häufigstes Ergebnis
 /// (`FUN_0046686a`).
 pub const SACKED_PAGE: i16 = 0x33;
@@ -1553,6 +1556,99 @@ pub fn five_years(records: &Records) -> Vec<(u16, [f32; 7])> {
             (g.get::<i16>(at) as u16, points)
         })
         .collect()
+}
+
+/// A country's all-time first-league figures (`FUN_0072b25b` mode 0):
+/// each club number's games, points, goals for and against over its
+/// seasons there (`DAT_00b131c4` in the lists block, 0xa20 a country by
+/// its slot, twelve words a club — all, at home, away), this season's
+/// table of the first league added (`FUN_007293ea`); nothing for a
+/// country not played.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Eternal {
+    pub team: i16,
+    pub games: i32,
+    pub points: i32,
+    pub goals_for: i32,
+    pub goals_against: i32,
+}
+
+const ETERNAL: (usize, usize) = (0x7b0c, 0xa20);
+
+pub fn eternal(records: &Records, country: u16) -> Vec<Eternal> {
+    if !records.globals.played(country as i16) {
+        return Vec::new();
+    }
+    let (at, per_slot) = ETERNAL;
+    let from = at + usize::from(records.countries.slot(country.into())) * per_slot;
+    let Some(b) = records.block(LISTS).and_then(|b| b.get(from..from + per_slot)) else {
+        return Vec::new();
+    };
+    let word =
+        |at: usize| b.get(at..at + 2).map_or(0, |w| i32::from(i16::from_le_bytes([w[0], w[1]])));
+    let teams = records.countries.team_count(country.into()).max(0);
+    let mut rows: Vec<Eternal> = (0..teams)
+        .map(|t| {
+            let at = 24 * t as usize;
+            Eternal {
+                team: t,
+                games: word(at),
+                points: word(at + 2),
+                goals_for: word(at + 4),
+                goals_against: word(at + 6),
+            }
+        })
+        .collect();
+    if let Some(league) = League::of(records, country, 0) {
+        for row in table(records, &league, ALL) {
+            if let Some(e) = usize::try_from(row.team).ok().and_then(|t| rows.get_mut(t)) {
+                e.games += row.games;
+                e.points += row.points;
+                e.goals_for += row.goals_for;
+                e.goals_against += row.goals_against;
+            }
+        }
+    }
+    rows
+}
+
+/// The Abs. ewige Tabelle's order (`FUN_0072b9b9` with `FUN_0072bc49`):
+/// points, then the goal difference, then goals scored, then more games
+/// first; clubs alike keep their numbers' order.
+pub fn absolute_order(rows: &mut [Eternal]) {
+    rows.sort_by_key(|e| {
+        let diff = e.goals_for - e.goals_against;
+        std::cmp::Reverse((e.points, diff, e.goals_for, e.games))
+    });
+}
+
+/// The Rel. ewige Tabelle's order (`FUN_00461ac7`): an exchange sort
+/// that leaves out the last club number. A club without games gives way
+/// to one with; of two with games, at equal points and games the better
+/// difference, then the more goals go first, else the higher points a
+/// game in single precision.
+pub fn relative_order(rows: &mut [Eternal]) {
+    let n = rows.len();
+    for i in 0..n.saturating_sub(2) {
+        for j in i + 1..n - 1 {
+            let (a, b) = (rows[i], rows[j]);
+            let swap = if a.games == 0 {
+                b.games > 0
+            } else if b.games > 0 {
+                if a.points == b.points && a.games == b.games {
+                    let (da, db) = (a.goals_for - a.goals_against, b.goals_for - b.goals_against);
+                    da < db || (da == db && a.goals_for < b.goals_for)
+                } else {
+                    (a.points as f32 / a.games as f32) < (b.points as f32 / b.games as f32)
+                }
+            } else {
+                false
+            };
+            if swap {
+                rows.swap(i, j);
+            }
+        }
+    }
 }
 
 /// The league's results by score (`FUN_0046686a` by `FUN_007218db`: the

@@ -248,6 +248,37 @@ const ALL_TIME_GAMES_HEADER_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (C | 200, 40), (C | 242, 40), (C | 285, 50)];
 const ALL_TIME_GAMES_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (R | 200, 30), (R | 240, 30), (R | 280, 35)];
+/// The Abs. ewige Tabelle's header and rows (`FUN_00460f97` with 0x87d240,
+/// and 0x87d200), and the Rel.'s (`FUN_00461ac7` with 0x87d2b0, and
+/// 0x87d270); Germany's two notes under the first.
+const ABSOLUTE_HEADER: u16 = 3022;
+const ABSOLUTE_HEADER_COLUMNS: [(u16, u16); 6] =
+    [(R, 25), (30, 0), (C | 205, 40), (C | 245, 50), (C | 295, 40), (C | 338, 50)];
+const ABSOLUTE_ROW_COLUMNS: [(u16, u16); 8] = [
+    (R, 25),
+    (30, 0),
+    (R | 200, 40),
+    (R | 245, 40),
+    (R | 290, 35),
+    (R | 325, 35),
+    (362, 0),
+    (367, 0),
+];
+const RELATIVE_HEADER: u16 = 3023;
+const RELATIVE_HEADER_COLUMNS: [(u16, u16); 6] =
+    [(C, 25), (30, 0), (C | 210, 40), (C | 250, 55), (C | 310, 34), (C | 350, 40)];
+const RELATIVE_ROW_COLUMNS: [(u16, u16); 8] = [
+    (R, 25),
+    (30, 0),
+    (R | 200, 40),
+    (R | 245, 50),
+    (R | 300, 35),
+    (R | 335, 35),
+    (372, 0),
+    (375, 0),
+];
+const GERMANY: u16 = 14;
+const GERMAN_NOTES: [u16; 2] = [5004, 5005];
 /// The Häufigstes Ergebnis' header and rows (`FUN_0046686a` with
 /// 0x87d884, and 0x87d854): place, the score, this season's count and the
 /// total.
@@ -2025,6 +2056,11 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(code @ (statistics::ABSOLUTE_PAGE | statistics::RELATIVE_PAGE))
+                if self.category == HISTORY =>
+            {
+                self.eternal_page(cx, view, code == statistics::RELATIVE_PAGE)
+            }
             Some(statistics::SCORES_PAGE) if self.category == HISTORY => self.scores_page(cx, view),
             Some(statistics::SACKED_PAGE) if self.category == HISTORY => self.sacked_page(cx, view),
             Some(statistics::LEADERS_PAGE) if self.category == HISTORY => {
@@ -3596,6 +3632,56 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Abs. or Rel. ewige Tabelle (`FUN_00460f97`, `FUN_00461ac7`) of
+    /// the country the strip stands at: the clubs that played its first
+    /// league, by points or by points a game, numbered as shown; the own
+    /// club red. Under Germany's absolute table, its two notes.
+    fn eternal_page(&self, cx: &Cx, view: &mut View, relative: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let country = self.strip_country(records);
+        let (header, columns): (u16, &[(u16, u16)]) = if relative {
+            (RELATIVE_HEADER, &RELATIVE_HEADER_COLUMNS)
+        } else {
+            (ABSOLUTE_HEADER, &ABSOLUTE_HEADER_COLUMNS)
+        };
+        set_header(view, dialog, game.text(header).to_owned(), columns);
+        let mut table = statistics::eternal(records, country);
+        if relative {
+            statistics::relative_order(&mut table);
+        } else {
+            statistics::absolute_order(&mut table);
+        }
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let mut rows: Vec<TableRow> = table
+            .iter()
+            .filter(|e| e.games != 0)
+            .enumerate()
+            .map(|(i, e)| {
+                let club = game.club_name(Some(records), country as u8, e.team);
+                let (gf, ga) = (e.goals_for, e.goals_against);
+                let points = if relative {
+                    fixed(f64::from(e.points) / f64::from(e.games), 2)
+                } else {
+                    e.points.to_string()
+                };
+                let (n, games, diff) = (i + 1, e.games, gf - ga);
+                let text = format!("{n}.\t{club}\t{games}\t{points}\t{diff}\t{gf}\t:\t{ga}");
+                let ink = if own == Some((country, e.team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if !relative && country == GERMANY {
+            for note in GERMAN_NOTES {
+                let text = game.text(note).to_owned();
+                rows.push(TableRow { text, ink: INK, mark: None, columns: Some(vec![(0, 0)]) });
+            }
+        }
+        let columns = if relative { &RELATIVE_ROW_COLUMNS } else { &ABSOLUTE_ROW_COLUMNS };
+        self.plain_table(view, dialog, columns, rows);
+        true
     }
 
     /// The Häufigstes Ergebnis (`FUN_0046686a`): the league's twenty most
