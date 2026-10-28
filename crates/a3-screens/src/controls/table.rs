@@ -36,6 +36,8 @@ const RIGHT: u16 = 0x8000;
 const FIRST_IN: i32 = 2;
 /// Where a row stands in a window no page gave columns (`FUN_006df140`).
 const PLAIN_IN: i32 = 3;
+/// How much of the rows' width the bar takes.
+const BAR_WIDE: i32 = 0x14;
 /// The cross-table's own cell (`FUN_0079c74a` with COLORREF 200), and
 /// how far down its bar's track stands.
 const ACROSS_BLUE: Rgba<u8> = Rgba([0, 0, 200, 255]);
@@ -233,6 +235,9 @@ impl TableState {
         }
         let (first, pitch) = self.layout(height as i32);
         let cells = self.cells();
+        // With the bar standing, `FUN_006de7b0` takes its 0x14 off the
+        // rows' width, where their cells end.
+        let width = if self.scrolls() { self.width - BAR_WIDE } else { self.width };
         for (i, row) in self.rows.iter().skip(self.scroll).take(SHOWN).enumerate() {
             let y = first + i as i32 * pitch;
             if let Some([r, g, b]) = row.mark {
@@ -255,10 +260,10 @@ impl TableState {
             let place = self.scroll + i;
             for (k, (text, &(left, align, right))) in row.text.split('\t').zip(cells).enumerate()
             {
-                if left >= self.width {
+                if left >= width {
                     break;
                 }
-                let right = right.min(self.width);
+                let right = right.min(width);
                 // The cross-table starts its labels where the column
                 // stands; the other tables give the first one two over.
                 let in_ = if self.cross.is_some() || k > 0 { 0 } else { FIRST_IN };

@@ -4892,6 +4892,41 @@ mod tests {
         assert!(table.rows.iter().all(|r| r.ink == [0, 0, 0]));
     }
 
+    /// More of the Mannschaft category's lists over the own squad: the
+    /// Scorer and the Vorlagen keep only the players with a figure, the
+    /// Fairneß and the Gelbe Karten all of them.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_squads_figures() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let page = |row: u32| {
+            format!("now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 {row}")
+        };
+        let texts = |row: u32| -> Option<(String, Vec<String>, i32)> {
+            let runner = on_save(&game, "A", &page(row))?;
+            let view = runner.host.view();
+            let header = view.text(control(dialog, 1292).unwrap()).to_owned();
+            let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+            Some((header, table.rows.iter().map(|r| r.text.clone()).collect(), table.centred))
+        };
+        let Some((header, rows, centred)) = texts(3) else { return };
+        assert_eq!(header, "Nr.\\tName\\tGesamt\\tlSp\\tTore\\tlSp\\tVorl.\\tlSp");
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[0], "1.\tJosip Juranovic\t2\t(0)\t1\t(0)\t1\t(0)");
+        assert_eq!(centred, -1);
+        let Some((header, rows, centred)) = texts(6) else { return };
+        assert_eq!(header, "Nr\\tName\\tPunkte\\tRot\\tGelb-Rot\\tGelb\\tSptg. gesp");
+        assert_eq!(rows.len(), 26);
+        assert_eq!(rows[0], "1.\tDiogo Leite\t5\t1\t0\t0\t0");
+        assert_eq!(centred, 26);
+        let Some((_, rows, _)) = texts(8) else { return };
+        assert_eq!(rows, ["1.\tDanilho Doekhi\t1\t(0)", "2.\tJosip Juranovic\t1\t(0)"]);
+        let Some((header, rows, _)) = texts(9) else { return };
+        assert_eq!(header, "Nr\\tName\\tLiga\\tPokal\\tEuropapokal");
+        assert_eq!(rows[1], "2.\tOliver Burke\t1\t1\t0");
+    }
+
     /// The Liga category names its players and counts their goals,
     /// assists, free kicks and penalties.
     #[test]

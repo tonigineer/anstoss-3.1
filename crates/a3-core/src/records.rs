@@ -206,6 +206,8 @@ record! {
     /// Matches of the competitions of the kinds 12 to 15 this season: his
     /// internationals.
     0x266 => kind_12_matches, set_kind_12_matches: u8;
+    /// Matchdays he sat out banned this season.
+    0x267 => banned_matchdays, set_banned_matchdays: u8;
     /// Bit 7: he ends his career; bit 5: his strength is not known yet
     /// (an amateur's, `CAmateure::FUN_0070699b`).
     0x26f => retiring, set_retiring: u8;
@@ -269,6 +271,9 @@ record! {
     0x246 => own_goals, set_own_goals: u8;
     0x247 => assists, set_assists: u8;
     0x248 => joker_goals, set_joker_goals: u8;
+    /// His goals and assists in the last match.
+    0x249 => last_goals, set_last_goals: u8;
+    0x24a => last_assists, set_last_assists: u8;
     /// Penalties and free kicks this season: taken, and scored.
     0x24b => penalties, set_penalties: [u8; 2];
     0x24d => free_kicks, set_free_kicks: [u8; 2];

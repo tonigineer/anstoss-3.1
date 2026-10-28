@@ -301,15 +301,29 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
 }
 
 /// The Mannschaft category's pages over the own squad (`FUN_004677f5`):
-/// the Torjägerliste under text 2413 (`FUN_00469f05(0)`).
+/// the Torjägerliste under text 2413 (`FUN_00469f05(0)`), the Scorer
+/// under 3037 (`FUN_0046b87a`), the Fairneß under 2404 (`FUN_004679ef`),
+/// the Vorlagen under 3036 (`FUN_0046b4cf`) and the Gelbe Karten under
+/// 2405 (`FUN_00467de7`).
 pub const SQUAD_SCORERS_PAGE: i16 = 0;
+pub const SQUAD_POINTS_PAGE: i16 = 2;
+pub const SQUAD_FAIRNESS_PAGE: i16 = 6;
+pub const SQUAD_ASSISTS_PAGE: i16 = 0xc;
+pub const SQUAD_YELLOW_PAGE: i16 = 0xe;
 
 /// The own squad in a page's order (`FUN_0046767e`'s exchange sort over
 /// the indexes `FUN_00467645` lays out): the players as the club lists
-/// them, every place from the first up swapping with the first of the
-/// rest whose key is greater.
-pub fn squad_by(records: &Records, team: &Team, key: impl Fn(&Player) -> i32) -> Vec<u16> {
-    let ids = team.players();
+/// them that the page keeps — it leaves the others out before it sorts —
+/// every place from the first up swapping with the first of the rest
+/// whose key is greater.
+pub fn squad_by(
+    records: &Records,
+    team: &Team,
+    keep: impl Fn(&Player) -> bool,
+    key: impl Fn(&Player) -> i32,
+) -> Vec<u16> {
+    let ids: Vec<u16> =
+        team.players().into_iter().filter(|&id| records.player(id).is_none_or(&keep)).collect();
     let keys: Vec<i32> = ids.iter().map(|&id| records.player(id).map_or(0, &key)).collect();
     let mut order: Vec<usize> = (0..ids.len()).collect();
     for i in 0..order.len() {
@@ -625,15 +639,19 @@ const FIELDED_MOST: usize = 50;
 /// (`FUN_0067582a`), whether he is a foreigner — of another nation than
 /// `country`, a Briton only outside Britain — and how many nations
 /// besides the country's own the squad brings.
-pub fn club_figures(records: &Records, country: u16, level: u8, today: NaiveDate) -> Vec<ClubFigures> {
+pub fn club_figures(
+    records: &Records,
+    country: u16,
+    level: u8,
+    today: NaiveDate,
+) -> Vec<ClubFigures> {
     let Some(league) = League::of(records, country, level) else { return Vec::new() };
     (0..league.teams())
         .map(|place| {
             let team = league.team(place);
             let mut figures = ClubFigures { team, ..ClubFigures::default() };
-            let Some(record) = u16::try_from(team).ok().and_then(|t| records.team(country, t)) else {
-                return figures;
-            };
+            let record = u16::try_from(team).ok().and_then(|t| records.team(country, t));
+            let Some(record) = record else { return figures };
             figures.strength = strength(records, record);
             let ids = record.players();
             let mut sum = 0i16;
@@ -779,7 +797,9 @@ pub fn by_foreigners(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
     for i in 0..rows.len() {
         for j in i + 1..rows.len() {
             let (a, b) = (&rows[i], &rows[j]);
-            if a.foreigners < b.foreigners || a.foreigners == b.foreigners && a.nations < b.nations {
+            if a.foreigners < b.foreigners
+                || a.foreigners == b.foreigners && a.nations < b.nations
+            {
                 rows.swap(i, j);
             }
         }
@@ -822,7 +842,13 @@ const SUBS_OUT_CLUBS: &str = "0xaea1b8";
 /// A league's rebuilt club list as the page copies it out (`FUN_00721008`
 /// and its siblings, by the league's list index `FUN_00677b07`): its
 /// entries of `entry` bytes, as long as one names a country, 24 at most.
-fn club_list(records: &Records, country: u16, level: u8, list: &str, entry: usize) -> Vec<ClubCount> {
+fn club_list(
+    records: &Records,
+    country: u16,
+    level: u8,
+    list: &str,
+    entry: usize,
+) -> Vec<ClubCount> {
     let Some(index) = league_of(records, country, level) else { return Vec::new() };
     let Some(b) = records.block(&format!("{list}[{index}]")) else { return Vec::new() };
     let word = |at: usize| b.get(at..at + 2).map_or(0, |w| i16::from_le_bytes([w[0], w[1]]));
@@ -863,7 +889,12 @@ const PLAYERS_OUT: &str = "0xaeeee8";
 
 /// The Häufigste Einw. or Ausw. Spieler (`FUN_0044e53f`, `FUN_0044e839`):
 /// the league's list as long as an entry holds a player.
-pub fn player_substitutions(records: &Records, country: u16, level: u8, out: bool) -> Vec<PlayerCount> {
+pub fn player_substitutions(
+    records: &Records,
+    country: u16,
+    level: u8,
+    out: bool,
+) -> Vec<PlayerCount> {
     let list = if out { PLAYERS_OUT } else { PLAYERS_IN };
     let Some(index) = league_of(records, country, level) else { return Vec::new() };
     let Some(b) = records.block(&format!("{list}[{index}]")) else { return Vec::new() };
@@ -923,7 +954,8 @@ pub fn above_target(records: &Records, country: u16, level: u8) -> Vec<ClubCount
         if word(at) == 0 {
             break;
         }
-        rows.push(ClubCount { country: word(at) as u16, team: word(at + 2), values: [word(at + 4), 0] });
+        let (country, team) = (word(at) as u16, word(at + 2));
+        rows.push(ClubCount { country, team, values: [word(at + 4), 0] });
     }
     rows
 }

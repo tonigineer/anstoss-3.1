@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 
 use a3_core::opponent::League;
-use a3_core::records::{Records, Team};
+use a3_core::records::{Player, Records, Team};
 use a3_core::season::Rules;
 use a3_core::statistics::{self, CATEGORY_NAMES, Club, Page};
 use a3_files::rch::{Align, Control, Dialog, Kind};
@@ -150,15 +150,163 @@ const CROSS_WIDTH: i32 = 0x1dd;
 /// The goal pages' header, one text for all four (`FUN_0044917a`; the
 /// axis' own label 0xa51 stands empty and is never drawn).
 const GOAL_HEADER: u16 = 0xa50;
-/// The Mannschaft category, over the own squad: the Torjägerliste's
-/// header (text 2413, `FUN_00469f05` with 0x87e1d8) and rows (0x87e160) —
-/// rank, name, league, cup and European goals.
+/// The Mannschaft category, over the own squad.
 const MANNSCHAFT: usize = 1;
-const SQUAD_SCORERS_HEADER: u16 = 2413;
-const SQUAD_SCORERS_HEADER_COLUMNS: [(u16, u16); 5] =
-    [(C, 0x14), (0x19, 0), (C | 0xd2, 0x1e), (C | 0x102, 0x1e), (C | 0x127, 0x3c)];
-const SQUAD_SCORERS_ROW_COLUMNS: [(u16, u16); 5] =
-    [(R, 0x14), (0x19, 0), (R | 0xc8, 0x1e), (R | 0xfa, 0x1e), (R | 0x12c, 0x1e)];
+
+/// A Mannschaft page: its header text, the header's and the rows'
+/// columns, whether it hands the window the squad's size (else
+/// 0xffffffff), the players it keeps, the key it sorts them by, and the
+/// figures its row writes after the rank and the name.
+struct SquadPage {
+    header: u16,
+    header_columns: &'static [(u16, u16)],
+    columns: &'static [(u16, u16)],
+    centred: bool,
+    keep: fn(&Player) -> bool,
+    key: fn(&Player) -> i32,
+    figures: fn(&Player) -> String,
+}
+
+/// A player's league cards — yellow, red, yellow-red — and their points
+/// as the Fairneß weighs them.
+fn card_points(p: &Player) -> i32 {
+    let [yellow, red, yellow_red] = p.league_cards().map(i32::from);
+    red * 5 + yellow_red * 3 + yellow
+}
+
+fn scorer_points(p: &Player) -> i32 {
+    i32::from(p.goals()[0]) + i32::from(p.assists())
+}
+
+/// The Mannschaft pages built, by their codes, with their blocks:
+/// - the Torjägerliste (`FUN_00469f05(0)`, 0x87e1d8 and 0x87e160): all
+///   by league goals, with cup and European goals;
+/// - the Scorer (`FUN_0046b87a`, 0x87e460 and 0x87e420): those with goals
+///   or assists by their sum, each figure with the last match's in
+///   brackets;
+/// - the Fairneß (`FUN_004679ef`, 0x87de48 and 0x87de10): all by their
+///   cards' points, the cards, the matchdays banned;
+/// - the Vorlagen (`FUN_0046b4cf`, 0x87e400 and 0x87e3e0): those with
+///   assists by them, the last match's in brackets;
+/// - the Gelbe Karten (`FUN_00467de7`, 0x87dea8 and 0x87de80): all by
+///   their yellow cards in the league, then the cup, then Europe.
+fn squad_page(code: i16) -> Option<SquadPage> {
+    Some(match code {
+        statistics::SQUAD_SCORERS_PAGE => SquadPage {
+            header: 2413,
+            header_columns: &[
+                (C, 0x14),
+                (0x19, 0),
+                (C | 0xd2, 0x1e),
+                (C | 0x102, 0x1e),
+                (C | 0x127, 0x3c),
+            ],
+            columns: &[(R, 0x14), (0x19, 0), (R | 0xc8, 0x1e), (R | 0xfa, 0x1e), (R | 0x12c, 0x1e)],
+            centred: true,
+            keep: |_| true,
+            key: |p| i32::from(p.goals()[0]),
+            figures: |p| {
+                let [league, cup, europe] = p.goals();
+                format!("{league}\t{cup}\t{europe}")
+            },
+        },
+        statistics::SQUAD_POINTS_PAGE => SquadPage {
+            header: 3037,
+            header_columns: &[
+                (C, 0x14),
+                (0x19, 0),
+                (C | 0xa0, 0x23),
+                (C | 0xbf, 0x1e),
+                (C | 0xf3, 0x23),
+                (C | 0x10f, 0x1e),
+                (C | 0x143, 0x23),
+                (C | 0x15f, 0x1e),
+            ],
+            columns: &[
+                (R, 0x14),
+                (0x19, 0),
+                (R | 0x96, 0x23),
+                (R | 0xb9, 0x1e),
+                (R | 0xe6, 0x23),
+                (R | 0x109, 0x1e),
+                (R | 0x136, 0x23),
+                (R | 0x159, 0x1e),
+            ],
+            centred: false,
+            keep: |p| scorer_points(p) != 0,
+            key: scorer_points,
+            figures: |p| {
+                let (goals, assists) = (p.goals()[0], p.assists());
+                let (last_goals, last_assists) = (p.last_goals(), p.last_assists());
+                format!(
+                    "{}\t({})\t{goals}\t({last_goals})\t{assists}\t({last_assists})",
+                    u16::from(goals) + u16::from(assists),
+                    u16::from(last_goals) + u16::from(last_assists)
+                )
+            },
+        },
+        statistics::SQUAD_FAIRNESS_PAGE => SquadPage {
+            header: 2404,
+            header_columns: &[
+                (C, 0x14),
+                (0x19, 0),
+                (C | 0xaf, 0x32),
+                (C | 0xe1, 0x32),
+                (C | 0x113, 0x32),
+                (C | 0x145, 0x32),
+                (C | 0x177, 0x46),
+            ],
+            columns: &[
+                (R, 0x14),
+                (0x19, 0),
+                (C | 0xaf, 0x32),
+                (C | 0xe1, 0x32),
+                (C | 0x113, 0x32),
+                (C | 0x145, 0x32),
+                (C | 0x177, 0x46),
+            ],
+            centred: true,
+            keep: |_| true,
+            key: card_points,
+            figures: |p| {
+                let [yellow, red, yellow_red] = p.league_cards();
+                let banned = p.banned_matchdays();
+                format!("{}\t{red}\t{yellow_red}\t{yellow}\t{banned}", card_points(p))
+            },
+        },
+        statistics::SQUAD_ASSISTS_PAGE => SquadPage {
+            header: 3036,
+            header_columns: &[(C, 0x18), (0x1a, 0), (C | 0xaf, 0x28), (C | 0xd7, 0x28)],
+            columns: &[(R, 0x18), (0x1a, 0), (R | 0xa6, 0x28), (R | 0xcd, 0x28)],
+            centred: false,
+            keep: |p| p.assists() > 0,
+            key: |p| i32::from(p.assists()),
+            figures: |p| format!("{}\t({})", p.assists(), p.last_assists()),
+        },
+        statistics::SQUAD_YELLOW_PAGE => SquadPage {
+            header: 2405,
+            header_columns: &[
+                (R, 0x14),
+                (0x19, 0),
+                (C | 0xa0, 0x32),
+                (C | 0xd7, 0x28),
+                (C | 0xff, 0x50),
+            ],
+            columns: &[(R, 0x14), (0x19, 0), (R | 0x96, 0x28), (R | 0xc8, 0x28), (R | 0xfa, 0x32)],
+            centred: true,
+            keep: |_| true,
+            key: |p| {
+                let [league, cup, europe] =
+                    [p.league_cards()[0], p.cup_cards()[0], p.europe_cards()[0]].map(i32::from);
+                league << 16 | cup << 8 | europe
+            },
+            figures: |p| {
+                format!("{}\t{}\t{}", p.league_cards()[0], p.cup_cards()[0], p.europe_cards()[0])
+            },
+        },
+        _ => return None,
+    })
+}
 /// The Liga category and its two player pages' header texts (2713 and
 /// 2715) with their header's and rows' columns (`FUN_00449bd6`'s blocks
 /// at 0x879708 and 0x87972c, `FUN_0044a3fa`'s at 0x8797e8 and 0x879808).
@@ -824,7 +972,7 @@ impl Statistics {
             {
                 self.liga_page(cx, view, code)
             }
-            Some(code @ statistics::SQUAD_SCORERS_PAGE) if self.category == MANNSCHAFT => {
+            Some(code) if self.category == MANNSCHAFT && squad_page(code).is_some() => {
                 self.squad_stats_page(cx, view, code)
             }
             Some(statistics::FAIRNESS_PAGE) if self.category == LIGA => {
@@ -1183,35 +1331,32 @@ impl Statistics {
         true
     }
 
-    /// The Mannschaft category's pages over the own squad (`FUN_004677f5`),
-    /// all rows black, the window handed the squad's size: the
-    /// Torjägerliste (`FUN_00469f05(0)`), the players by their league
-    /// goals, "%d.\t%s\t%d\t%d\t%d" with their cup and European goals.
-    fn squad_stats_page(&self, cx: &Cx, view: &mut View, _code: i16) -> bool {
+    /// The Mannschaft category's pages over the own squad (`FUN_004677f5`):
+    /// the players the page keeps in its order, "%d.\t%s\t" with the
+    /// rank and the name a player goes by (`FUN_006feb4d`), then its
+    /// figures, all rows black.
+    fn squad_stats_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(team) = own_team(cx) else { return false };
-        set_header(
-            view,
-            dialog,
-            game.text(SQUAD_SCORERS_HEADER).to_owned(),
-            &SQUAD_SCORERS_HEADER_COLUMNS,
-        );
-        let ids = statistics::squad_by(records, team, |p| i32::from(p.goals()[0]));
+        let Some(page) = squad_page(code) else { return false };
+        set_header(view, dialog, game.text(page.header).to_owned(), page.header_columns);
+        let ids = statistics::squad_by(records, team, page.keep, page.key);
         let rows: Vec<TableRow> = ids
             .iter()
             .enumerate()
             .map(|(i, &id)| {
                 let name = records.known_as(id).unwrap_or_default();
-                let [league, cup, europe] = records.player(id).map_or([0; 3], |p| p.goals());
-                let text = format!("{}.\t{name}\t{league}\t{cup}\t{europe}", i + 1);
+                let figures = records.player(id).map(page.figures).unwrap_or_default();
+                let text = format!("{}.\t{name}\t{figures}", i + 1);
                 TableRow { text, ink: INK, mark: None, columns: None }
             })
             .collect();
+        let centred = if page.centred { team.players().len() as i32 } else { -1 };
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {
-                columns: SQUAD_SCORERS_ROW_COLUMNS.to_vec(),
-                centred: rows.len() as i32,
+                columns: page.columns.to_vec(),
+                centred,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,
