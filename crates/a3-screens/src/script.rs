@@ -4892,6 +4892,27 @@ mod tests {
         assert!(table.rows.iter().all(|r| r.ink == [0, 0, 0]));
     }
 
+    /// The Mannschaft category's Torjäger ewig lists the club's scorers
+    /// under its manager as the club keeps them.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_clubs_all_time_scorers() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 2";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tName\\tTore\\tEins.\\tSchnitt\\t1.L\\t2.L\\t3.L\\tLetzte 3 Jahre"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 12);
+        assert_eq!(table.centred, 13);
+        assert_eq!(table.rows[0].text, "1.\tToni Lubiniecki\t1\t3\t0.3\t1\t0\t0\t1\t0\t0");
+        assert_eq!(table.rows[4].text, "5.\tMarin Ljubicic\t0\t3\t0.0\t0\t0\t0\t0\t0\t0");
+    }
+
     /// The Mannschaft category's Spielereigenschaften names the squad's
     /// traits, the players by name.
     #[test]

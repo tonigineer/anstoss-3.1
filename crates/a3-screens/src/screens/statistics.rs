@@ -178,6 +178,41 @@ fn scorer_points(p: &Player) -> i32 {
     i32::from(p.goals()[0]) + i32::from(p.assists())
 }
 
+/// The Torjäger ewig's header and rows (`FUN_0046a366` with 0x87e258,
+/// and 0x87e200): rank, name, goals, matches, their mean, the goals by
+/// league level and those of the last three seasons; the header's last
+/// two columns stand empty.
+const ALL_TIME_HEADER: u16 = 2414;
+const ALL_TIME_HEADER_COLUMNS: [(u16, u16); 11] = [
+    (C, 0x14),
+    (0x19, 0),
+    (C | 0x87, 0x28),
+    (C | 0xaf, 0x1e),
+    (C | 0xcd, 0x28),
+    (C | 0xfc, 0x19),
+    (C | 0x115, 0x19),
+    (C | 0x12e, 0x19),
+    (C | 0x151, 0x50),
+    (0, 0),
+    (0, 0),
+];
+const ALL_TIME_ROW_COLUMNS: [(u16, u16); 11] = [
+    (R, 0x14),
+    (0x19, 0),
+    (R | 0x84, 0x20),
+    (R | 0xa4, 0x20),
+    (R | 0xc4, 0x25),
+    (R | 0xf7, 0x19),
+    (R | 0x110, 0x19),
+    (R | 0x129, 0x19),
+    (R | 0x149, 0x1b),
+    (R | 0x164, 0x1b),
+    (R | 0x17f, 0x1b),
+];
+/// The single row of an empty Torjäger ewig, a string of the exe's own
+/// (0x87e908).
+const NO_ALL_TIME_SCORER: &str =
+    "Keiner Ihrer Spieler hat bisher unter Ihrer Leitung ein Tor erzielt!";
 /// The Spielereigenschaften's header and rows (`FUN_00471109` with
 /// 0x87e6d0, and 0x87e6f0): name, position, strength and traits.
 const TRAITS_HEADER: u16 = 4739;
@@ -813,6 +848,21 @@ fn per_matchday(points: i16, played: i16) -> String {
     format!("{}.{:02}", hundredths / 100, hundredths % 100)
 }
 
+/// A double as "%2.1f" writes it: to one place, a half rounded up — the
+/// second place of its exact decimal expansion decides.
+fn tenths(value: f64) -> String {
+    let exact = format!("{:.60}", value.abs());
+    let (whole, places) = exact.split_once('.').unwrap_or((&exact, "0"));
+    let digit = |k: usize| u64::from(places.as_bytes().get(k).map_or(0, |b| b - b'0'));
+    let whole: u64 = whole.parse().unwrap_or(0);
+    let mut tenths = whole * 10 + digit(0);
+    if digit(1) >= 5 {
+        tenths += 1;
+    }
+    let sign = if value < 0.0 && tenths > 0 { "-" } else { "" };
+    format!("{sign}{}.{}", tenths / 10, tenths % 10)
+}
+
 /// A float as "%3.1f" writes it: to one place, a half rounded up as the
 /// C library of its day does. Ten times a float stands exactly in a
 /// double, so a half is told exactly.
@@ -1029,6 +1079,9 @@ impl Statistics {
             }
             Some(statistics::SQUAD_TRAITS_PAGE) if self.category == MANNSCHAFT => {
                 self.traits_page(cx, view)
+            }
+            Some(statistics::SQUAD_ALL_TIME_PAGE) if self.category == MANNSCHAFT => {
+                self.all_time_page(cx, view)
             }
             Some(statistics::FAIRNESS_PAGE) if self.category == LIGA => {
                 self.fairness_page(cx, view)
@@ -1411,6 +1464,67 @@ impl Statistics {
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {
                 columns: page.columns.to_vec(),
+                centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Torjäger ewig (`FUN_0046a366`): the club's scorers under its
+    /// manager as stored, ranked by a counter,
+    /// "%d.\t%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d\t%d\t%d" — the names
+    /// spelled out, the goals in all and the matches, their mean as
+    /// "%2.1f" of a double (none without a match), the goals by level and
+    /// by season; the window handed one row more than there are. Without
+    /// one the page says so in a single row and sets no columns.
+    fn all_time_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(ALL_TIME_HEADER).to_owned(), &ALL_TIME_HEADER_COLUMNS);
+        let scorers = statistics::all_time_scorers(records, team);
+        let mut rows: Vec<TableRow> = scorers
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let (first, last) = (records.name(s.first), records.name(s.last));
+                let name = match (s.first, s.last) {
+                    (0, _) => last.to_owned(),
+                    (_, 0) => first.to_owned(),
+                    _ => format!("{first} {last}"),
+                };
+                let total: i16 = s.goals.iter().sum();
+                let mean = if s.matches == 0 {
+                    String::new()
+                } else {
+                    tenths(f64::from(total) / f64::from(s.matches))
+                };
+                let [first_level, second_level, third_level] = s.goals;
+                let [now, last_season, before] = s.seasons;
+                let text = format!(
+                    "{}.\t{name}\t{total}\t{}\t{mean}\t{first_level}\t{second_level}\t\
+                     {third_level}\t{now}\t{last_season}\t{before}",
+                    i + 1,
+                    s.matches
+                );
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        let mut columns = ALL_TIME_ROW_COLUMNS.to_vec();
+        if rows.is_empty() {
+            let text = NO_ALL_TIME_SCORER.to_owned();
+            rows.push(TableRow { text, ink: INK, mark: None, columns: None });
+            columns.clear();
+        }
+        let centred = if scorers.is_empty() { 1 } else { scorers.len() as i32 + 1 };
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns,
                 centred,
                 rows,
                 width: ROW_WIDTH,

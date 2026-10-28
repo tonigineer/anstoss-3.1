@@ -306,6 +306,8 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
 /// the Vorlagen under 3036 (`FUN_0046b4cf`) and the Gelbe Karten under
 /// 2405 (`FUN_00467de7`).
 pub const SQUAD_SCORERS_PAGE: i16 = 0;
+/// The Torjäger ewig under 2414 (`FUN_0046a366`).
+pub const SQUAD_ALL_TIME_PAGE: i16 = 1;
 pub const SQUAD_POINTS_PAGE: i16 = 2;
 /// The Einsätze under 2406 (`FUN_004681ce`).
 pub const SQUAD_MATCHES_PAGE: i16 = 4;
@@ -336,6 +338,45 @@ pub fn squad_by_name(records: &Records, team: &Team) -> Vec<u16> {
         }
     }
     order.iter().map(|&k| ids[k]).collect()
+}
+
+/// One of the club's scorers under its manager (`FUN_00633115`, the list
+/// of fifty entries of 0x16 at the human club's extra +0x15b0 that
+/// `FUN_00741bb3` keeps after each match, the most goals first): his
+/// names' pool ids, his goals in the league's three levels, his matches,
+/// and his goals this season and the two before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllTimeScorer {
+    pub first: u16,
+    pub last: u16,
+    pub goals: [i16; 3],
+    pub matches: i16,
+    pub seasons: [u8; 3],
+}
+
+const ALL_TIME_SCORERS: usize = 0x15b0;
+const ALL_TIME_ENTRY: usize = 0x16;
+const ALL_TIME_ENTRIES: usize = 50;
+
+/// The own club's all-time scorers in their stored order, those with a
+/// player's id.
+pub fn all_time_scorers(records: &Records, team: &Team) -> Vec<AllTimeScorer> {
+    let Some(slot) = usize::from(team.human()).checked_sub(1) else { return Vec::new() };
+    let Some(extra) = records.extras.get(slot) else { return Vec::new() };
+    (0..ALL_TIME_ENTRIES)
+        .map(|k| extra.get::<[u8; ALL_TIME_ENTRY]>(ALL_TIME_SCORERS + k * ALL_TIME_ENTRY))
+        .filter(|e| e[0] != 0 || e[1] != 0)
+        .map(|e| {
+            let word = |at: usize| u16::from_le_bytes([e[at], e[at + 1]]);
+            AllTimeScorer {
+                first: word(2),
+                last: word(4),
+                goals: [word(0xa), word(0xc), word(0xe)].map(|g| g as i16),
+                matches: word(0x10) as i16,
+                seasons: [e[0x12], e[0x13], e[0x14]],
+            }
+        })
+        .collect()
 }
 
 /// A player's D-Form (`FUN_006ff257`): the mean of his weekly forms this
