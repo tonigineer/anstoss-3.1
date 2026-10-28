@@ -248,6 +248,31 @@ const ALL_TIME_GAMES_HEADER_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (C | 200, 40), (C | 242, 40), (C | 285, 50)];
 const ALL_TIME_GAMES_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (R | 200, 30), (R | 240, 30), (R | 280, 35)];
+/// The 5-Jahreswertung's header and rows (`FUN_0045fac1` with 0x87d088):
+/// place, country, the total and the six seasons, each "%3.2f".
+const FIVE_YEARS_HEADER: u16 = 3017;
+const FIVE_YEARS_HEADER_COLUMNS: [(u16, u16); 9] = [
+    (R, 25),
+    (30, 0),
+    (R | 138, 40),
+    (R | 190, 40),
+    (R | 230, 40),
+    (R | 270, 40),
+    (R | 310, 40),
+    (R | 350, 40),
+    (R | 400, 40),
+];
+const FIVE_YEARS_ROW_COLUMNS: [(u16, u16); 9] = [
+    (R, 25),
+    (30, 0),
+    (R | 140, 40),
+    (R | 190, 40),
+    (R | 230, 40),
+    (R | 270, 40),
+    (R | 310, 40),
+    (R | 350, 40),
+    (R | 400, 40),
+];
 /// The Rekorde's records (`FUN_005396ba`): where each starts in the set,
 /// its title, and what its figure is. Its rows' columns, the titles' ink
 /// (COLORREF 0xaa) and the installation's file of the Für die Ewigkeit.
@@ -1933,6 +1958,9 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(statistics::FIVE_YEARS_PAGE) if self.category == HISTORY => {
+                self.five_years_page(cx, view)
+            }
             Some(code @ (statistics::RECORDS_PAGE | statistics::ALL_TIME_RECORDS_PAGE))
                 if self.category == HISTORY =>
             {
@@ -3495,6 +3523,46 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The 5-Jahreswertung (`FUN_0045fac1`): the European ranking's 37
+    /// countries in the order kept, each with its total and its points of
+    /// the six seasons up to the year's (`DAT_00b5cbca`), the oldest
+    /// first, labelled "%02d/%02d" (`FUN_005b03ff`).
+    fn five_years_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let year = i32::from(records.globals.start_year());
+        let seasons: Vec<String> = (0..=5)
+            .rev()
+            .map(|k| year - k)
+            .map(|y| format!("{:02}/{:02}", y % 100, (y + 1) % 100))
+            .collect();
+        // The header splits its titles where the text writes "\t".
+        let header = game.text(FIVE_YEARS_HEADER).to_owned() + &seasons.join("\\t");
+        set_header(view, dialog, header, &FIVE_YEARS_HEADER_COLUMNS);
+        let rows = statistics::five_years(records)
+            .iter()
+            .enumerate()
+            .map(|(i, (country, points))| {
+                let figures: Vec<String> = points.iter().map(|&p| fixed(f64::from(p), 2)).collect();
+                let text =
+                    format!("{}.\t{}\t{}", i + 1, game.world.nation(*country), figures.join("\t"));
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FIVE_YEARS_ROW_COLUMNS.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
     }
 
     /// The Rekorde (`FUN_0045f7a5`) of the game, or the Für die Ewigkeit

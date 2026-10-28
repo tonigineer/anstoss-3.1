@@ -1033,6 +1033,8 @@ pub const SERIES_PAGE: i16 = 1;
 pub const LAST_MATCHDAY_PAGE: i16 = 6;
 /// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
+/// The Historisches' 5-Jahreswertung (`FUN_0045fac1`).
+pub const FIVE_YEARS_PAGE: i16 = 0x17;
 /// The Historisches' Rekorde (`FUN_0045f7a5`) and Für die Ewigkeit
 /// (`FUN_0045f8e5`).
 pub const RECORDS_PAGE: i16 = 0x1d;
@@ -1525,6 +1527,25 @@ const RECORDS_AT: usize = 0xb5cd1c;
 pub fn game_records(records: &Records) -> Vec<u8> {
     let g = &records.globals;
     (0..RECORDS_SIZE).map(|k| g.get::<u8>(RECORDS_AT + k)).collect()
+}
+
+/// The 5-Jahreswertung (`FUN_0045fac1`): the 37 countries of the
+/// European ranking as the globals keep them (`DAT_00b5d1a8`, 0x24 each):
+/// the country, its total and its points of the last six seasons, the
+/// oldest first; the season that drops out (+8) is not shown.
+pub const RANKING_COUNTRIES: usize = 0x25;
+const RANKING_AT: usize = 0xb5d1a8;
+
+pub fn five_years(records: &Records) -> Vec<(u16, [f32; 7])> {
+    let g = &records.globals;
+    (0..RANKING_COUNTRIES)
+        .map(|i| RANKING_AT + i * 0x24)
+        .map(|at| {
+            let points =
+                [4, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x20].map(|k| f32::from_bits(g.get(at + k)));
+            (g.get::<i16>(at) as u16, points)
+        })
+        .collect()
 }
 
 /// A player of a country's all-time lists, kept for its first league
