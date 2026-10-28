@@ -5111,6 +5111,34 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// The Historisches category's Rekorde show the records the game has
+    /// set — its seeded ones and those the manager broke — each title in
+    /// red over who holds it, since when and the figure; Für die Ewigkeit
+    /// those of the installation's file.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_records() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 4\nnow row 1284 2";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts.len(), 34);
+        assert_eq!(texts[0], "Höchster Heimsieg");
+        assert_eq!(texts[1], "R. Langenberg\t8.2.2026\t6:0 gegen Rot-Weiß Erfurt");
+        assert_eq!(texts[21], "T. Lubiniecki\t18.7.2025\t7.00 Mio € (Mikey Moore)");
+        assert_eq!(texts[33], "R. Langenberg\t8.2.2026\t12");
+        assert_eq!(table.rows[0].ink, [0xaa, 0, 0]);
+        let next = format!("{then}\nnow row 1284 4");
+        let Some(runner) = on_save(&game, "A", &next) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "Höchster Heimsieg");
+        assert!(table.rows[1].text.starts_with("R. Langenberg\t24.8.2026\t6:0 gegen "));
+    }
+
     /// The Historisches category's Ewige Torjägerliste and Ewige Einsätze
     /// list the country's first league's twenty best scorers, with their
     /// clubs, and its most fielded players.

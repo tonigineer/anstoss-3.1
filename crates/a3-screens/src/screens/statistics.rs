@@ -248,6 +248,54 @@ const ALL_TIME_GAMES_HEADER_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (C | 200, 40), (C | 242, 40), (C | 285, 50)];
 const ALL_TIME_GAMES_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (R | 200, 30), (R | 240, 30), (R | 280, 35)];
+/// The Rekorde's records (`FUN_005396ba`): where each starts in the set,
+/// its title, and what its figure is. Its rows' columns, the titles' ink
+/// (COLORREF 0xaa) and the installation's file of the Für die Ewigkeit.
+const RECORD_KINDS: [(usize, u16, RecordFigure); 21] = [
+    (0x0, 2312, RecordFigure::Score(2314)),
+    (0x3a, 2313, RecordFigure::Score(2335)),
+    (0x74, 2315, RecordFigure::Score(2314)),
+    (0xae, 2316, RecordFigure::Score(2335)),
+    (0xe8, 2318, RecordFigure::Series),
+    (0x116, 2319, RecordFigure::Series),
+    (0x144, 2320, RecordFigure::Count),
+    (0x172, 2321, RecordFigure::Count),
+    (0x1a0, 2322, RecordFigure::Count),
+    (0x1ce, 2323, RecordFigure::Count),
+    (0x1fc, 2324, RecordFigure::Player),
+    (0x22e, 2325, RecordFigure::Player),
+    (0x260, 2326, RecordFigure::Player),
+    (0x294, 2327, RecordFigure::Fee),
+    (0x2c8, 2328, RecordFigure::Fee),
+    (0x2fc, 2329, RecordFigure::Money),
+    (0x32c, 2330, RecordFigure::Form),
+    (0x360, 2331, RecordFigure::Long),
+    (0x390, 2332, RecordFigure::Long),
+    (0x3c0, 2333, RecordFigure::Count),
+    (0x3ee, 2334, RecordFigure::Last),
+];
+const RECORDS_COLUMNS: [(u16, u16); 3] = [(0, 0), (R | 160, 60), (230, 0)];
+const RECORD_TITLE_INK: [u8; 3] = [0xaa, 0, 0];
+const RECORD_DATE: u16 = 1997;
+const ALL_TIME_RECORDS_FILE: &str = "alltimes.saq";
+
+/// What a record's figure is, from its +0x2c on: a score against a club
+/// by its text; points from games; a count; a count by a player; a fee
+/// paid for a player; a sum of money; a form in tenths by a player; a
+/// count of four bytes; and the last's count at +0x30.
+#[derive(Clone, Copy)]
+enum RecordFigure {
+    Score(u16),
+    Series,
+    Count,
+    Player,
+    Fee,
+    Money,
+    Form,
+    Long,
+    Last,
+}
+
 /// The Mannschaftsvergleich's header and rows (`FUN_00450c3f` with
 /// 0x87a0d8 and 0x87a0f0): a label and a column for each club, the lines'
 /// rows three columns for each; its labels from 2957 on, the lines'
@@ -1885,6 +1933,11 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(code @ (statistics::RECORDS_PAGE | statistics::ALL_TIME_RECORDS_PAGE))
+                if self.category == HISTORY =>
+            {
+                self.records_page(cx, view, code == statistics::ALL_TIME_RECORDS_PAGE)
+            }
             Some(code @ (ALL_TIME_SCORERS_PAGE | ALL_TIME_GAMES_PAGE))
                 if self.category == HISTORY =>
             {
@@ -3442,6 +3495,87 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Rekorde (`FUN_0045f7a5`) of the game, or the Für die Ewigkeit
+    /// (`FUN_0045f8e5`) of the installation: for each record set — its
+    /// day not 0 — its title in red, then who holds it, since when and the
+    /// figure; rows spread over their own count, the header blank.
+    fn records_page(&self, cx: &Cx, view: &mut View, all_time: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        set_header(view, dialog, String::new(), &[(0, 0)]);
+        let set = if all_time {
+            game.file(ALL_TIME_RECORDS_FILE).unwrap_or_default()
+        } else {
+            statistics::game_records(records)
+        };
+        let mut rows = Vec::new();
+        if set.len() >= statistics::RECORDS_SIZE {
+            let byte = |at: usize| set[at];
+            let word = |at: usize| i16::from_le_bytes([set[at], set[at + 1]]);
+            let long = |at: usize| i32::from_le_bytes(set[at..at + 4].try_into().unwrap());
+            let text = |at: usize, len: usize| {
+                let bytes = &set[at..at + len];
+                let end = bytes.iter().position(|&b| b == 0).unwrap_or(len);
+                a3_files::sav::cp1252(&bytes[..end])
+            };
+            let name = |at: usize| spelled(records, word(at) as u16, word(at + 2) as u16);
+            let money = |v: i32| super::playerinfo::money(game, i64::from(v));
+            let line = |text: String, ink| TableRow {
+                text,
+                ink,
+                mark: None,
+                columns: Some(RECORDS_COLUMNS.to_vec()),
+            };
+            for &(r, title, figure) in &RECORD_KINDS {
+                if byte(r) == 0 {
+                    continue;
+                }
+                let date = game
+                    .text(RECORD_DATE)
+                    .replacen("%1", &byte(r).to_string(), 1)
+                    .replacen("%2", &byte(r + 1).to_string(), 1)
+                    .replacen("%3", &word(r + 2).to_string(), 1);
+                let value = match figure {
+                    RecordFigure::Score(format) => {
+                        let club = game.club_name(Some(records), byte(r + 0x36), word(r + 0x38));
+                        game.text(format)
+                            .replacen("%d", &word(r + 0x30).to_string(), 1)
+                            .replacen("%d", &word(r + 0x32).to_string(), 1)
+                            .replacen("%s", &club, 1)
+                    }
+                    RecordFigure::Series => game
+                        .text(2317)
+                        .replacen("%d", &byte(r + 0x2c).to_string(), 1)
+                        .replacen("%d", &byte(r + 0x2d).to_string(), 1),
+                    RecordFigure::Count => word(r + 0x2c).to_string(),
+                    RecordFigure::Player => format!("{} ({})", word(r + 0x2c), name(r + 0x2e)),
+                    RecordFigure::Fee => format!("{} ({})", money(long(r + 0x30)), name(r + 0x2c)),
+                    RecordFigure::Money => money(long(r + 0x2c)),
+                    RecordFigure::Form => {
+                        format!("{} ({})", tenths(f64::from(word(r + 0x30)) / 10.0), name(r + 0x2c))
+                    }
+                    RecordFigure::Long => long(r + 0x2c).to_string(),
+                    RecordFigure::Last => word(r + 0x30).to_string(),
+                };
+                rows.push(line(game.text(title).to_owned(), RECORD_TITLE_INK));
+                let holder = format!("{}. {}\t{date}", text(r + 0x1a, 2), text(r + 0x1c, 0x14));
+                rows.push(line(format!("{holder}\t{value}"), INK));
+            }
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: RECORDS_COLUMNS.to_vec(),
+                centred: rows.len() as i32,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
     }
 
     /// The Ewige Torjägerliste and the Ewige Einsätze of the country the

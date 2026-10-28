@@ -1033,6 +1033,10 @@ pub const SERIES_PAGE: i16 = 1;
 pub const LAST_MATCHDAY_PAGE: i16 = 6;
 /// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
+/// The Historisches' Rekorde (`FUN_0045f7a5`) and Für die Ewigkeit
+/// (`FUN_0045f8e5`).
+pub const RECORDS_PAGE: i16 = 0x1d;
+pub const ALL_TIME_RECORDS_PAGE: i16 = 0x1e;
 /// The Elf des Tages under 2975 (`FUN_00451e0d`), the Elf des Jahres
 /// under 2976 (`FUN_004523ce`).
 pub const DAY_ELEVEN_PAGE: i16 = 3;
@@ -1510,6 +1514,17 @@ pub fn day_eleven(records: &Records, country: u16, level: u8) -> [(u16, u8); 11]
         }
     }
     eleven
+}
+
+/// The game's records, as the Rekorde shows them (`FUN_0045f7a5`): 0x420
+/// bytes at `DAT_00b5cd1c` in the globals block; the Für die Ewigkeit's
+/// set of the installation has the same layout (`alltimes.saq`).
+pub const RECORDS_SIZE: usize = 0x420;
+const RECORDS_AT: usize = 0xb5cd1c;
+
+pub fn game_records(records: &Records) -> Vec<u8> {
+    let g = &records.globals;
+    (0..RECORDS_SIZE).map(|k| g.get::<u8>(RECORDS_AT + k)).collect()
 }
 
 /// A player of a country's all-time lists, kept for its first league
