@@ -5111,6 +5111,32 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// The Historisches category's Ligapokal/Supercup lists the country's
+    /// finals with year and result, and its Tabellenführungen the clubs
+    /// that led the first league, the own club red.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_finals_and_leaders() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 4\nnow row 1284 5";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["2025\tEintracht Frankfurt\t-\tVfB Stuttgart\t1\t:\t2\t "]);
+        let next = format!("{then}\nnow row 1284 6");
+        let Some(runner) = on_save(&game, "A", &next) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            ["1.\tFC Bayern München\t1\t1", "2.\t1.FC Union Berlin\t1\t1", "3.\tVfB Stuttgart\t1\t1"]
+        );
+        assert_eq!(table.rows[1].ink, [255, 0, 0]);
+    }
+
     /// The Historisches category's 5-Jahreswertung lists the European
     /// ranking's 37 countries with their total and the six seasons' points,
     /// the seasons' labels counting back from the year's.

@@ -1033,8 +1033,11 @@ pub const SERIES_PAGE: i16 = 1;
 pub const LAST_MATCHDAY_PAGE: i16 = 6;
 /// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
-/// The Historisches' 5-Jahreswertung (`FUN_0045fac1`).
+/// The Historisches' 5-Jahreswertung (`FUN_0045fac1`), Tabellenführungen
+/// (`FUN_00463a9b`) and Ligapokal/Supercup (`FUN_0046364c`).
 pub const FIVE_YEARS_PAGE: i16 = 0x17;
+pub const LEADERS_PAGE: i16 = 0x21;
+pub const FINALS_PAGE: i16 = 0x28;
 /// The Historisches' Rekorde (`FUN_0045f7a5`) and Für die Ewigkeit
 /// (`FUN_0045f8e5`).
 pub const RECORDS_PAGE: i16 = 0x1d;
@@ -1545,6 +1548,50 @@ pub fn five_years(records: &Records) -> Vec<(u16, [f32; 7])> {
                 [4, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x20].map(|k| f32::from_bits(g.get(at + k)));
             (g.get::<i16>(at) as u16, points)
         })
+        .collect()
+}
+
+/// The Tabellenführungen (`FUN_00463a9b` by `FUN_00642b23`:
+/// `DAT_00b1710c` in the lists block, 0x1b0 a country by its slot): for
+/// each club number the matchdays it led the first league
+/// (`FUN_00728fd9`) and its seasons in it (`FUN_00774088`). The clubs
+/// that led, most matchdays first, then fewer seasons, then by number.
+const LEADERS: (usize, usize) = (0xba54, 0x1b0);
+
+pub fn leaderships(records: &Records, country: u16) -> Vec<(i16, i16, i16)> {
+    let (at, per_slot) = LEADERS;
+    let from = at + usize::from(records.countries.slot(country.into())) * per_slot;
+    let Some(b) = records.block(LISTS).and_then(|b| b.get(from..from + per_slot)) else {
+        return Vec::new();
+    };
+    let word = |at: usize| b.get(at..at + 2).map_or(0, |w| i16::from_le_bytes([w[0], w[1]]));
+    let teams = records.countries.team_count(country.into()).max(0);
+    let mut led: Vec<(i16, i16, i16)> = (0..teams)
+        .map(|t| (t, word(4 * t as usize), word(4 * t as usize + 2)))
+        .filter(|&(_, count, _)| count != 0)
+        .collect();
+    led.sort_by_key(|&(t, count, seasons)| (std::cmp::Reverse(count), seasons, t));
+    led
+}
+
+/// The Ligapokal/Supercup's finals (`FUN_0046364c` by `FUN_006429fb`:
+/// `DAT_00b19150` in the lists block, 0x140 a country by its slot): twenty
+/// entries of the year and the final's pairing, kept packed at the end
+/// (`FUN_006cd999`); those that name a club, the newest first.
+const FINALS: (usize, usize) = (0xda98, 0x140);
+const FINALS_KEPT: usize = 20;
+
+pub fn league_cup_finals(records: &Records, country: u16) -> Vec<(i16, CupPairing)> {
+    let (at, per_slot) = FINALS;
+    let from = at + usize::from(records.countries.slot(country.into())) * per_slot;
+    let Some(b) = records.block(LISTS).and_then(|b| b.get(from..from + per_slot)) else {
+        return Vec::new();
+    };
+    let entry = |k: usize| &b[k * 0x10..(k + 1) * 0x10];
+    let count = (0..FINALS_KEPT).filter(|&k| entry(k)[2] != 0).count();
+    (count.saturating_sub(FINALS_KEPT)..count)
+        .map(|k| entry(FINALS_KEPT - 1 - k))
+        .map(|e| (i16::from_le_bytes([e[0], e[1]]), pairing(&e[2..])))
         .collect()
 }
 

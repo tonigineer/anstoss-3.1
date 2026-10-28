@@ -248,6 +248,28 @@ const ALL_TIME_GAMES_HEADER_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (C | 200, 40), (C | 242, 40), (C | 285, 50)];
 const ALL_TIME_GAMES_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (R | 200, 30), (R | 240, 30), (R | 280, 35)];
+/// The Tabellenführungen's header and rows (`FUN_00463a9b`): place, club,
+/// matchdays at the top and seasons in the league; the own club red.
+const LEADERS_HEADER: u16 = 3032;
+const LEADERS_HEADER_COLUMNS: [(u16, u16); 4] = [(R, 25), (30, 0), (C | 235, 40), (C | 300, 40)];
+const LEADERS_ROW_COLUMNS: [(u16, u16); 4] = [(R, 25), (30, 0), (R | 220, 40), (R | 300, 25)];
+/// The Ligapokal/Supercup's header and rows (`FUN_0046364c` with
+/// 0x87d4b0, and 0x87d440): the year, then the pairing's cells.
+const FINALS_HEADER: u16 = 3031;
+const FINALS_HEADER_COLUMNS: [(u16, u16); 3] = [(0, 60), (C | 60, 240), (C | 310, 50)];
+const FINALS_ROW_COLUMNS: [(u16, u16); 11] = [
+    (0, 0),
+    (60, 0),
+    (180, 0),
+    (185, 0),
+    (R | 315, 20),
+    (337, 0),
+    (342, 0),
+    (R | 365, 20),
+    (387, 0),
+    (392, 0),
+    (415, 0),
+];
 /// The 5-Jahreswertung's header and rows (`FUN_0045fac1` with 0x87d088):
 /// place, country, the total and the six seasons, each "%3.2f".
 const FIVE_YEARS_HEADER: u16 = 3017;
@@ -1636,6 +1658,36 @@ fn eleven_page(
     true
 }
 
+/// A cup pairing as the row `FUN_0044893f` writes it: the sides — "ohne
+/// Verein" where none stands yet —, each leg's goals where it was played
+/// (the first's place kept empty), and "n.V."/"n.E." or a space.
+fn pairing_text(game: &Game, records: &Records, p: &statistics::CupPairing) -> String {
+    let side = |country: u8, team: i16| {
+        if country == 0 {
+            game.text(NO_CLUB).to_owned()
+        } else {
+            game.club_name(Some(records), country, team)
+        }
+    };
+    let leg = |leg: Option<(u8, u8)>, empty: &str| {
+        leg.map_or_else(|| empty.to_owned(), |(a, b)| format!("\t{a}\t:\t{b}"))
+    };
+    let note = if p.penalties {
+        game.text(PENALTIES)
+    } else if p.extra_time {
+        game.text(EXTRA_TIME)
+    } else {
+        " "
+    };
+    format!(
+        "{}\t-\t{}{}{}\t{note}",
+        side(p.home_country, p.home),
+        side(p.away_country, p.away),
+        leg(p.first, "\t\t\t"),
+        leg(p.second, "")
+    )
+}
+
 /// A name from the pool's ids as `FUN_00637cbb` spells it, "%s %s", or
 /// just one of the two where the other's id is 0, nothing where both are.
 fn spelled(records: &Records, first: u16, last: u16) -> String {
@@ -1958,6 +2010,10 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(statistics::LEADERS_PAGE) if self.category == HISTORY => {
+                self.leaders_page(cx, view)
+            }
+            Some(statistics::FINALS_PAGE) if self.category == HISTORY => self.finals_page(cx, view),
             Some(statistics::FIVE_YEARS_PAGE) if self.category == HISTORY => {
                 self.five_years_page(cx, view)
             }
@@ -3525,6 +3581,76 @@ impl Statistics {
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
     }
 
+    /// The Tabellenführungen (`FUN_00463a9b`): the clubs of the country
+    /// the strip stands at that led its first league, by matchdays at the
+    /// top.
+    fn leaders_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let country = self.strip_country(records);
+        set_header(view, dialog, game.text(LEADERS_HEADER).to_owned(), &LEADERS_HEADER_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let rows = statistics::leaderships(records, country)
+            .iter()
+            .enumerate()
+            .map(|(i, &(team, count, seasons))| {
+                let club = game.club_name(Some(records), country as u8, team);
+                let text = format!("{}.\t{club}\t{count}\t{seasons}", i + 1);
+                let ink = if own == Some((country, team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: LEADERS_ROW_COLUMNS.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Ligapokal/Supercup (`FUN_0046364c`): the finals of the country
+    /// the strip stands at, the newest first, "%d\t%s" of the year and
+    /// the pairing; the own club's red. With none the table stays as it
+    /// was.
+    fn finals_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let country = self.strip_country(records);
+        set_header(view, dialog, game.text(FINALS_HEADER).to_owned(), &FINALS_HEADER_COLUMNS);
+        let finals = statistics::league_cup_finals(records, country);
+        if finals.is_empty() {
+            return true;
+        }
+        let own = own_team(cx).map(|t: &Team| (t.country(), i16::from(t.number())));
+        let rows = finals
+            .iter()
+            .map(|(year, p)| {
+                let text = format!("{year}\t{}", pairing_text(game, records, p));
+                let ours = own == Some((p.home_country, p.home))
+                    || own == Some((p.away_country, p.away));
+                TableRow { text, ink: if ours { OWN_INK } else { INK }, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FINALS_ROW_COLUMNS.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
     /// The 5-Jahreswertung (`FUN_0045fac1`): the European ranking's 37
     /// countries in the order kept, each with its total and its points of
     /// the six seasons up to the year's (`DAT_00b5cbca`), the oldest
@@ -4528,30 +4654,7 @@ impl Statistics {
         let rows = pairings
             .iter()
             .map(|p| {
-                let side = |country: u8, team: i16| {
-                    if country == 0 {
-                        game.text(NO_CLUB).to_owned()
-                    } else {
-                        game.club_name(Some(records), country, team)
-                    }
-                };
-                let leg = |leg: Option<(u8, u8)>, empty: &str| {
-                    leg.map_or_else(|| empty.to_owned(), |(a, b)| format!("\t{a}\t:\t{b}"))
-                };
-                let note = if p.penalties {
-                    game.text(PENALTIES)
-                } else if p.extra_time {
-                    game.text(EXTRA_TIME)
-                } else {
-                    " "
-                };
-                let text = format!(
-                    "{}\t-\t{}{}{}\t{note}",
-                    side(p.home_country, p.home),
-                    side(p.away_country, p.away),
-                    leg(p.first, "\t\t\t"),
-                    leg(p.second, "")
-                );
+                let text = pairing_text(game, records, p);
                 let ink = if own == Some((u16::from(p.home_country), p.home))
                     || own == Some((u16::from(p.away_country), p.away))
                 {
