@@ -5138,6 +5138,25 @@ mod tests {
         assert_eq!(texts[1], ((196, 322), "VfB Stuttgart"));
     }
 
+    /// With the department raised, the Aktuelles category's Stars der
+    /// Ligen lists the league's best player at each position; a position
+    /// no one holds keeps an empty name.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_leagues_stars() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 7";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts.len(), 10);
+        assert_eq!(texts[0], "Torwart\tGregor Kobel\tBorussia Dortmund\t10.6\t27");
+        assert_eq!(texts[1], "Libero\t\tohne Verein\t0.0\t0");
+        assert_eq!(texts[9], "Sturm\tHarry Kane\tFC Bayern München\t11.8\t32");
+    }
+
     /// The Aktuelles category's Spielbericht tells the club's last match:
     /// the league and matchday, the pairing with the places, the goals,
     /// the red card, the gate, the weather, the comparison and the money,

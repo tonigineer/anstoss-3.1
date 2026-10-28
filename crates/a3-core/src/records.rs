@@ -1611,13 +1611,14 @@ impl Records {
     }
 
     /// A referee's full name (`FUN_00637cbb`): first and last name, one
-    /// alone where the other is none.
+    /// alone where the other is none, nothing where both are.
     pub fn referee_name(&self, id: i16) -> Option<String> {
         let id = usize::try_from(id).ok().filter(|id| (1..=REFEREES).contains(id))?;
         let bytes = self.block(&format!("{REFEREE_AT:#x}[{id}]"))?;
         let part = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
         let (first, last) = (part(0), part(2));
         Some(match (first, last) {
+            (0, 0) => String::new(),
             (0, l) => self.name(l).to_owned(),
             (f, 0) => self.name(f).to_owned(),
             (f, l) => format!("{} {}", self.name(f), self.name(l)),

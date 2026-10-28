@@ -230,6 +230,15 @@ const DAY_ELEVEN_PLACES: [(i32, i32); 11] = [
     (100, 0),
     (288, 0),
 ];
+/// The Stars der Ligen's header and rows (`FUN_00455aaf` with 0x87a310,
+/// and 0x87a2e8): the position, the player, his club, strength and age;
+/// the positions' names from the keeper on (0x8a84e4), and the own
+/// club's player in blue (COLORREF 0xff0000).
+const STARS_HEADER: u16 = 3699;
+const STARS_HEADER_COLUMNS: [(u16, u16); 5] = [(3, 0), (120, 0), (240, 0), (C | 345, 40), (385, 0)];
+const STARS_ROW_COLUMNS: [(u16, u16); 5] = [(3, 0), (120, 0), (240, 0), (360, 0), (390, 0)];
+const POSITION_NAMES: u16 = 1362;
+const STAR_INK: [u8; 3] = [0, 0, 0xff];
 /// The Spielbericht's header and its rows' columns (`FUN_004529f3` with
 /// 0x87a190, 0x87a158 and 0x87a128): a label and its text; a label and
 /// the two sides' figures; a goal's label, score, scorer and minute.
@@ -1526,9 +1535,10 @@ fn eleven_page(
 }
 
 /// A name from the pool's ids as `FUN_00637cbb` spells it, "%s %s", or
-/// just one of the two where the other's id is 0.
+/// just one of the two where the other's id is 0, nothing where both are.
 fn spelled(records: &Records, first: u16, last: u16) -> String {
     match (first, last) {
+        (0, 0) => String::new(),
         (0, _) => records.name(last).to_owned(),
         (_, 0) => records.name(first).to_owned(),
         _ => format!("{} {}", records.name(first), records.name(last)),
@@ -1836,6 +1846,9 @@ impl Statistics {
             }
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
+            }
+            Some(statistics::STARS_PAGE) if self.category == AKTUELLES => {
+                self.stars_page(cx, view)
             }
             Some(statistics::REPORT_PAGE) if self.category == AKTUELLES => {
                 self.report_page(cx, view)
@@ -3383,6 +3396,45 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Stars der Ligen (`FUN_00455aaf`): the league's best player at
+    /// each of the ten positions, "%s\t%s\t%s\t%2.1f\t%d".
+    fn stars_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        set_header(view, dialog, game.text(STARS_HEADER).to_owned(), &STARS_HEADER_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (t.country(), i16::from(t.number())));
+        let rows = statistics::league_stars(records, country, level)
+            .iter()
+            .enumerate()
+            .map(|(p, star)| {
+                let (club_country, number) = star.club;
+                let text = format!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    game.text(POSITION_NAMES + p as u16),
+                    spelled(records, star.names[0], star.names[1]),
+                    game.club_name(Some(records), club_country, number),
+                    tenths(f64::from(star.strength) / 10.0),
+                    star.age
+                );
+                let ink = if own == Some(star.club) { STAR_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: STARS_ROW_COLUMNS.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
     }
 
     /// The Spielbericht (`FUN_004529f3`): the own club's last match, row

@@ -1041,6 +1041,8 @@ pub const YEAR_ELEVEN_PAGE: i16 = 4;
 pub const PLAN_PAGE: i16 = 0x11;
 /// The Spielbericht under 2977 (`FUN_004529f3`).
 pub const REPORT_PAGE: i16 = 0;
+/// The Stars der Ligen under 3699 (`FUN_00455aaf`).
+pub const STARS_PAGE: i16 = 0xa;
 
 /// The human club's runs (`FUN_00632de8`: 0x56 bytes at its extra block's
 /// +0xd88), as the Serien states them (`FUN_0044ffb3`): each run that has
@@ -1504,6 +1506,40 @@ pub fn day_eleven(records: &Records, country: u16, level: u8) -> [(u16, u8); 11]
         }
     }
     eleven
+}
+
+/// The league's best player at each position (`FUN_00455aaf` by
+/// `FUN_00642bad`: 0x8c bytes at `DAT_00b0b01c` by the league's list
+/// index), as `FUN_007256af` found them: his id, names, strength in
+/// tenths, club and age; a place no one held stays empty.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Star {
+    pub id: u16,
+    pub names: [u16; 2],
+    pub strength: i16,
+    pub club: (u8, i16),
+    pub age: i16,
+}
+
+const STARS: u32 = 0xb0affc;
+pub const STAR_PLACES: usize = 10;
+
+pub fn league_stars(records: &Records, country: u16, level: u8) -> [Star; STAR_PLACES] {
+    let mut stars = [Star::default(); STAR_PLACES];
+    let Some(index) = league_of(records, country, level) else { return stars };
+    let Some(b) = records.block(&format!("{STARS:#x}[{index}]")) else { return stars };
+    let word = |at: usize| b.get(at..at + 2).map_or(0, |w| i16::from_le_bytes([w[0], w[1]]));
+    for (p, star) in stars.iter_mut().enumerate() {
+        let at = 14 * p;
+        *star = Star {
+            id: word(at) as u16,
+            names: [word(at + 2) as u16, word(at + 4) as u16],
+            strength: word(at + 6),
+            club: (b.get(at + 8).copied().unwrap_or(0), word(at + 0xa)),
+            age: word(at + 0xc),
+        };
+    }
+    stars
 }
 
 /// A country's Elf des Jahres so far (`FUN_004523ce` by `FUN_0064214b`:
