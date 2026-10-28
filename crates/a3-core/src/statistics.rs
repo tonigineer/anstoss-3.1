@@ -299,9 +299,15 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
 }
 
 /// The Liga category's first two pages: the Torjägerliste and the
-/// Scorer, under the single header texts 0xa99 and 0xa9b.
+/// Scorer, under the single header texts 0xa99 and 0xa9b; behind them
+/// the Vorlagen, the Freistoßschützen and the Elfmeterschützen, under
+/// 0xa9a, 0xa9d and 0xa9e (`FUN_0044a02e`, `FUN_0044ab7a`,
+/// `FUN_0044af3b`).
 pub const TOR_PAGE: i16 = 0;
 pub const SCORER_PAGE: i16 = 1;
+pub const VORLAGEN_PAGE: i16 = 2;
+pub const FREISTOSS_PAGE: i16 = 3;
+pub const ELFMETER_PAGE: i16 = 4;
 
 /// One player of the Liga lists: the name pool's ids of the name as the
 /// list holds it, his club's number, with the figures the page shows in
@@ -382,6 +388,49 @@ pub fn torjaeger(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
             })
         })
         .collect()
+}
+
+/// The three saved lists that share one shape (`DAT_00b0f576`,
+/// `DAT_00b10ce6` and `DAT_00b114b6`, inside the same block): twenty
+/// entries of 10 with the names' pool ids, the club's number, and from
+/// the gate byte on the figures of their columns.
+const SHORT_LISTS: [(usize, usize); 3] = [(0x3ebe, 200), (0x562e, 200), (0x5dfe, 200)];
+
+/// One of those twenty-entry lists.
+fn short_list(records: &Records, country: u16, level: u8, which: usize) -> Vec<LigaRow> {
+    let (at, row) = SHORT_LISTS[which];
+    let Some(b) = list_bytes(records, country, level, at, row, 10, 0x14) else {
+        return Vec::new();
+    };
+    (0..0x14)
+        .filter_map(|i| {
+            let e = &b[i * 10..i * 10 + 10];
+            (e[5] != 0).then(|| LigaRow {
+                first: u16::from_le_bytes([e[0], e[1]]),
+                last: u16::from_le_bytes([e[2], e[3]]),
+                team: i16::from(e[4]),
+                values: [e[5], e[6], e[7], e[8], e[9], 0],
+            })
+        })
+        .collect()
+}
+
+/// The league's assisters this season (`FUN_0044a02e`): his assists and
+/// the matchdays on which they came.
+pub fn vorlagen(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    short_list(records, country, level, 0)
+}
+
+/// The league's free-kick takers (`FUN_0044ab7a`): the ones they took,
+/// the converted and the missed.
+pub fn freistosse(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    short_list(records, country, level, 1)
+}
+
+/// The league's penalty takers (`FUN_0044af3b`): the ones they got, the
+/// converted and the missed.
+pub fn elfmeter(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    short_list(records, country, level, 2)
 }
 
 /// The league's scorers and assisters this season (`FUN_0044a3fa`): the

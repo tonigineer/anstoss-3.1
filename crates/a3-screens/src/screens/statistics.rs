@@ -158,6 +158,9 @@ const GOAL_HEADER: u16 = 0xa50;
 const LIGA: usize = 2;
 const TOR_HEADER: u16 = 0xa99;
 const SCORER_HEADER: u16 = 0xa9b;
+const VORLAGEN_HEADER: u16 = 0xa9a;
+const FREISTOSS_HEADER: u16 = 0xa9d;
+const ELFMETER_HEADER: u16 = 0xa9e;
 const TOR_HEADER_COLUMNS: [(u16, u16); 9] = [
     (R, 0x12),
     (0x18, 0),
@@ -199,6 +202,25 @@ const SCORER_ROW_COLUMNS: [(u16, u16); 8] = [
     (C | 0x13b, 0x19),
     (R | 0x159, 0x14),
     (R | 0x172, 0x14),
+];
+/// The three pages behind them draw their headers and their rows from
+/// one and the same blocks (`FUN_0044a02e` at 0x8798a8, `FUN_0044ab7a`
+/// and `FUN_0044af3b` at 0x8798a8 and 0x879908): the assisters' two
+/// figures, and the free-kick and penalty takers' three.
+const VORLAGEN_COLUMNS: [(u16, u16); 5] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0xa0, 0),
+    (C | 0x118, 0x32),
+    (C | 0x140, 0x28),
+];
+const TAKER_COLUMNS: [(u16, u16); 6] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0x96, 0),
+    (C | 0x122, 0x28),
+    (C | 0x14a, 0x28),
+    (C | 0x172, 0x28),
 ];
 const TOR_OWN_INK: [u8; 3] = [0, 0, 255];
 /// The cup rows' columns (`FUN_006df48b` with 0x879428 and 0x879450): the
@@ -612,9 +634,10 @@ impl Statistics {
             Some(statistics::SUPERCUP_PAGE) if self.category == TABLES => {
                 self.supercup_page(cx, view)
             }
-            Some(statistics::TOR_PAGE) if self.category == LIGA => self.liga_page(cx, view, true),
-            Some(statistics::SCORER_PAGE) if self.category == LIGA => {
-                self.liga_page(cx, view, false)
+            Some(code @ statistics::TOR_PAGE..=statistics::ELFMETER_PAGE)
+                if self.category == LIGA =>
+            {
+                self.liga_page(cx, view, code)
             }
             _ => false,
         };
@@ -789,87 +812,119 @@ impl Statistics {
         true
     }
 
-    /// The Liga category's player pages (`FUN_00449bd6` and
-    /// `FUN_0044a3fa`): the league the strip stands on draws the list
-    /// the game keeps for it as the season goes on and saves with the
-    /// game (`DAT_00b0b6b8`) — a hundred top scorers by their goals,
-    /// twenty scorers by their points; the page never sorts. Each row
-    /// reads "%d.\t%s\t%s…" (0x879ed8,
-    /// 0x879f04) with the player's name as "%s, %c" (0x879ed0): his
-    /// last name, a comma and his first name's initial, the club's
-    /// name, and his figures; the own club's row stands blue on the
-    /// goal page, red on the scorer page.
-    fn liga_page(&self, cx: &Cx, view: &mut View, tor: bool) -> bool {
+    /// The Liga category's player pages (`FUN_00449bd6`, `FUN_0044a3fa`,
+    /// `FUN_0044a02e`, `FUN_0044ab7a` and `FUN_0044af3b`): the league
+    /// the strip stands on draws the list the game keeps for it as the
+    /// season goes on and saves with the game (`DAT_00b0b6b8`) — a
+    /// hundred top scorers by their goals, twenty scorers by their
+    /// points, and twenty each of the assisters and of the free-kick
+    /// and penalty takers; the page never sorts. Each row reads
+    /// "%d.\t%s\t%s…" (0x879ed8, 0x879ef4,
+    /// 0x879f04, 0x879f30 and 0x879f44) with the club's name and the
+    /// figures from the gate byte on; the goal and scorer pages name
+    /// the player "%s, %c" (0x879ed0), his last name, a comma and his
+    /// first name's initial, the three others spell both names out
+    /// ("FUN_00637cbb"'s "%s %s", 0x89d96c). The own club's row stands
+    /// blue on all but the scorer page, where it is red.
+    fn liga_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
-        let (header, header_columns, columns, list) = if tor {
-            (
+        // header text, header's and rows' columns, the saved list, the
+        // figures a row prints, whether the names are spelled out, and
+        // whether the page hands its row count to the window (the two
+        // taker pages hand 0xffffffff instead, so their rows start at
+        // the top).
+        let (header, header_columns, columns, list, shown, spelled, centred) = match code {
+            statistics::TOR_PAGE => (
                 TOR_HEADER,
                 &TOR_HEADER_COLUMNS[..],
                 &TOR_ROW_COLUMNS[..],
                 statistics::torjaeger(records, country, level),
-            )
-        } else {
-            (
+                6,
+                false,
+                true,
+            ),
+            statistics::SCORER_PAGE => (
                 SCORER_HEADER,
                 &SCORER_HEADER_COLUMNS[..],
                 &SCORER_ROW_COLUMNS[..],
                 statistics::scorers(records, country, level),
-            )
+                5,
+                false,
+                true,
+            ),
+            statistics::VORLAGEN_PAGE => (
+                VORLAGEN_HEADER,
+                &VORLAGEN_COLUMNS[..],
+                &VORLAGEN_COLUMNS[..],
+                statistics::vorlagen(records, country, level),
+                2,
+                true,
+                true,
+            ),
+            statistics::FREISTOSS_PAGE => (
+                FREISTOSS_HEADER,
+                &TAKER_COLUMNS[..],
+                &TAKER_COLUMNS[..],
+                statistics::freistosse(records, country, level),
+                3,
+                true,
+                false,
+            ),
+            statistics::ELFMETER_PAGE => (
+                ELFMETER_HEADER,
+                &TAKER_COLUMNS[..],
+                &TAKER_COLUMNS[..],
+                statistics::elfmeter(records, country, level),
+                3,
+                true,
+                false,
+            ),
+            _ => return false,
         };
         set_header(view, dialog, game.text(header).to_owned(), header_columns);
         let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
         let rows: Vec<_> = list
             .iter()
             .enumerate()
-            .filter_map(|(i, row)| {
-                let last = records.name(row.last);
-                let name = match records.name(row.first).chars().next() {
-                    Some(initial) => format!("{last}, {initial}"),
-                    None => last.to_owned(),
+            .map(|(i, row)| {
+                let (first, last) = (records.name(row.first), records.name(row.last));
+                let name = if spelled {
+                    match (first.is_empty(), last.is_empty()) {
+                        (true, _) => last.to_owned(),
+                        (_, true) => first.to_owned(),
+                        _ => format!("{first} {last}"),
+                    }
+                } else {
+                    match first.chars().next() {
+                        Some(initial) => format!("{last}, {initial}"),
+                        None => last.to_owned(),
+                    }
                 };
                 let club = game.club_name(Some(records), country as u8, row.team);
-                let v = row.values;
-                let text = if tor {
-                    format!(
-                        "{}.\t{name}\t{club}\t{}\t{}\t{}\t{}\t{}\t{}",
-                        i + 1,
-                        v[0],
-                        v[1],
-                        v[2],
-                        v[3],
-                        v[4],
-                        v[5]
-                    )
-                } else {
-                    format!(
-                        "{}.\t{name}\t{club}\t{}\t{}\t{}\t{}\t{}",
-                        i + 1,
-                        v[0],
-                        v[1],
-                        v[2],
-                        v[3],
-                        v[4]
-                    )
-                };
+                let mut text = format!("{}.\t{name}\t{club}", i + 1);
+                for v in &row.values[..shown] {
+                    text.push('\t');
+                    text.push_str(&v.to_string());
+                }
                 let ink = if own == Some((country, row.team)) {
-                    if tor {
-                        TOR_OWN_INK
-                    } else {
+                    if code == statistics::SCORER_PAGE {
                         OWN_INK
+                    } else {
+                        TOR_OWN_INK
                     }
                 } else {
                     INK
                 };
-                Some(TableRow { text, ink, mark: None, columns: None })
+                TableRow { text, ink, mark: None, columns: None }
             })
             .collect();
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             // The page hands its row count to the window (`FUN_00458c56`'s
             // first parameter, the window's +0x10ec), so `FUN_006de7b0`
             // stands the shown rows centred in its height.
-            let centred = i32::try_from(rows.len()).unwrap_or(-1);
+            let centred = if centred { i32::try_from(rows.len()).unwrap_or(-1) } else { -1 };
             *table = TableState {
                 columns: columns.to_vec(),
                 rows,

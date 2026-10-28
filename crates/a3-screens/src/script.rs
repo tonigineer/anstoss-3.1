@@ -4867,7 +4867,8 @@ mod tests {
         assert_eq!(graph.bars[0].0, 150);
     }
 
-    /// The Liga category names its players and counts their goals.
+    /// The Liga category names its players and counts their goals,
+    /// assists, free kicks and penalties.
     #[test]
     #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
     fn the_archive_lists_the_leagues_players() {
@@ -4908,5 +4909,51 @@ mod tests {
         assert_eq!(table.rows[0].text, "1.\tKane, H\tFC Bayern München\t5\t3\t0\t2\t1");
         let red = table.rows.iter().position(|r| r.ink == [255, 0, 0]).unwrap();
         assert!(table.rows[red].text.starts_with("6.\tJuranovic, J\t1.FC Union Berlin"));
+        // The free-kick page (`FUN_0044ab7a`): taken, converted and
+        // missed, both names spelled out, rows from the top.
+        let fr = format!("{liga}\nnow row 1284 2");
+        let Some(runner) = on_save(&game, "A", &fr) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tges.\\tverw.\\tversch."
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.centred, -1);
+        assert_eq!(
+            table.rows[0].text,
+            "1.\tFranck Honorat\tBorussia M'gladbach\t2\t1\t1"
+        );
+        assert_eq!(
+            table.rows[4].text,
+            "5.\tErmedin Demirovic\tVfB Stuttgart\t3\t1\t2"
+        );
+        // The penalty page (`FUN_0044af3b`): the own club's row blue.
+        let el = format!("{liga}\nnow row 1284 3");
+        let Some(runner) = on_save(&game, "A", &el) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tElfer\\tverw.\\tversch."
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(
+            table.rows[1].text,
+            "2.\tJanik Haberer\t1.FC Union Berlin\t1\t1\t0"
+        );
+        assert_eq!(table.rows[1].ink, [0, 0, 255]);
+        // The assistor page (`FUN_0044a02e`) stands centred like the two
+        // first; its figures are the entry's after the club's number.
+        let vo = format!("{liga}\nnow row 1284 5");
+        let Some(runner) = on_save(&game, "A", &vo) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tVorl.\\tlSp"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 20);
+        assert_eq!(table.centred, 20);
+        assert_eq!(table.rows[0].text, "1.\tHarry Kane\tFC Bayern München\t2\t0");
     }
 }
