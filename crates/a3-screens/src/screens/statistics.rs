@@ -237,6 +237,25 @@ const ALL_TIME_MATCHES_ROW_COLUMNS: [(u16, u16); 8] = [
     (R | 0x14a, 0x23),
     (R | 0x17a, 0x23),
 ];
+/// The Vereinsresultate's header and rows (`FUN_0046ce89` with 0x87e598,
+/// and 0x87e558): the weekday and the date, both sides with a dash
+/// between, the result's two scores with a colon. A date is text 1776
+/// "%1, %2.%3.%4" with the day's weekday among texts 1779 on
+/// (`FUN_00676008`, the day of the game modulo seven).
+const FIXTURES_HEADER: u16 = 3041;
+const FIXTURES_HEADER_COLUMNS: [(u16, u16); 3] = [(C, 0), (C | 0x6e, 0), (C | 0x168, 0x32)];
+const FIXTURES_ROW_COLUMNS: [(u16, u16); 8] = [
+    (5, 0x1e),
+    (R | 0x1d, 0x3c),
+    (0x6e, 0),
+    (0xeb, 0),
+    (0xf0, 0),
+    (R | 0x168, 0x14),
+    (0x17e, 0),
+    (0x183, 0),
+];
+const DATE_TEXT: u16 = 1776;
+const WEEKDAY_TEXTS: u16 = 1779;
 /// The Spielereigenschaften's header and rows (`FUN_00471109` with
 /// 0x87e6d0, and 0x87e6f0): name, position, strength and traits.
 const TRAITS_HEADER: u16 = 4739;
@@ -1114,6 +1133,9 @@ impl Statistics {
             Some(statistics::SQUAD_TRAITS_PAGE) if self.category == MANNSCHAFT => {
                 self.traits_page(cx, view)
             }
+            Some(statistics::SQUAD_FIXTURES_PAGE) if self.category == MANNSCHAFT => {
+                self.fixtures_page(cx, view)
+            }
             Some(statistics::SQUAD_ALL_TIME_PAGE) if self.category == MANNSCHAFT => {
                 self.all_time_page(cx, view)
             }
@@ -1502,6 +1524,64 @@ impl Statistics {
             *table = TableState {
                 columns: page.columns.to_vec(),
                 centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Vereinsresultate (`FUN_0046ce89`): the club's league fixtures
+    /// through the season (`FUN_0062af24`), a blank row before the second
+    /// half's first, each "%s\t%s" of the date split after its comma, then
+    /// "%s\t%s\t-\t%s\t" with the home side first, and "%d\t:\t%d" once
+    /// the matchday is played; black, the window handed one row more than
+    /// there are fixtures.
+    fn fixtures_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(FIXTURES_HEADER).to_owned(), &FIXTURES_HEADER_COLUMNS);
+        let country = team.country();
+        let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
+        let league = League::of(records, country.into(), team.level());
+        let place = usize::from(team.league_place());
+        let own = game.club_name(Some(records), country, i16::from(team.number()));
+        let mut rows = Vec::new();
+        for (i, f) in fixtures.iter().enumerate() {
+            if i == fixtures.len() / 2 {
+                rows.push(TableRow { text: String::new(), ink: INK, mark: None, columns: None });
+            }
+            let date = records.globals.date_of(f.day as i16).map_or_else(String::new, |d| {
+                use chrono::Datelike;
+                let weekday = game.text(WEEKDAY_TEXTS + (f.day % 7) as u16);
+                game.text(DATE_TEXT)
+                    .replace("%1", weekday)
+                    .replace("%2", &d.day().to_string())
+                    .replace("%3", &d.month().to_string())
+                    .replace("%4", &d.year().to_string())
+            });
+            // `CString::Left` up to the comma and `Mid` past its space.
+            let date = match date.find(',') {
+                Some(k) => format!("{}\t{}", &date[..=k], date.get(k + 2..).unwrap_or("")),
+                None => format!("{date}\t"),
+            };
+            let other = game.club_name(Some(records), country, f.opponent);
+            let (home, away) = if f.home { (&own, &other) } else { (&other, &own) };
+            let mut text = format!("{date}\t{home}\t-\t{away}\t");
+            let result = league.as_ref().and_then(|l| l.result(i + 1, place));
+            if let Some((_, _, Some((h, a)))) = result {
+                text.push_str(&format!("{h}\t:\t{a}"));
+            }
+            rows.push(TableRow { text, ink: INK, mark: None, columns: None });
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FIXTURES_ROW_COLUMNS.to_vec(),
+                centred: fixtures.len() as i32 + 1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

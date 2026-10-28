@@ -318,6 +318,8 @@ pub const SQUAD_ASSISTS_PAGE: i16 = 0xc;
 pub const SQUAD_YELLOW_PAGE: i16 = 0xe;
 /// The Spielereigenschaften under 4739 (`FUN_00471109`).
 pub const SQUAD_TRAITS_PAGE: i16 = 0x1d;
+/// The Vereinsresultate under 3041 (`FUN_0046ce89`).
+pub const SQUAD_FIXTURES_PAGE: i16 = 0x19;
 
 /// The own squad by the names its players go by (`FUN_00471109`): the
 /// same exchange sort, a place swapping with the first of the rest whose

@@ -3893,7 +3893,8 @@ mod tests {
         let dialog = &game.dialogs[&174];
         assert!(view.list(control(dialog, 2830).unwrap()).unwrap().rows.is_empty());
         // The highscores: the careers of the installation, five on the
-        // oracle's copy, none of the fixed games kept there.
+        // oracle's copy as setup.sh makes it, none of the fixed games kept
+        // there (an oracle run that ends a career adds its own).
         let then = format!("{to_pages}\nnow choose 5643 8\nuntil dialog 95");
         let runner = on_save(&game, "A", &then).unwrap();
         let view = runner.host.view();
@@ -3904,7 +3905,7 @@ mod tests {
             let rows = &view.list(control(dialog, 2010).unwrap()).unwrap().rows;
             assert_eq!(rows.len(), 5);
             let expected = [
-                "1.\tToni Lubiniecki\t18\t151397\t151397\t9\t0\t22.10.2026",
+                "1.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t24.8.2026",
                 "2.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t26.9.2026",
                 "3.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t26.9.2026",
                 "4.\tToni Lubiniecki\t18\t5880\t5880\t9\t0\t26.9.2026",
@@ -4890,6 +4891,32 @@ mod tests {
         assert_eq!(table.rows[0].text, "1.\tJosip Juranovic\t1\t0\t0");
         assert_eq!(table.rows[3].text, "4.\tToni Lubiniecki\t1\t1\t0");
         assert!(table.rows.iter().all(|r| r.ink == [0, 0, 0]));
+    }
+
+    /// The Mannschaft category's Vereinsresultate lists the club's league
+    /// fixtures with their dates, the results of those played.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_clubs_fixtures() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 0";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Datum\\tBegegnung\\tErgebnis");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        // Thirty-four matchdays and a blank row between the halves.
+        assert_eq!(table.rows.len(), 35);
+        assert_eq!(table.centred, 35);
+        assert_eq!(
+            table.rows[0].text,
+            "Sam,\t24.8.2025\tHamburger SV\t-\t1.FC Union Berlin\t0\t:\t3"
+        );
+        assert_eq!(
+            table.rows[3].text,
+            "Sam,\t14.9.2025\t1.FC Union Berlin\t-\tRB Leipzig\t"
+        );
+        assert_eq!(table.rows[17].text, "");
     }
 
     /// The Mannschaft category's Torjäger ewig lists the club's scorers
