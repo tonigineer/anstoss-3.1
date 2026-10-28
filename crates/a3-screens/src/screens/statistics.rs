@@ -230,6 +230,17 @@ const DAY_ELEVEN_PLACES: [(i32, i32); 11] = [
     (100, 0),
     (288, 0),
 ];
+/// The Mannschaftsvergleich's header and rows (`FUN_00450c3f` with
+/// 0x87a0d8 and 0x87a0f0): a label and a column for each club, the lines'
+/// rows three columns for each; its labels from 2957 on, the lines'
+/// format, and the rows the window spreads them over.
+const COMPARISON_HEADER: u16 = 2956;
+const COMPARISON_COLUMNS: [(u16, u16); 3] = [(0, 120), (125, 170), (300, 140)];
+const COMPARISON_LINE_COLUMNS: [(u16, u16); 7] =
+    [(0, 120), (125, 40), (165, 40), (215, 40), (300, 40), (340, 40), (390, 40)];
+const COMPARISON_LABELS: u16 = 2957;
+const COMPARISON_LINE: u16 = 2974;
+const COMPARISON_ROWS: i32 = 0x12;
 /// The Stars der Ligen's header and rows (`FUN_00455aaf` with 0x87a310,
 /// and 0x87a2e8): the position, the player, his club, strength and age;
 /// the positions' names from the keeper on (0x8a84e4), and the own
@@ -1682,6 +1693,15 @@ impl Statistics {
                 self.leagues.iter().map(name).collect()
             }
             k if k == SIDES.0 => SIDES.1.map(text).to_vec(),
+            // The other human clubs, by name (`FUN_004599d8` case 0xe).
+            statistics::OTHER_HUMANS_STRIP => {
+                let own = own_team(cx).map(|t: &Team| (t.country(), i16::from(t.number())));
+                statistics::human_clubs(records)
+                    .into_iter()
+                    .filter(|&c| Some(c) != own)
+                    .map(|(c, n)| game.club_name(Some(records), c, n))
+                    .collect()
+            }
             statistics::QUALIFIER_STRIP => {
                 (0..QUALIFIER_GROUPS).map(|g| text(GROUP_NAMES + g as u16)).collect()
             }
@@ -1846,6 +1866,9 @@ impl Statistics {
             }
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
+            }
+            Some(statistics::COMPARISON_PAGE) if self.category == AKTUELLES => {
+                self.comparison_page(cx, view)
             }
             Some(statistics::STARS_PAGE) if self.category == AKTUELLES => {
                 self.stars_page(cx, view)
@@ -3396,6 +3419,108 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Mannschaftsvergleich (`FUN_00450c3f`): the own club beside the
+    /// other human club the strip stands at, if there is one, row by row
+    /// a label and each club's figure. The club, its manager — a human
+    /// with his standing, a computer's trainer with his figure at +0x24,
+    /// else nothing —, the squad's figures of
+    /// [`statistics::comparison`], and its market value, each player's in
+    /// whole thousands.
+    fn comparison_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(season) = cx.state.season.as_ref() else { return false };
+        let Some(own) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(COMPARISON_HEADER).to_owned(), &[(0, 0)]);
+        let today = season.date();
+        let key = (own.country(), i16::from(own.number()));
+        let others: Vec<(u8, i16)> =
+            statistics::human_clubs(records).into_iter().filter(|&c| c != key).collect();
+        let mut clubs = vec![own];
+        if let Some(&(c, n)) = others.get(self.chosen.min(others.len().saturating_sub(1))) {
+            clubs.extend(records.team(c.into(), n as u16));
+        }
+        let text = |id: u16| game.text(id).replace("\\t", "\t");
+        let line = |(count, form, goals): (i32, i32, i32)| {
+            text(COMPARISON_LINE)
+                .replacen("%d", &count.to_string(), 1)
+                .replacen("%2.1f", &tenths(f64::from(form) / 10.0), 1)
+                .replacen("%d", &goals.to_string(), 1)
+        };
+        let manager = |team: &Team| {
+            let [first, _] = team.humans();
+            let human = usize::from(first).checked_sub(1).and_then(|s| records.managers.get(s));
+            let coach = team.staff()[1];
+            match (human, coach) {
+                (Some(m), _) if first != 0 => {
+                    format!("{} {} ({})\t", m.first_name(), m.last_name(), m.standing())
+                }
+                (_, coach) if coach != 0 => {
+                    let person = records.persons.get(usize::from(coach));
+                    let figure = person.map_or(0, |p| p.get::<i8>(0x24));
+                    format!("{} ({figure})\t", records.person_name(coach))
+                }
+                _ => String::new(),
+            }
+        };
+        let stars = records.globals.stars();
+        let value = |team: &Team| -> i64 {
+            let worth = |id: u16| {
+                let Some((player, _, status)) = a3_core::load::any_player(records, &game.data, id)
+                else {
+                    return 0;
+                };
+                let Some(r) = records.player(id) else { return 0 };
+                let years = status.contract.unwrap_or(0);
+                super::playerinfo::market_value(game, &player, r, stars, years, today)
+            };
+            // Each player's in whole thousands, the thousands summed.
+            team.players().iter().map(|&id| worth(id) / 1000).sum::<i64>() * 1000
+        };
+        let figures: Vec<(&Team, statistics::Comparison)> =
+            clubs.iter().map(|&t| (t, statistics::comparison(records, t, today))).collect();
+        let tenth = |v: i32| tenths(f64::from(v) / 10.0);
+        let mut rows = Vec::new();
+        for (k, label) in (COMPARISON_LABELS..COMPARISON_LINE).enumerate() {
+            let mut row = text(label);
+            for &(team, c) in &figures {
+                row += &match k {
+                    0 => format!("{}\t", team.name()),
+                    1 => manager(team),
+                    2 => format!("{}\t", tenth(c.age)),
+                    3 => format!("{}\t", c.young),
+                    4 => format!("{}\t", c.old),
+                    5 => format!("{}\t", c.appearances),
+                    6 => format!("{}\t", c.foreigners),
+                    7 => format!("{}\t", c.home_grown),
+                    8 => format!("{}\t", c.condition),
+                    9 => format!("{}\t", c.freshness),
+                    10 => format!("{}\t", tenth(c.form)),
+                    11..=15 => line(c.lines[k - 11]),
+                    _ => format!("{}\t", super::playerinfo::money(game, value(team))),
+                };
+            }
+            let columns = if (11..=15).contains(&k) {
+                COMPARISON_LINE_COLUMNS.to_vec()
+            } else {
+                COMPARISON_COLUMNS.to_vec()
+            };
+            rows.push(TableRow { text: row, ink: INK, mark: None, columns: Some(columns) });
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: COMPARISON_COLUMNS.to_vec(),
+                centred: COMPARISON_ROWS,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
     }
 
     /// The Stars der Ligen (`FUN_00455aaf`): the league's best player at

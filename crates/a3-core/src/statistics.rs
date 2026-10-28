@@ -1041,8 +1041,12 @@ pub const YEAR_ELEVEN_PAGE: i16 = 4;
 pub const PLAN_PAGE: i16 = 0x11;
 /// The Spielbericht under 2977 (`FUN_004529f3`).
 pub const REPORT_PAGE: i16 = 0;
-/// The Stars der Ligen under 3699 (`FUN_00455aaf`).
+/// The Stars der Ligen under 3699 (`FUN_00455aaf`), the
+/// Mannschaftsvergleich under 2956 (`FUN_00450c3f`, its strip the other
+/// human clubs).
 pub const STARS_PAGE: i16 = 0xa;
+pub const COMPARISON_PAGE: i16 = 5;
+pub const OTHER_HUMANS_STRIP: i16 = 0xe;
 
 /// The human club's runs (`FUN_00632de8`: 0x56 bytes at its extra block's
 /// +0xd88), as the Serien states them (`FUN_0044ffb3`): each run that has
@@ -1508,6 +1512,89 @@ pub fn day_eleven(records: &Records, country: u16, level: u8) -> [(u16, u8); 11]
     eleven
 }
 
+/// A club's column of the Mannschaftsvergleich (`FUN_00450c3f`), over
+/// its squad: its mean age in tenths, the young (under 22) and the old
+/// (over 32), the first-league appearances (`FUN_00704bfb` over the
+/// leagues 0, 4, 5, 6 and 7), the foreigners (`FUN_00676e4c`), the
+/// home-grown (`FUN_0070583d`), the mean condition and freshness
+/// (`FUN_00457e00`, `FUN_006ff649`) and the mean form in tenths
+/// (`FUN_006ff037`); for the keepers, the defence, the midfield and the
+/// attack by the main position (`FUN_00677c44`, `FUN_00677c5f`,
+/// `FUN_00677ca7`) and for all how many, their D-Form's mean
+/// (`FUN_006ff257`; for all the form's instead) and their league goals.
+/// The means are whole numbers before the tenths.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Comparison {
+    pub age: i32,
+    pub young: i32,
+    pub old: i32,
+    pub appearances: i32,
+    pub foreigners: i32,
+    pub home_grown: i32,
+    pub condition: i32,
+    pub freshness: i32,
+    pub form: i32,
+    pub lines: [(i32, i32, i32); 5],
+}
+
+const FIRST_LEAGUES: [usize; 5] = [0, 4, 5, 6, 7];
+const HOME_GROWN: u8 = 0x10;
+
+pub fn comparison(records: &Records, team: &Team, today: NaiveDate) -> Comparison {
+    let players: Vec<&Player> =
+        team.players().iter().filter_map(|&id| records.player(id)).collect();
+    let n = players.len() as i32;
+    let mean = |sum: i32, count: i32| if count > 0 { sum / count } else { 0 };
+    let mut c = Comparison::default();
+    let mut sums = [0; 5];
+    let (mut ages, mut forms) = (0, 0);
+    for p in &players {
+        let age = age_on(p, today);
+        ages += age * 10;
+        c.young += i32::from(age < 22);
+        c.old += i32::from(age > 32);
+        let apps = p.career_appearances();
+        c.appearances += FIRST_LEAGUES.iter().map(|&k| i32::from(apps[k])).sum::<i32>();
+        c.foreigners += i32::from(foreign(p.nation(), team.country().into()));
+        c.home_grown += i32::from(p.manner() & HOME_GROWN != 0);
+        let fitness = crate::load::fitness(p);
+        c.condition += crate::lineup::condition(fitness);
+        c.freshness += crate::lineup::freshness(fitness);
+        forms += form_today(p) * 10;
+        let line = match p.positions()[0] {
+            1 => 0,
+            2..=5 => 1,
+            6..=9 => 2,
+            _ => 3,
+        };
+        let goals = i32::from(p.goals()[0]);
+        c.lines[line].0 += 1;
+        sums[line] += d_form(p);
+        c.lines[line].2 += goals;
+        c.lines[4].2 += goals;
+    }
+    c.age = mean(ages, n);
+    c.condition = mean(c.condition, n);
+    c.freshness = mean(c.freshness, n);
+    c.form = mean(forms, n);
+    for (line, sum) in c.lines.iter_mut().zip(sums).take(4) {
+        line.1 = mean(sum, line.0);
+    }
+    c.lines[4].0 = n;
+    c.lines[4].1 = c.form;
+    c
+}
+
+/// Whether a nation is foreign to a country (`FUN_00676e4c`): another,
+/// the Britons counting as one where the country is one of theirs.
+fn foreign(nation: u8, country: u16) -> bool {
+    if BRITISH.iter().any(|&b| u16::from(b) == country) {
+        !BRITISH.contains(&nation)
+    } else {
+        u16::from(nation) != country
+    }
+}
+
 /// The league's best player at each position (`FUN_00455aaf` by
 /// `FUN_00642bad`: 0x8c bytes at `DAT_00b0b01c` by the league's list
 /// index), as `FUN_007256af` found them: his id, names, strength in
@@ -1920,12 +2007,7 @@ pub fn club_figures(
                 figures.under_22 += i16::from(age < 22);
                 figures.over_30 += i16::from(age > 30);
                 let nation = player.nation();
-                let foreign = if BRITISH.iter().any(|&b| u16::from(b) == country) {
-                    !BRITISH.contains(&nation)
-                } else {
-                    u16::from(nation) != country
-                };
-                figures.foreigners += i16::from(foreign);
+                figures.foreigners += i16::from(foreign(nation, country));
                 if let Some(seen) = seen.get_mut(usize::from(nation)) {
                     *seen = true;
                 }

@@ -5138,6 +5138,29 @@ mod tests {
         assert_eq!(texts[1], ((196, 322), "VfB Stuttgart"));
     }
 
+    /// With the department raised, the Aktuelles category's
+    /// Mannschaftsvergleich sets out the own club's figures — alone, with
+    /// no other human club to compare it with.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_compares_the_squads() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 2";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Mannschaftsvergleich");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts.len(), 17);
+        assert_eq!(texts[0], "Verein\t1.FC Union Berlin\t");
+        assert_eq!(texts[1], "Manager\tToni Lubiniecki (9)\t");
+        assert_eq!(texts[2], "DAlter\t25.3\t");
+        assert_eq!(texts[11], "Torhüter\tA:3\tDF:13.1\tTo:0\t");
+        assert_eq!(texts[15], "Gesamt\tA:26\tDF:14.1\tTo:4\t");
+        assert_eq!(texts[16], "Marktwert\t101.23 Mio €\t");
+    }
+
     /// With the department raised, the Aktuelles category's Stars der
     /// Ligen lists the league's best player at each position; a position
     /// no one holds keeps an empty name.
