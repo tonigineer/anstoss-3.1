@@ -1023,6 +1023,10 @@ pub const REFEREES_PAGE: i16 = 0x14;
 /// The Zeitungsmeldungen under 4709 (`FUN_004571ee`) and the europ.
 /// Vereinsrangliste under 4717 (`FUN_00457b04`).
 pub const NEWSPAPER_PAGE: i16 = 0x12;
+/// The Qualifikationsgruppen under 3535 or 3536 (`FUN_004555ee`), its
+/// strip the six groups.
+pub const QUALIFIERS_PAGE: i16 = 9;
+pub const QUALIFIER_STRIP: i16 = 0x17;
 /// The Serien under 2928 (`FUN_0044ffb3`).
 pub const SERIES_PAGE: i16 = 1;
 /// The Letzter Spieltag under 3530 (`FUN_0045491f`).
@@ -1088,6 +1092,127 @@ pub fn runs(records: &Records, team: &Team) -> Vec<Run> {
         }
     }
     runs
+}
+
+/// A national team's group of the qualifiers or the finals (0xda bytes
+/// each from `DAT_01ba07e0`, the qualifiers' six first): its count of
+/// countries, the countries, the results by slot ([home][away], 0xff
+/// before the match), and the pairings by matchday, three pairs of slots
+/// a day. Reads past the group fall into the next, as the original's do.
+pub struct NationsGroup<'a> {
+    data: &'a [u8],
+}
+
+const GROUPS: &str = "0x1ba07c0";
+const GROUP: usize = 0xda;
+const GROUP_RESULTS: usize = 0xe;
+const GROUP_RESULT_ROW: usize = 0x18;
+const GROUP_PAIRINGS: usize = 0x9e;
+const GROUP_MATCHDAY: usize = 6;
+/// The human managers' national teams (`DAT_00b5d17a`, `FUN_006b990d`):
+/// four entries of 8, a country byte and the team's number at +2, 200.
+const HUMAN_NATIONS: usize = 0xb5d17a;
+const NATIONAL: i16 = 200;
+
+/// A country's line in a group's table (`FUN_006b7dac`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GroupLine {
+    pub country: u16,
+    pub games: i16,
+    pub points: i16,
+    pub goals: i16,
+    pub against: i16,
+}
+
+impl<'a> NationsGroup<'a> {
+    pub fn of(records: &'a Records, group: usize) -> Option<Self> {
+        Some(Self { data: records.block(GROUPS)?.get(group * GROUP..)? })
+    }
+
+    fn word(&self, at: usize) -> i16 {
+        self.data.get(at..at + 2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
+    }
+
+    fn byte(&self, at: usize) -> u8 {
+        self.data.get(at).copied().unwrap_or(0)
+    }
+
+    pub fn count(&self) -> usize {
+        usize::try_from(self.word(0)).unwrap_or(0)
+    }
+
+    pub fn country(&self, slot: usize) -> u16 {
+        self.word(2 + 2 * slot) as u16
+    }
+
+    /// The result of a pair of slots, home first; none before the match.
+    pub fn result(&self, home: usize, away: usize) -> Option<(u8, u8)> {
+        let at = GROUP_RESULTS + home * GROUP_RESULT_ROW + away * 4;
+        (self.byte(at) != 0xff).then(|| (self.byte(at), self.byte(at + 1)))
+    }
+
+    /// A matchday's pair of slots (`FUN_006b8149`), none where a slot lies
+    /// past the group's countries.
+    pub fn pair(&self, matchday: usize, game: usize) -> Option<(usize, usize)> {
+        let at = GROUP_PAIRINGS + matchday * GROUP_MATCHDAY + game * 2;
+        let (home, away) = (usize::from(self.byte(at)), usize::from(self.byte(at + 1)));
+        (home < self.count() && away < self.count()).then_some((home, away))
+    }
+
+    /// The table (`FUN_006b7dac`): every result of the 2n − 2 matchdays'
+    /// pairs counted, three points a win, one a draw, then the bubble sort
+    /// `FUN_0072b9b9` — by the points, the difference, the goals and the
+    /// games, the better first, ties in the slots' order.
+    pub fn table(&self) -> Vec<GroupLine> {
+        let n = self.count().min(6);
+        let line = |k: usize| GroupLine { country: self.country(k), ..GroupLine::default() };
+        let mut lines: Vec<GroupLine> = (0..n).map(line).collect();
+        for md in 0..(2 * n).saturating_sub(2) {
+            for game in 0..n / 2 {
+                let at = GROUP_PAIRINGS + md * GROUP_MATCHDAY + game * 2;
+                let (home, away) = (usize::from(self.byte(at)), usize::from(self.byte(at + 1)));
+                let (Some((h, a)), true) = (self.result(home, away), home < n && away < n) else {
+                    continue;
+                };
+                let (h, a) = (i16::from(h), i16::from(a));
+                for (slot, own, other) in [(home, h, a), (away, a, h)] {
+                    let line = &mut lines[slot];
+                    line.games += 1;
+                    line.goals += own;
+                    line.against += other;
+                    line.points += match own.cmp(&other) {
+                        std::cmp::Ordering::Greater => 3,
+                        std::cmp::Ordering::Equal => 1,
+                        std::cmp::Ordering::Less => 0,
+                    };
+                }
+            }
+        }
+        let key = |l: &GroupLine| (l.points, l.goals - l.against, l.goals, l.games);
+        loop {
+            let mut swapped = false;
+            for k in 0..lines.len().saturating_sub(1) {
+                if key(&lines[k]) < key(&lines[k + 1]) {
+                    lines.swap(k, k + 1);
+                    swapped = true;
+                }
+            }
+            if !swapped {
+                break;
+            }
+        }
+        lines
+    }
+}
+
+/// Whether a human manager coaches a country's national team
+/// (`FUN_00677428` with 200).
+pub fn coached_nation(records: &Records, country: u16) -> bool {
+    (0..4).any(|k| {
+        let at = HUMAN_NATIONS + 8 * k;
+        u16::from(records.globals.get::<u8>(at)) == country
+            && records.globals.get::<i16>(at + 2) == NATIONAL
+    })
 }
 
 /// A club's gate at its last home game (`FUN_0063f021`): of the gates its

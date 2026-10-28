@@ -184,6 +184,31 @@ const CLUB_RANKING_SHOWN: usize = 25;
 const NEWSPAPER_HEADER: u16 = 4709;
 const NEWSPAPER_COLUMNS: [(u16, u16); 2] = [(0, 0), (0x37, 0)];
 const SHORT_DATE: u16 = 1997;
+/// The Qualifikationsgruppen's headers (`FUN_004555ee`: the World Cup's
+/// in the years `FUN_0067bb89` names, else the European Championship's),
+/// its strip's group names (0x87caa0), the fixture rows' own columns
+/// (0x87a228) and the table's (0x87a1e8).
+const WORLD_CUP_QUALIFIERS: u16 = 3535;
+const EURO_QUALIFIERS: u16 = 3536;
+const GROUP_NAMES: u16 = 3522;
+const QUALIFIER_GROUPS: usize = 6;
+const QUALIFIER_FIXTURE_COLUMNS: [(u16, u16); 4] =
+    [(3, 0), (0x82, 0), (R | 0xf5, 0x2c), (0x122, 0)];
+const QUALIFIER_TABLE_COLUMNS: [(u16, u16); 8] = [
+    (R, 0x19),
+    (0x1e, 0),
+    (R | 0xb4, 0x1e),
+    (R | 0xd7, 0x1e),
+    (R | 0xfa, 0x23),
+    (R | 0x11d, 0x23),
+    (0x142, 0),
+    (0x147, 0),
+];
+/// The most matchdays the page looks at, and the pairs and lines it
+/// writes.
+const QUALIFIER_LAST_MATCHDAY: usize = 11;
+const QUALIFIER_PAIRS: usize = 3;
+const QUALIFIER_LINES: usize = 6;
 /// The Serien's header, one column.
 const SERIES_HEADER: u16 = 2928;
 /// The Letzter Spieltag's header and rows (`FUN_0045491f` with 0x87a1d8,
@@ -1520,6 +1545,9 @@ impl Statistics {
                 self.leagues.iter().map(name).collect()
             }
             k if k == SIDES.0 => SIDES.1.map(text).to_vec(),
+            statistics::QUALIFIER_STRIP => {
+                (0..QUALIFIER_GROUPS).map(|g| text(GROUP_NAMES + g as u16)).collect()
+            }
             k if k == GOALS.0 => GOALS.1.map(text).to_vec(),
             k if k == NATIONS.0 => {
                 let mut names = countries();
@@ -1673,7 +1701,12 @@ impl Statistics {
             Some(statistics::CLUB_RANKING_PAGE) if self.category == AKTUELLES => {
                 self.club_ranking_page(cx, view)
             }
-            Some(statistics::SERIES_PAGE) if self.category == AKTUELLES => self.series_page(cx, view),
+            Some(statistics::SERIES_PAGE) if self.category == AKTUELLES => {
+                self.series_page(cx, view)
+            }
+            Some(statistics::QUALIFIERS_PAGE) if self.category == AKTUELLES => {
+                self.qualifiers_page(cx, view)
+            }
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
@@ -3009,6 +3042,71 @@ impl Statistics {
             *table = TableState {
                 columns: CLUB_RANKING_ROW_COLUMNS.to_vec(),
                 centred: CLUB_RANKING_SHOWN as i32,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Qualifikationsgruppen (`FUN_004555ee`): the strip's group, its
+    /// pairs of the matchday its leader has last played — "%s\t- %s\t%d\t:%d",
+    /// or "%s\t- %s" before the match, in four columns of their own — and
+    /// its table, six lines "%d.\t%s\t%d\t%d\t%d\t%d\t:\t%d"; red where a
+    /// human manager coaches the country; from the top of the window.
+    fn qualifiers_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let world_cup = matches!(records.globals.start_year() % 4, 0 | 1);
+        let header = if world_cup { WORLD_CUP_QUALIFIERS } else { EURO_QUALIFIERS };
+        set_header(view, dialog, game.text(header).to_owned(), &[(0, 0)]);
+        let Some(group) = statistics::NationsGroup::of(records, self.chosen.min(6)) else {
+            return false;
+        };
+        let nation = |c: u16| game.world.nation(c).to_owned();
+        let ink = |coached: bool| if coached { OWN_INK } else { INK };
+        let table = group.table();
+        let leader_games = table.first().map_or(0, |l| i32::from(l.games));
+        let md = (leader_games - 1).clamp(0, QUALIFIER_LAST_MATCHDAY as i32) as usize;
+        let mut rows = Vec::new();
+        let mut sides = (0u16, 0u16);
+        for g in 0..QUALIFIER_PAIRS {
+            // A pair past the group's countries leaves the last sides.
+            if let Some((h, a)) = group.pair(md, g) {
+                sides = (group.country(h), group.country(a));
+            }
+            let (home, away) = sides;
+            let slot = |c: u16| (0..group.count()).find(|&k| group.country(k) == c);
+            let result = slot(home).zip(slot(away)).and_then(|(h, a)| group.result(h, a));
+            let text = match result {
+                Some((gh, ga)) => format!("{}\t- {}\t{gh}\t:{ga}", nation(home), nation(away)),
+                None => format!("{}\t- {}", nation(home), nation(away)),
+            };
+            let coached = [home, away].iter().any(|&c| statistics::coached_nation(records, c));
+            let columns = Some(QUALIFIER_FIXTURE_COLUMNS.to_vec());
+            rows.push(TableRow { text, ink: ink(coached), mark: None, columns });
+        }
+        for (i, l) in table.iter().take(QUALIFIER_LINES).enumerate() {
+            let text = format!(
+                "{}.\t{}\t{}\t{}\t{}\t{}\t:\t{}",
+                i + 1,
+                nation(l.country),
+                l.games,
+                l.points,
+                l.goals - l.against,
+                l.goals,
+                l.against
+            );
+            let coached = statistics::coached_nation(records, l.country);
+            rows.push(TableRow { text, ink: ink(coached), mark: None, columns: None });
+        }
+        if let Some(t) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *t = TableState {
+                columns: QUALIFIER_TABLE_COLUMNS.to_vec(),
+                centred: -1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

@@ -5056,6 +5056,30 @@ mod tests {
         assert_eq!(rows.len(), 9);
     }
 
+    /// The Aktuelles category's Qualifikationsgruppen shows a group's last
+    /// pairs and its table, the strip stepping through the six groups.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_qualifying_groups() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 4";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "WM-Qualifikationsgruppen");
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Gruppe 1");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 9);
+        assert_eq!(table.rows[0].text, "Niederlande\t- Malta\t4\t:1");
+        assert_eq!(table.rows[3].text, "1.\tKroatien\t5\t10\t7\t13\t:\t6");
+        let next = format!("{then}\nnow click at 545 436");
+        let Some(runner) = on_save(&game, "A", &next) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Gruppe 2");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[3].text, "1.\tSpanien\t5\t13\t9\t14\t:\t5");
+    }
+
     /// The Aktuelles category's Serien states the club's runs that reached
     /// their marks and its biggest wins and defeats that scored.
     #[test]
