@@ -1013,6 +1013,66 @@ pub fn squad_by(
 /// (`FUN_00457711`).
 pub const GOALS_PER_MATCHDAY_PAGE: i16 = 0xb;
 pub const REFEREES_PAGE: i16 = 0x14;
+/// The Zeitungsmeldungen under 4709 (`FUN_004571ee`) and the europ.
+/// Vereinsrangliste under 4717 (`FUN_00457b04`).
+pub const NEWSPAPER_PAGE: i16 = 0x12;
+pub const CLUB_RANKING_PAGE: i16 = 0x15;
+
+/// A club of the European club ranking (`DAT_00b080d8`, thirty entries of
+/// 0x14 that `FUN_007255ec` rebuilds each day, the best first): its
+/// country and number, and its points — in all, from the league, the
+/// European cups and the cup, as the page shows them (+4, +8, +0x10, +0xc).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RankedClub {
+    pub country: u8,
+    pub club: i16,
+    pub points: [f32; 4],
+}
+
+pub fn club_ranking(records: &Records) -> Vec<RankedClub> {
+    const LIST: &str = "0xb080d8";
+    const ENTRY: usize = 0x14;
+    let Some(b) = records.block(LIST) else { return Vec::new() };
+    b.chunks_exact(ENTRY)
+        .map(|e| {
+            let float = |at: usize| f32::from_le_bytes([e[at], e[at + 1], e[at + 2], e[at + 3]]);
+            RankedClub {
+                country: i16::from_le_bytes([e[0], e[1]]) as u8,
+                club: i16::from_le_bytes([e[2], e[3]]),
+                points: [float(4), float(8), float(0x10), float(0xc)],
+            }
+        })
+        .collect()
+}
+
+/// A headline of the newspaper's list (`FUN_00721707`: a count and twenty
+/// entries of 0xc4 the save keeps at `DAT_00b0a0a8`, the newest first):
+/// its day, month and year and its two lines.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Headline {
+    pub date: (u8, u8, u16),
+    pub lines: [String; 2],
+}
+
+pub fn newspaper(records: &Records) -> Vec<Headline> {
+    const LIST: &str = "0xb0a088";
+    const ENTRY: usize = 0xc4;
+    const LINE: usize = 0x60;
+    const MOST: usize = 20;
+    let Some(b) = records.block(LIST) else { return Vec::new() };
+    let count = usize::try_from(i16::from_le_bytes([b[0], b[1]])).unwrap_or(0).min(MOST);
+    let text = |bytes: &[u8]| {
+        let end = bytes.iter().position(|&c| c == 0).unwrap_or(bytes.len());
+        a3_files::sav::cp1252(&bytes[..end])
+    };
+    (0..count)
+        .filter_map(|k| b.get(2 + k * ENTRY..2 + (k + 1) * ENTRY))
+        .map(|e| Headline {
+            date: (e[0], e[1], u16::from_le_bytes([e[2], e[3]])),
+            lines: [text(&e[4..4 + LINE]), text(&e[4 + LINE..4 + 2 * LINE])],
+        })
+        .collect()
+}
 
 /// The goals of each matchday the league has played, both sides' summed
 /// over its pairs (`FUN_00455d6c`).

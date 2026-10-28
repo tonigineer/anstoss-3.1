@@ -5056,6 +5056,37 @@ mod tests {
         assert_eq!(rows.len(), 9);
     }
 
+    /// The Aktuelles category shows the European club ranking the game
+    /// keeps, and the newspaper's headlines — none yet on this save.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_europes_clubs_and_quotes_the_paper() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let page = |row: u32| {
+            format!("now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 {row}")
+        };
+        let Some(runner) = on_save(&game, "A", &page(10)) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Pl.\\tVerein\\tPunkte\\tLiga\\tEP\\tPokal"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 25);
+        assert_eq!(table.rows[0].text, "1.\tInter Mailand\t345.00\t270.00\t75.00\t0.00");
+        assert_eq!(
+            table.rows[13].text,
+            "14.\tFC Bayern München\t275.67\t200.67\t75.00\t0.00"
+        );
+        let Some(runner) = on_save(&game, "A", &page(7)) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Letzte Zeitungsmeldungen");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 1);
+        assert!(table.columns.is_empty());
+    }
+
     /// The Mannschaft category's Torjägerliste ranks the own squad by its
     /// league goals, with the cup's and the European cups' beside.
     #[test]

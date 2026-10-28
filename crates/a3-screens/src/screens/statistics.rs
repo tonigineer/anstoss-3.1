@@ -158,6 +158,32 @@ const MANNSCHAFT: usize = 1;
 /// (`FUN_00457711` with 0x87a488, and 0x87a4a8), the two lists' titles
 /// 4713 and 4734.
 const AKTUELLES: usize = 3;
+/// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
+/// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
+/// the European cups and the cup.
+const CLUB_RANKING_HEADER: u16 = 4717;
+const CLUB_RANKING_HEADER_COLUMNS: [(u16, u16); 6] = [
+    (R, 0x14),
+    (0x1e, 0),
+    (C | 0xb9, 0x28),
+    (C | 0xf5, 0x28),
+    (C | 0x127, 0x28),
+    (C | 0x15e, 0x28),
+];
+const CLUB_RANKING_ROW_COLUMNS: [(u16, u16); 6] = [
+    (R, 0x14),
+    (0x1e, 0),
+    (R | 0xc8, 0x14),
+    (R | 0xfa, 0x1e),
+    (R | 0x12c, 0x1e),
+    (R | 0x15e, 0x1e),
+];
+const CLUB_RANKING_SHOWN: usize = 25;
+/// The Zeitungsmeldungen's header, one column, and its rows' two columns
+/// (`FUN_004571ee` with 0x87a448, and {0, 55}); a date as text 1997.
+const NEWSPAPER_HEADER: u16 = 4709;
+const NEWSPAPER_COLUMNS: [(u16, u16); 2] = [(0, 0), (0x37, 0)];
+const SHORT_DATE: u16 = 1997;
 const GOALS_PER_MATCHDAY_HEADER: u16 = 3700;
 const GOALS_PER_MATCHDAY_HEADER_COLUMNS: [(u16, u16); 3] =
     [(C | 3, 0x32), (C | 0x50, 0x28), (C | 0xa0, 0x28)];
@@ -1339,16 +1365,25 @@ fn spelled(records: &Records, first: u16, last: u16) -> String {
 /// A double as "%2.1f" writes it: to one place, a half rounded up — the
 /// second place of its exact decimal expansion decides.
 fn tenths(value: f64) -> String {
+    fixed(value, 1)
+}
+
+/// A double to `places` places as printf writes it, a half rounded up
+/// by the next digit of its exact decimal expansion.
+fn fixed(value: f64, places: usize) -> String {
     let exact = format!("{:.60}", value.abs());
-    let (whole, places) = exact.split_once('.').unwrap_or((&exact, "0"));
-    let digit = |k: usize| u64::from(places.as_bytes().get(k).map_or(0, |b| b - b'0'));
-    let whole: u64 = whole.parse().unwrap_or(0);
-    let mut tenths = whole * 10 + digit(0);
-    if digit(1) >= 5 {
-        tenths += 1;
+    let (whole, fraction) = exact.split_once('.').unwrap_or((&exact, "0"));
+    let digit = |k: usize| u64::from(fraction.as_bytes().get(k).map_or(0, |b| b - b'0'));
+    let scale = 10u64.pow(places as u32);
+    let mut n = whole.parse::<u64>().unwrap_or(0) * scale;
+    for k in 0..places {
+        n += digit(k) * 10u64.pow((places - 1 - k) as u32);
     }
-    let sign = if value < 0.0 && tenths > 0 { "-" } else { "" };
-    format!("{sign}{}.{}", tenths / 10, tenths % 10)
+    if digit(places) >= 5 {
+        n += 1;
+    }
+    let sign = if value < 0.0 && n > 0 { "-" } else { "" };
+    format!("{sign}{}.{:0places$}", n / scale, n % scale)
 }
 
 /// A float as "%3.1f" writes it: to one place, a half rounded up as the
@@ -1613,6 +1648,12 @@ impl Statistics {
             }
             Some(statistics::GOALS_PER_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.goals_per_matchday_page(cx, view)
+            }
+            Some(statistics::CLUB_RANKING_PAGE) if self.category == AKTUELLES => {
+                self.club_ranking_page(cx, view)
+            }
+            Some(statistics::NEWSPAPER_PAGE) if self.category == AKTUELLES => {
+                self.newspaper_page(cx, view)
             }
             Some(statistics::REFEREES_PAGE) if self.category == AKTUELLES => {
                 self.referees_page(cx, view)
@@ -2901,6 +2942,84 @@ impl Statistics {
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {
                 columns: GOALS_PER_MATCHDAY_ROW_COLUMNS.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The europ. Vereinsrangliste (`FUN_00457b04`): the European club
+    /// ranking the game keeps (`DAT_00b080d8`), up to 25 until an entry
+    /// without a country, "%d.\t%s\t%3.2f\t%3.2f\t%3.2f\t%3.2f" of the
+    /// points in all, from the league, the European cups and the cup, the
+    /// own club red; the window handed 25 rows.
+    fn club_ranking_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let header = game.text(CLUB_RANKING_HEADER).to_owned();
+        set_header(view, dialog, header, &CLUB_RANKING_HEADER_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (t.country(), i16::from(t.number())));
+        let rows: Vec<TableRow> = statistics::club_ranking(records)
+            .iter()
+            .take(CLUB_RANKING_SHOWN)
+            .take_while(|e| e.country != 0)
+            .enumerate()
+            .map(|(i, e)| {
+                let club = game.club_name(Some(records), e.country, e.club);
+                let [total, league, europe, cup] = e.points.map(|v| fixed(f64::from(v), 2));
+                let text = format!("{}.\t{club}\t{total}\t{league}\t{europe}\t{cup}", i + 1);
+                let ink = if own == Some((e.country, e.club)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: CLUB_RANKING_ROW_COLUMNS.to_vec(),
+                centred: CLUB_RANKING_SHOWN as i32,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Zeitungsmeldungen (`FUN_004571ee`): the newspaper's last
+    /// headlines the game keeps, newest first — the date "%1.%2.%3" and
+    /// the first line, then the second under it — or, without one, a
+    /// single empty row and no columns; from the top of the window.
+    fn newspaper_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        set_header(view, dialog, game.text(NEWSPAPER_HEADER).to_owned(), &[(0, 0)]);
+        let line = |text: String| TableRow { text, ink: INK, mark: None, columns: None };
+        let news = statistics::newspaper(records);
+        let (rows, columns) = if news.is_empty() {
+            (vec![line(String::new())], Vec::new())
+        } else {
+            let rows = news
+                .iter()
+                .flat_map(|n| {
+                    let date = game
+                        .text(SHORT_DATE)
+                        .replace("%1", &n.date.0.to_string())
+                        .replace("%2", &n.date.1.to_string())
+                        .replace("%3", &n.date.2.to_string());
+                    [line(format!("{date}\t{}", n.lines[0])), line(format!("\t{}", n.lines[1]))]
+                })
+                .collect();
+            (rows, NEWSPAPER_COLUMNS.to_vec())
+        };
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns,
                 centred: -1,
                 rows,
                 width: ROW_WIDTH,
