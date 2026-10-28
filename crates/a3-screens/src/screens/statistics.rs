@@ -344,6 +344,15 @@ const VALUES_LABEL: u16 = 2533;
 /// 0xffff), the Formverlauf's line the first.
 const LINE_INKS: [[u8; 3]; 6] =
     [[255, 0, 0], [0, 0, 255], [0, 255, 0], [0, 0, 0], [128, 128, 128], [255, 255, 0]];
+/// The Tabellenplatzentwicklung's header and its axis' label
+/// ("Spieltag"); its graph 310 high.
+const PLACES_HEADER: u16 = 3055;
+const MATCHDAY_LABEL: u16 = 3056;
+const PLACES_HEIGHT: i32 = 310;
+/// The clubs' line colours (COLORREF 0xff, 0, 0xff00, 0xffff, 0x808080,
+/// 0xff0000).
+const CLUB_INKS: [[u8; 3]; 6] =
+    [[255, 0, 0], [0, 0, 0], [0, 255, 0], [255, 255, 0], [128, 128, 128], [0, 0, 255]];
 /// How many pixels a stored point is worth (`DAT_0080db2c`, 1.5).
 const POINT_PIXELS: f64 = 1.5;
 const GRAPH_HEIGHT: i32 = 300;
@@ -1095,7 +1104,8 @@ fn line_graph(
                 (4 + across * (i - 4), high + legend / 2 + 9)
             };
             shapes.push(Shape::Fill { at: (x, y + 4), size: (6, text_high), colour: line.colour });
-            shapes.push(Shape::Text { at: (x + 8, y + 4), text: line.label.clone(), colour: black });
+            let text = line.label.clone();
+            shapes.push(Shape::Text { at: (x + 8, y + 4), text, colour: black });
         }
     }
     let mut pen = |from: (i32, i32), to: (i32, i32), colour: [u8; 3]| {
@@ -1396,6 +1406,9 @@ impl Statistics {
                 if self.category == MANNSCHAFT =>
             {
                 self.weekly_graph_page(cx, view, code == statistics::SQUAD_FORM_PAGE)
+            }
+            Some(statistics::SQUAD_PLACES_PAGE) if self.category == MANNSCHAFT => {
+                self.places_page(cx, view)
             }
             Some(statistics::SQUAD_GOAL_MINUTES_PAGE) if self.category == MANNSCHAFT => {
                 self.goal_minutes_page(cx, view)
@@ -1823,8 +1836,8 @@ impl Statistics {
         let pixels = |b: u8| (f64::from(b) * POINT_PIXELS) as i32;
         let (header, lines, y_max, value_label) = if form {
             let values = statistics::weekly_form(records, team).into_iter().map(pixels).collect();
-            let line =
-                GraphLine { values, colour: LINE_INKS[0], label: game.text(FORM_LEGEND).to_owned() };
+            let label = game.text(FORM_LEGEND).to_owned();
+            let line = GraphLine { values, colour: LINE_INKS[0], label };
             (FORM_HEADER, vec![line], 20, FORM_LABEL)
         } else {
             let weeks = statistics::weekly_values(records, team);
@@ -1842,6 +1855,66 @@ impl Statistics {
         let size = (rect.width() as i32, rect.height() as i32);
         let labels = (game.text(WEEK_LABEL), game.text(value_label));
         let shapes = line_graph(game, size, GRAPH_HEIGHT, y_max, &lines, labels);
+        if let Some(table) = view.table_mut(c) {
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
+                rows: Vec::new(),
+                width: ROW_WIDTH,
+                scroll: 0,
+                cross: None,
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+            };
+        }
+        true
+    }
+
+    /// The Tabellenplatzentwicklung (`FUN_0047004e`): a line for each
+    /// human manager's club, its league place after each matchday played,
+    /// the first place at the top — the graph's height shared out among
+    /// the places of the biggest league, a float, and both ends cut
+    /// (`ftol` without rounding) — the club's name its legend.
+    fn places_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(PLACES_HEADER).to_owned(), &[(0, 0)]);
+        let rect = dialog.controls[c].rect;
+        let size = (rect.width() as i32, rect.height() as i32);
+        let clubs: Vec<(u8, &Team)> = statistics::human_clubs(records)
+            .into_iter()
+            .filter_map(|(country, club)| {
+                Some((country, records.team(country.into(), u16::try_from(club).ok()?)?))
+            })
+            .collect();
+        let most = clubs
+            .iter()
+            .map(|&(country, team)| statistics::league_size(records, country.into(), team.level()))
+            .max()
+            .unwrap_or(0)
+            - 1;
+        let high = PLACES_HEIGHT.min(size.1 - 16);
+        let share = high as f32 / most as f32;
+        let top = (f64::from(most) * f64::from(share)) as i32;
+        let lines: Vec<GraphLine> = clubs
+            .iter()
+            .enumerate()
+            .map(|(k, &(country, team))| GraphLine {
+                values: statistics::places_by_matchday(team)
+                    .iter()
+                    .take_while(|&&place| place != 0)
+                    .map(|&place| top - (f64::from(place - 1) * f64::from(share)) as i32)
+                    .collect(),
+                colour: CLUB_INKS[k % CLUB_INKS.len()],
+                label: game.club_name(Some(records), country, i16::from(team.number())),
+            })
+            .collect();
+        let labels = (game.text(MATCHDAY_LABEL), "");
+        let shapes = if most > 0 {
+            line_graph(game, size, PLACES_HEIGHT, most, &lines, labels)
+        } else {
+            Vec::new()
+        };
         if let Some(table) = view.table_mut(c) {
             *table = TableState {
                 columns: Vec::new(),
@@ -1882,7 +1955,8 @@ impl Statistics {
                 let [home, away] = minutes[side][m].map(i32::from);
                 if home != 0 {
                     let colour = HOME_GOALS_INK;
-                    shapes.push(Shape::Fill { at: (x, y - home * 10), size: (2, home * 10), colour });
+                    let (at, size) = ((x, y - home * 10), (2, home * 10));
+                    shapes.push(Shape::Fill { at, size, colour });
                 }
                 if away != 0 {
                     let at = (x, y - (home + away) * 10);

@@ -337,6 +337,8 @@ pub const SQUAD_GOAL_MINUTES_PAGE: i16 = 0xb;
 /// 3495 (`FUN_0046f282`, `FUN_0046f51d`).
 pub const SQUAD_FORM_PAGE: i16 = 0x11;
 pub const SQUAD_VALUES_PAGE: i16 = 0x10;
+/// The Tabellenplatzentwicklung under 3055 (`FUN_0047004e`).
+pub const SQUAD_PLACES_PAGE: i16 = 0x1b;
 /// The Spielertrends under 2421 (`FUN_0046dbe2`).
 pub const SQUAD_TRENDS_PAGE: i16 = 7;
 /// The Angstgegner and the Lieblingsgegner under 3040 and 3039
@@ -515,6 +517,37 @@ pub fn goal_minutes(records: &Records, team: &Team) -> [[[u8; 2]; 100]; 2] {
         }
     }
     minutes
+}
+
+/// The human managers' clubs (`FUN_006355f4`: four entries of eight
+/// bytes at `DAT_00b5cbe2`, a country byte and the club's number at +2,
+/// and their count at `DAT_00b5cc02`).
+pub fn human_clubs(records: &Records) -> Vec<(u8, i16)> {
+    const LIST: usize = 0xb5cbe2;
+    const COUNT: usize = 0xb5cc02;
+    const MOST: usize = 4;
+    let count = usize::try_from(records.globals.get::<i16>(COUNT)).unwrap_or(0).min(MOST);
+    (0..count)
+        .map(|k| LIST + 8 * k)
+        .map(|at| (records.globals.get::<u8>(at), records.globals.get::<i16>(at + 2)))
+        .collect()
+}
+
+/// A club's league place after each matchday, 0 for one not played
+/// (`FUN_0063ef2b`, the team record's 46 bytes at +0x2ca).
+pub fn places_by_matchday(team: &Team) -> [u8; 46] {
+    const PLACES: usize = 0x2ca;
+    team.get(PLACES)
+}
+
+/// How many clubs a league has (`FUN_00635a35`): its own count where the
+/// country is kept in full and the level one of the six, else 18.
+pub fn league_size(records: &Records, country: u16, level: u8) -> i32 {
+    const ELSEWHERE: i32 = 0x12;
+    if level >= 6 || !records.countries.has_teams(country.into()) {
+        return ELSEWHERE;
+    }
+    League::of(records, country, level).map_or(ELSEWHERE, |l| l.teams() as i32)
 }
 
 /// The weeks a human club keeps of itself in its extra block, at most

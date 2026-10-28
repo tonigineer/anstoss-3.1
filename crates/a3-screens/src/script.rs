@@ -5011,6 +5011,41 @@ mod tests {
         assert_eq!(yellow, 7);
     }
 
+    /// The Mannschaft category's Tabellenplatzentwicklung draws each human
+    /// club's league places matchday by matchday.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_draws_the_clubs_places() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 13";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Tabellenplatzentwicklung");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        let texts: Vec<&str> = shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["1.FC Union Berlin", "Spieltag"]);
+        // Places 1, 6 and 11 over the Bundesliga's 17 steps of 310 / 17
+        // pixels: two red segments down from the top.
+        let red: Vec<_> = shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::Pen { from, to, colour: [255, 0, 0] } => Some((*from, *to)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(red.len(), 2);
+        assert!(red[0].1.1 > red[0].0.1 && red[1].1.1 > red[1].0.1);
+    }
+
     /// The Mannschaft category's Trefferverteilung draws the club's goals
     /// and those against it minute by minute, and counts them by half.
     #[test]

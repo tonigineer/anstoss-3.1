@@ -310,18 +310,19 @@ pub(crate) fn paste(frame: &mut RgbaImage, picture: &RgbaImage, at: Vec2) {
 /// So a flat line keeps its left end and a steep one its top end; where a
 /// steep line runs between two pixels it takes the right one.
 pub(crate) fn line(frame: &mut RgbaImage, from: (i32, i32), to: (i32, i32), color: Rgba<u8>) {
+    const FLAT_ACROSS: i64 = 126;
     const STEEP_ACROSS: i64 = 128;
-    line_across(frame, from, to, color, STEEP_ACROSS);
+    line_across(frame, from, to, color, (FLAT_ACROSS, STEEP_ACROSS));
 }
 
-/// The same with a steep line moved 127/256 of a pixel across, so that
-/// where it runs exactly between two pixels it takes the left one: how
-/// the line graph's pen draws (`FUN_0071e017`'s lines, seen on the
-/// Mannschaft's Formverlauf and Mannschaftswerte), its flat lines as
-/// `line`'s.
+/// The same as the graph window's pen draws (`FUN_0071e017`'s lines):
+/// flat or steep, a line moved 127/256 of a pixel across, so that where
+/// it runs exactly between two pixels it takes the upper or the left one
+/// — found on the Mannschaft's three line graphs and the goal graph,
+/// which no other choice of the three offsets matches together.
 pub(crate) fn pen_line(frame: &mut RgbaImage, from: (i32, i32), to: (i32, i32), color: Rgba<u8>) {
-    const STEEP_ACROSS: i64 = 127;
-    line_across(frame, from, to, color, STEEP_ACROSS);
+    const ACROSS: i64 = 127;
+    line_across(frame, from, to, color, (ACROSS, ACROSS));
 }
 
 fn line_across(
@@ -329,14 +330,13 @@ fn line_across(
     from: (i32, i32),
     to: (i32, i32),
     color: Rgba<u8>,
-    steep_across: i64,
+    (flat_across, steep_across): (i64, i64),
 ) {
     // In 256ths of a pixel.
     const UNIT: i64 = 256;
-    const FLAT_ACROSS: i64 = 126;
     const DOWN: i64 = 128;
     let flat = (to.0 - from.0).abs() >= (to.1 - from.1).abs();
-    let across = if flat { FLAT_ACROSS } else { steep_across };
+    let across = if flat { flat_across } else { steep_across };
     let (x0, y0) = (i64::from(from.0) * UNIT + across, i64::from(from.1) * UNIT + DOWN);
     let (x1, y1) = (i64::from(to.0) * UNIT + across, i64::from(to.1) * UNIT + DOWN);
     let (dx, dy) = (x1 - x0, y1 - y0);
