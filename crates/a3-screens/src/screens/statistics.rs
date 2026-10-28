@@ -424,6 +424,9 @@ const STRENGTH_HIDDEN: u8 = 0x40;
 /// The Mannschaft pages built, by their codes, with their blocks:
 /// - the Torjägerliste (`FUN_00469f05(0)`, 0x87e1d8 and 0x87e160): all
 ///   by league goals, with cup and European goals;
+/// - the Torjägerliste plus (`FUN_00469f05(1)`, 0x87e188 and 0x87e110):
+///   the same order, with the last match's goals, the goals by kind and
+///   the chances, and the share converted, a float "%2.1f";
 /// - the Scorer (`FUN_0046b87a`, 0x87e460 and 0x87e420): those with goals
 ///   or assists by their sum, each figure with the last match's in
 ///   brackets;
@@ -454,6 +457,51 @@ fn squad_page(code: i16) -> Option<SquadPage> {
             figures: |p| {
                 let [league, cup, europe] = p.goals();
                 format!("{league}\t{cup}\t{europe}")
+            },
+        },
+        statistics::SQUAD_SCORERS_PLUS_PAGE => SquadPage {
+            header: 2412,
+            header_columns: &[
+                (C, 0x14),
+                (0x19, 0),
+                (C | 0xa0, 0x1e),
+                (C | 0xbc, 0x19),
+                (C | 0xe3, 0x19),
+                (C | 0x101, 0x19),
+                (C | 0x11f, 0x19),
+                (C | 0x13d, 0x19),
+                (C | 0x15c, 0x1e),
+                (C | 0x181, 0x32),
+            ],
+            columns: &[
+                (R, 0x14),
+                (0x19, 0),
+                (R | 0xa0, 0x14),
+                (R | 0xb4, 0x19),
+                (R | 0xdc, 0x19),
+                (R | 0xfa, 0x19),
+                (R | 0x118, 0x19),
+                (R | 0x136, 0x19),
+                (R | 0x159, 0x1e),
+                (R | 0x186, 0x1e),
+            ],
+            centred: true,
+            keep: |_| true,
+            key: |p| i32::from(p.goals()[0]),
+            figures: |p| {
+                let goals = p.goals()[0];
+                let [penalty, free_kick, distance, head, _] = p.goal_kinds();
+                let chances = p.chances();
+                let share = if chances == 0 {
+                    0.0
+                } else {
+                    (f64::from(goals) * 100.0 / f64::from(chances)) as f32
+                };
+                format!(
+                    "{goals}\t{}\t{free_kick}\t{penalty}\t{head}\t{distance}\t{chances}\t{}",
+                    p.last_goals(),
+                    tenths(f64::from(share))
+                )
             },
         },
         statistics::SQUAD_POINTS_PAGE => SquadPage {

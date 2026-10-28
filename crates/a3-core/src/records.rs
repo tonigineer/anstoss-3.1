@@ -283,6 +283,9 @@ record! {
     0x24a => last_assists, set_last_assists: u8;
     /// Penalties and free kicks this season: taken, and scored.
     0x24b => penalties, set_penalties: [u8; 2];
+    /// His chances this season, and his goals at home.
+    0x251 => chances, set_chances: u8;
+    0x252 => home_goals, set_home_goals: u8;
     0x24d => free_kicks, set_free_kicks: [u8; 2];
     /// Appearances in all his career: in the cups, in the European cups.
     0x25f => career_cup_appearances, set_career_cup_appearances: [u8; 5];

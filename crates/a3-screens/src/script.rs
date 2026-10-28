@@ -4869,6 +4869,27 @@ mod tests {
         assert_eq!(graph.bars[0].0, 150);
     }
 
+    /// With the statistics department raised the Mannschaft category's
+    /// Torjägerliste plus adds the goals by kind, the chances and the
+    /// share converted.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_squads_scorers_in_full() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 2";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tName\\tTore\\tLS\\tFr\\tEl\\tKo\\tDi\\tCh\\tVerwertet"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tJosip Juranovic\t1\t0\t0\t0\t0\t1\t1\t100.0");
+        assert_eq!(table.rows[3].text, "4.\tToni Lubiniecki\t1\t0\t0\t0\t1\t0\t1\t100.0");
+        assert_eq!(table.rows[4].text, "5.\tDiogo Leite\t0\t0\t0\t0\t0\t0\t0\t0.0");
+    }
+
     /// The Mannschaft category's Torjägerliste ranks the own squad by its
     /// league goals, with the cup's and the European cups' beside.
     #[test]

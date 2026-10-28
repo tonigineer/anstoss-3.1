@@ -313,6 +313,9 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
 /// the Vorlagen under 3036 (`FUN_0046b4cf`) and the Gelbe Karten under
 /// 2405 (`FUN_00467de7`).
 pub const SQUAD_SCORERS_PAGE: i16 = 0;
+/// The Torjägerliste plus under 2412 (`FUN_00469f05(1)`), from the
+/// second department on.
+pub const SQUAD_SCORERS_PLUS_PAGE: i16 = 0x1c;
 /// The Torjäger ewig under 2414 (`FUN_0046a366`), the Einsätze ewig
 /// under 2407 (`FUN_00468695`).
 pub const SQUAD_ALL_TIME_PAGE: i16 = 1;
