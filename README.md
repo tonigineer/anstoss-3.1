@@ -96,19 +96,6 @@ release archives name it `anstoss-3.1`. On Debian or Ubuntu, building needs
 `pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 libx11-dev`.
 
-### Releases
-
-Pushing a version tag builds both systems and publishes a GitHub release
-(`.github/workflows/release.yml`):
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Started by hand in the Actions tab, the workflow only builds the archives
-and attaches them to the run.
-
 ## License
 
 The source code is licensed under the GNU General Public License,
