@@ -267,6 +267,12 @@ const FAIRNESS_ROW_COLUMNS: [(u16, u16); 7] = [
 ];
 const FAIRNESS_RECORD: u16 = 0x825;
 const RECORD_COLUMNS: [(u16, u16); 2] = [(0, 0x8c), (0xc8, 0)];
+/// The Durchschnittsalter's header and rows, one block for both
+/// (`FUN_0044cd71`, 0x879b58 and 0x879b80 alike): rank, club, the mean
+/// age, the players under 22 and over 30.
+const AGE_HEADER: u16 = 0xdd9;
+const AGE_COLUMNS: [(u16, u16); 5] =
+    [(R, 0x14), (0x19, 0), (C | 0xc8, 0x32), (C | 0xfa, 0x32), (C | 0x12c, 0x32)];
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -504,6 +510,14 @@ fn per_matchday(points: i16, played: i16) -> String {
     format!("{}.{:02}", hundredths / 100, hundredths % 100)
 }
 
+/// A float as "%3.1f" writes it: to one place, a half rounded up as the
+/// C library of its day does. Ten times a float stands exactly in a
+/// double, so a half is told exactly.
+fn one_place(value: f32) -> String {
+    let tenths = (f64::from(value) * 10.0 + 0.5).floor() as i64;
+    format!("{}.{}", tenths / 10, tenths % 10)
+}
+
 /// The leagues the strip steps through (`FUN_0045a439`): the main
 /// country's, then the first of each other country played.
 fn leagues(records: &Records) -> Vec<(u16, u8)> {
@@ -712,6 +726,7 @@ impl Statistics {
             Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
                 self.chance_page(cx, view)
             }
+            Some(statistics::AGE_PAGE) if self.category == LIGA => self.age_page(cx, view),
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -1082,6 +1097,48 @@ impl Statistics {
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {
                 columns: FAIRNESS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Durchschnittsalter (`FUN_0044cd71`): the league's clubs by
+    /// their squads' mean age, the youngest first,
+    /// "%d.\t%s\t%3.1f\t%d\t%d" from the top of the window, the own club
+    /// red.
+    fn age_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(today) = cx.state.season.as_ref().map(|s| s.date()) else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        set_header(view, dialog, game.text(AGE_HEADER).to_owned(), &AGE_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let figures = statistics::club_figures(records, country, level, today);
+        let rows = statistics::by_age(figures)
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let club = game.club_name(Some(records), country as u8, row.team);
+                let text = format!(
+                    "{}.\t{club}\t{}\t{}\t{}",
+                    i + 1,
+                    one_place(row.average_age),
+                    row.under_22,
+                    row.over_30
+                );
+                let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: AGE_COLUMNS.to_vec(),
                 rows,
                 width: ROW_WIDTH,
                 centred: -1,

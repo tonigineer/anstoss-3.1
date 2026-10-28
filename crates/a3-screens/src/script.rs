@@ -5012,6 +5012,29 @@ mod tests {
         assert_eq!(table.rows[19].columns, Some(vec![(0, 0x8c), (0xc8, 0)]));
     }
 
+    /// The Durchschnittsalter ranks the league's squads by their mean
+    /// age on the day, the youngest first.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_leagues_ages() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 10";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Pl.\\tVerein\\tSchnitt\\tUnter 22\\tÜber 30"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.centred, -1);
+        assert_eq!(table.rows[0].text, "1.\tSV Werder Bremen\t24.5\t8\t3");
+        assert_eq!(table.rows[9].text, "10.\t1.FC Union Berlin\t25.3\t9\t5");
+        assert_eq!(table.rows[9].ink, [255, 0, 0]);
+        assert_eq!(table.rows[17].text, "18.\tFC Bayern München\t26.7\t3\t4");
+    }
+
     /// The Chancenverwertung reckons each club's quote of goals from its
     /// chances and ranks the league by it.
     #[test]

@@ -13,6 +13,8 @@ use std::io;
 
 use a3_files::exe::Exe;
 
+use chrono::NaiveDate;
+
 use crate::opponent::{CUPS_AT, League, PAIRING, PAIRINGS};
 use crate::random::Random;
 use crate::records::{Manager, Records, Team};
@@ -531,6 +533,91 @@ pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
     let points = at(FAIR_RECORD + 2);
     let record = (points != 0).then(|| (at(FAIR_RECORD), points));
     Fairness { rows, played: league.played() as i16, record }
+}
+
+/// The Liga's club pages from Mannschaftsübersicht on, by their codes:
+/// Durchschnittsalter under 0xdd9 (`FUN_0044cd71`).
+pub const AGE_PAGE: i16 = 0xc;
+
+/// A club's figures as `FUN_00642cd4` gathers them for the club pages,
+/// an entry of 0x1c bytes each: its number, its squad, their mean age
+/// (a float at +8), how many are under 22 and over 30 (+0xe, +0x10), the
+/// foreigners among them (+0x14) and the other nations they come from
+/// (+0x16).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClubFigures {
+    pub team: i16,
+    pub players: i16,
+    pub average_age: f32,
+    pub under_22: i16,
+    pub over_30: i16,
+    pub foreigners: i16,
+    pub nations: i16,
+}
+
+/// The nations `FUN_00676e4c` takes as one: England, Wales, Scotland and
+/// Northern Ireland.
+const BRITISH: [u8; 4] = [0x10, 0x2d, 0x39, 0x49];
+/// The nations the count of nations runs over (its array of 0x75).
+const NATIONS: usize = 0x75;
+
+/// The league's clubs in the order of its table (`FUN_00642cd4`): for
+/// each its squad as the club lists it, every player's age on `today`
+/// (`FUN_0067582a`), whether he is a foreigner — of another nation than
+/// `country`, a Briton only outside Britain — and how many nations
+/// besides the country's own the squad brings.
+pub fn club_figures(records: &Records, country: u16, level: u8, today: NaiveDate) -> Vec<ClubFigures> {
+    let Some(league) = League::of(records, country, level) else { return Vec::new() };
+    (0..league.teams())
+        .map(|place| {
+            let team = league.team(place);
+            let mut figures = ClubFigures { team, ..ClubFigures::default() };
+            let Some(record) = u16::try_from(team).ok().and_then(|t| records.team(country, t)) else {
+                return figures;
+            };
+            let ids = record.players();
+            let mut sum = 0i16;
+            let mut seen = [false; NATIONS];
+            for player in ids.iter().filter_map(|&id| records.player(id)) {
+                let age = crate::autolineup::age(player.birthday(), today) as i16;
+                sum = sum.wrapping_add(age);
+                figures.under_22 += i16::from(age < 22);
+                figures.over_30 += i16::from(age > 30);
+                let nation = player.nation();
+                let foreign = if BRITISH.iter().any(|&b| u16::from(b) == country) {
+                    !BRITISH.contains(&nation)
+                } else {
+                    u16::from(nation) != country
+                };
+                figures.foreigners += i16::from(foreign);
+                if let Some(seen) = seen.get_mut(usize::from(nation)) {
+                    *seen = true;
+                }
+            }
+            figures.players = ids.len() as i16;
+            if figures.players >= 1 {
+                figures.average_age = f32::from(sum) / f32::from(figures.players);
+            }
+            figures.nations = (0..NATIONS)
+                .filter(|&n| seen[n] && n != usize::from(country))
+                .count() as i16;
+            figures
+        })
+        .collect()
+}
+
+/// The Durchschnittsalter's order (`FUN_0044cd71`): the youngest squad
+/// first, by the page's exchange sort — every place from the first up
+/// swapping with the first of the rest that is younger.
+pub fn by_age(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            if rows[j].average_age < rows[i].average_age {
+                rows.swap(i, j);
+            }
+        }
+    }
+    rows
 }
 
 /// A club of the Chancenverwertung: its number, its quote in whole
