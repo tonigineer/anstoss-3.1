@@ -1033,8 +1033,10 @@ pub const SERIES_PAGE: i16 = 1;
 pub const LAST_MATCHDAY_PAGE: i16 = 6;
 /// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
-/// The Elf des Tages under 2975 (`FUN_00451e0d`).
+/// The Elf des Tages under 2975 (`FUN_00451e0d`), the Elf des Jahres
+/// under 2976 (`FUN_004523ce`).
 pub const DAY_ELEVEN_PAGE: i16 = 3;
+pub const YEAR_ELEVEN_PAGE: i16 = 4;
 /// The Spielplan under 4747 (`FUN_0044edba`).
 pub const PLAN_PAGE: i16 = 0x11;
 /// The Spielbericht under 2977 (`FUN_004529f3`).
@@ -1499,6 +1501,23 @@ pub fn day_eleven(records: &Records, country: u16, level: u8) -> [(u16, u8); 11]
     if let Some(b) = b {
         for (i, place) in eleven.iter_mut().enumerate() {
             *place = (u16::from_le_bytes([b[2 * i], b[2 * i + 1]]), b[0x16 + i]);
+        }
+    }
+    eleven
+}
+
+/// A country's Elf des Jahres so far (`FUN_004523ce` by `FUN_0064214b`:
+/// 0x2c bytes at `DAT_00a2e0f8` by the country's slot): as the day's,
+/// and how often each made the day's eleven.
+const YEAR_ELEVEN: u32 = 0xa2e0d8;
+
+pub fn year_eleven(records: &Records, country: u16) -> [(u16, u8, u8); 11] {
+    let mut eleven = [(0, 0, 0); 11];
+    let from = usize::from(records.countries.slot(country.into())) * DAY_ELEVEN_LEAGUE;
+    let b = records.block(&format!("{YEAR_ELEVEN:#x}")).and_then(|b| b.get(from..from + 0x2c));
+    if let Some(b) = b {
+        for (i, place) in eleven.iter_mut().enumerate() {
+            *place = (u16::from_le_bytes([b[2 * i], b[2 * i + 1]]), b[0x16 + i], b[0x21 + i]);
         }
     }
     eleven

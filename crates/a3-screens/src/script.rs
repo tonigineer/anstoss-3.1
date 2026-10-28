@@ -5111,6 +5111,33 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// With the department raised, the Aktuelles category's Elf des
+    /// Jahres puts the country's team of the season on the canvas, each
+    /// name with how often he made the day's eleven.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_eleven_of_the_year() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 1";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Elf des Jahres (Aktueller Stand)");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        let texts: Vec<_> = shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::Text { at, text, .. } => Some((*at, text.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts.len(), 22);
+        assert_eq!(texts[0], ((196, 307), "Alexander Nübel (1)"));
+        assert_eq!(texts[1], ((196, 322), "VfB Stuttgart"));
+    }
+
     /// The Aktuelles category's Spielbericht tells the club's last match:
     /// the league and matchday, the pairing with the places, the goals,
     /// the red card, the gate, the weather, the comparison and the money,

@@ -212,9 +212,11 @@ const QUALIFIER_PAIRS: usize = 3;
 const QUALIFIER_LINES: usize = 6;
 /// The Serien's header, one column.
 const SERIES_HEADER: u16 = 2928;
-/// The Elf des Tages' header, and each place's corner on the canvas, from
-/// the keeper at the bottom to the strikers at the top (`FUN_00451e0d`).
+/// The Elf des Tages' and the Elf des Jahres' headers, and each place's
+/// corner on the canvas, from the keeper at the bottom to the strikers at
+/// the top (`FUN_00451e0d`, `FUN_004523ce`).
 const DAY_ELEVEN_HEADER: u16 = 2975;
+const YEAR_ELEVEN_HEADER: u16 = 2976;
 const DAY_ELEVEN_PLACES: [(i32, i32); 11] = [
     (194, 305),
     (194, 240),
@@ -1474,6 +1476,55 @@ fn line_graph(
     shapes
 }
 
+/// An eleven on the canvas (`FUN_00451e0d`, `FUN_004523ce`): each player
+/// at his place with the crest of the club he plays for now at its own
+/// size left of it (`FUN_00696161`), and in black his name — with his
+/// count " (%d)" where the page keeps one — over the club he played for.
+fn eleven_page(
+    cx: &Cx,
+    view: &mut View,
+    header: u16,
+    country: u16,
+    eleven: &[(u16, u8, Option<u8>); 11],
+) -> bool {
+    let (game, dialog) = (cx.game, cx.dialog);
+    let Some(records) = cx.state.records.as_ref() else { return false };
+    let Some(c) = control(dialog, TABLE) else { return false };
+    set_header(view, dialog, game.text(header).to_owned(), &[(0, 0)]);
+    let black = [0, 0, 0];
+    let mut shapes = Vec::new();
+    for (&(id, team, count), &(x, y)) in eleven.iter().zip(&DAY_ELEVEN_PLACES) {
+        let Some(player) = records.player(id) else { continue };
+        let [nation, number] = player.club();
+        let file = game.world.slot_of(nation.into()).and_then(|slot| {
+            game.rules.crest(&game.world, Some(records), (slot, usize::from(number)))
+        });
+        let crest = file.map(|file| Picture { black_clear: false, ..Picture::file(file) });
+        if let Some(image) = crest.and_then(|p| p.load(game).ok()) {
+            shapes.push(Shape::Image { at: (x - 32, y), image });
+        }
+        let mut text = records.known_as(id).unwrap_or_default();
+        if let Some(n) = count {
+            text += &format!(" ({n})");
+        }
+        shapes.push(Shape::Text { at: (x + 2, y + 2), text, colour: black });
+        let text = game.club_name(Some(records), country as u8, i16::from(team));
+        shapes.push(Shape::Text { at: (x + 2, y + 17), text, colour: black });
+    }
+    if let Some(table) = view.table_mut(c) {
+        *table = TableState {
+            columns: Vec::new(),
+            centred: -1,
+            rows: Vec::new(),
+            width: ROW_WIDTH,
+            scroll: 0,
+            cross: None,
+            graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+        };
+    }
+    true
+}
+
 /// A name from the pool's ids as `FUN_00637cbb` spells it, "%s %s", or
 /// just one of the two where the other's id is 0.
 fn spelled(records: &Records, first: u16, last: u16) -> String {
@@ -1791,6 +1842,9 @@ impl Statistics {
             }
             Some(statistics::PLAN_PAGE) if self.category == AKTUELLES => {
                 self.plan_page(cx, view, None)
+            }
+            Some(statistics::YEAR_ELEVEN_PAGE) if self.category == AKTUELLES => {
+                self.year_eleven_page(cx, view)
             }
             Some(statistics::DAY_ELEVEN_PAGE) if self.category == AKTUELLES => {
                 self.day_eleven_page(cx, view)
@@ -3301,46 +3355,34 @@ impl Statistics {
         true
     }
 
+    /// The country a countries' strip stands at: the main country, then
+    /// the more countries in their order.
+    fn strip_country(&self, records: &Records) -> u16 {
+        let globals = &records.globals;
+        let more = usize::try_from(globals.more_count()).unwrap_or(0);
+        (match self.chosen {
+            0 => globals.main_country(),
+            k if k > more => globals.main_country(),
+            k => globals.more_countries()[k - 1],
+        }) as u16
+    }
+
     /// The Elf des Tages (`FUN_00451e0d`): the league's team of the day on
-    /// the canvas, each player at his place with the crest of the club he
-    /// plays for now at its own size left of it (`FUN_00696161`), and in
-    /// black his name over the club he played for that day.
+    /// the canvas.
     fn day_eleven_page(&self, cx: &Cx, view: &mut View) -> bool {
-        let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
-        let Some(c) = control(dialog, TABLE) else { return false };
-        set_header(view, dialog, game.text(DAY_ELEVEN_HEADER).to_owned(), &[(0, 0)]);
-        let black = [0, 0, 0];
-        let mut shapes = Vec::new();
-        let eleven = statistics::day_eleven(records, country, level);
-        for (&(id, team), &(x, y)) in eleven.iter().zip(&DAY_ELEVEN_PLACES) {
-            let Some(player) = records.player(id) else { continue };
-            let [nation, number] = player.club();
-            let file = game.world.slot_of(nation.into()).and_then(|slot| {
-                game.rules.crest(&game.world, Some(records), (slot, usize::from(number)))
-            });
-            let crest = file.map(|file| Picture { black_clear: false, ..Picture::file(file) });
-            if let Some(image) = crest.and_then(|p| p.load(game).ok()) {
-                shapes.push(Shape::Image { at: (x - 32, y), image });
-            }
-            let text = records.known_as(id).unwrap_or_default();
-            shapes.push(Shape::Text { at: (x + 2, y + 2), text, colour: black });
-            let text = game.club_name(Some(records), country as u8, i16::from(team));
-            shapes.push(Shape::Text { at: (x + 2, y + 17), text, colour: black });
-        }
-        if let Some(table) = view.table_mut(c) {
-            *table = TableState {
-                columns: Vec::new(),
-                centred: -1,
-                rows: Vec::new(),
-                width: ROW_WIDTH,
-                scroll: 0,
-                cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
-            };
-        }
-        true
+        let eleven = statistics::day_eleven(records, country, level).map(|(id, t)| (id, t, None));
+        eleven_page(cx, view, DAY_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Elf des Jahres (`FUN_004523ce`): the country's team of the
+    /// season so far, each name with how often he made the day's.
+    fn year_eleven_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let country = self.strip_country(records);
+        let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
+        eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
     }
 
     /// The Spielbericht (`FUN_004529f3`): the own club's last match, row
@@ -3659,13 +3701,7 @@ impl Statistics {
     fn referees_page(&self, cx: &Cx, view: &mut View) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
-        let globals = &records.globals;
-        let more = usize::try_from(globals.more_count()).unwrap_or(0);
-        let country = match self.chosen {
-            0 => globals.main_country(),
-            k if k > more => globals.main_country(),
-            k => globals.more_countries()[k - 1],
-        } as u16;
+        let country = self.strip_country(records);
         set_header(view, dialog, game.text(REFEREES_HEADER).to_owned(), &REFEREES_HEADER_COLUMNS);
         let referees = statistics::referees(records, country);
         let line = |text: String| TableRow { text, ink: INK, mark: None, columns: None };
