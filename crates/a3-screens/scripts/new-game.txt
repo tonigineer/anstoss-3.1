@@ -1,5 +1,5 @@
 # A new game in Germany for two players without a club, played to the eve
-# of the first matchday. It plays the original too (anstoss3-menu
+# of the first matchday. It plays the original too (anstoss-3-1
 # --original): the lines for dialogs the replica does not show yet are the
 # original's.
 seed 7

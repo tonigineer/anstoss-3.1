@@ -14,7 +14,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 script=$1 dir=$2
 seed=${A3_PLAY_SEED:-} shot=${A3_PLAY_SHOT:-}
 probe() { python3 "$here/tools/probe/client.py" "$@"; }
-driver() { "$here/target/debug/anstoss3-menu" --original "$@"; }
+driver() { "$here/target/debug/anstoss-3-1" --original "$@"; }
 windows() { local path; path=$(realpath "$1"); echo "Z:${path//\//\\}"; }
 
 mkdir -p "$dir"

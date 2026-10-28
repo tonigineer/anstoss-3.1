@@ -11,7 +11,7 @@
 set -euo pipefail
 
 game=${ANSTOSS3_DIR:-"$HOME/.local/share/bottles/bottles/ANSTOSS-3/drive_c/GOG Games/ANSTOSS 3"}
-oracle=${ANSTOSS3_ORACLE:-"$HOME/.cache/anstoss3-menu/oracle"}
+oracle=${ANSTOSS3_ORACLE:-"$HOME/.cache/anstoss-3.1/oracle"}
 wine=${WINE:-wine}
 export WINEPREFIX="$oracle/prefix" WINEDLLOVERRIDES="mscoree=;mshtml=" WINEDEBUG=-all
 

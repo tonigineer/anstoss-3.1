@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "anstoss3-menu"
+name = "anstoss-3-1"
 path = "src/main.rs"
 
 [dependencies]

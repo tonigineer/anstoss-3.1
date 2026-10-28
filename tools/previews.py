@@ -26,8 +26,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REPLICA = ROOT / "target/release/anstoss3-menu"
-ORACLE = Path.home() / ".cache/anstoss3-menu/oracle"
+REPLICA = ROOT / "target/release/anstoss-3-1"
+ORACLE = Path.home() / ".cache/anstoss-3.1/oracle"
 OUT = ROOT / "previews"
 LOAD = (ROOT / "crates/a3-screens/scripts/load.txt").read_text()
 # The new-game script without its last line, so a frame can stop on any

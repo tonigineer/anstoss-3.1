@@ -6,7 +6,7 @@ far the replica has got with it.
 A row's status is any of: traced (understood from the decompile), ported (in
 the replica), function-tested (against the probe's traces), run-tested (run
 diff), screen-tested (shot diff). "Ported" comes from the replica itself — the
-dialogs its screens run (`anstoss3-menu --screens`) and the routines its code
+dialogs its screens run (`anstoss-3-1 --screens`) and the routines its code
 names in a `/// Original: FUN_…` line — the rest from `.plan/status.toml`,
 kept by hand.
 
@@ -150,7 +150,7 @@ def main() -> int:
 def replica_screens(binary: Path | None) -> list[int]:
     """The dialogs the replica's screens run."""
     command = [str(binary), "--screens"] if binary else [
-        "cargo", "run", "-q", "--bin", "anstoss3-menu", "--", "--screens"]
+        "cargo", "run", "-q", "--bin", "anstoss-3-1", "--", "--screens"]
     out = subprocess.run(command, cwd=HERE, capture_output=True, text=True, check=True).stdout
     return [int(line) for line in out.split()]
 

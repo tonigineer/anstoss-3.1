@@ -10,9 +10,9 @@ scenes only grow to the sides. SDXL inpainting
 repaints what the masks mark — the painted interface and the new space — and
 everything else of the original is laid back on top, untouched.
 
-It reads the pictures and masks the app exports (``anstoss3-menu
+It reads the pictures and masks the app exports (``anstoss-3-1
 --export-backgrounds``, run here automatically when they are missing) and
-writes ``~/.cache/anstoss3-menu/wide/<name>.png``, which the app picks up.
+writes ``~/.cache/anstoss-3.1/wide/<name>.png``, which the app picks up.
 
     tools/.venv/bin/python tools/outpaint.py [--force] [--seed N] [names...]
 """
@@ -146,7 +146,7 @@ def main() -> None:
 
 def cache_dir() -> Path:
     base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-    return Path(base) / "anstoss3-menu"
+    return Path(base) / "anstoss-3.1"
 
 
 def export(sources: Path) -> None:

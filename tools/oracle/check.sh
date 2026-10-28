@@ -11,7 +11,7 @@
 set -uo pipefail
 
 here=$(cd "$(dirname "$0")/../.." && pwd)
-oracle=${ANSTOSS3_ORACLE:-"$HOME/.cache/anstoss3-menu/oracle"}
+oracle=${ANSTOSS3_ORACLE:-"$HOME/.cache/anstoss-3.1/oracle"}
 re=${ANSTOSS3_RE:-"$HOME/Programming/anstoss3-re"}
 out="$oracle/runs/check"
 saves="$oracle/game/saves"

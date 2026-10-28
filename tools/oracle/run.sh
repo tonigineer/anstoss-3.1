@@ -16,7 +16,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")/../.." && pwd)
-oracle=${ANSTOSS3_ORACLE:-"$HOME/.cache/anstoss3-menu/oracle"}
+oracle=${ANSTOSS3_ORACLE:-"$HOME/.cache/anstoss-3.1/oracle"}
 runs="$oracle/runs"
 export A3PROBE_PORT=${A3PROBE_PORT:-47300}
 # WINE picks another Wine, as for setup.sh; its wineserver lies beside it.

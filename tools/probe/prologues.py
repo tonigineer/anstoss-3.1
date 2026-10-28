@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ORACLE = Path(os.environ.get("ANSTOSS3_ORACLE") or Path.home() / ".cache/anstoss3-menu/oracle")
+ORACLE = Path(os.environ.get("ANSTOSS3_ORACLE") or Path.home() / ".cache/anstoss-3.1/oracle")
 HOOK = re.compile(r'(/\* Its loop jumps back in[^*]*\*/\s*)?HOOK\("([^"]+)",\s*(0x[0-9a-f]+),\s*"([^"]*)"')
 OBJDUMP = "i686-w64-mingw32-objdump"
 

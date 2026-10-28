@@ -23,12 +23,10 @@ jobs:
         include:
           - name: linux-x86_64
             os: ubuntu-latest
-            binary: anstoss3-menu
-            program: anstoss-3.1
+            binary: anstoss-3-1
           - name: windows-x86_64
             os: windows-latest
-            binary: anstoss3-menu.exe
-            program: anstoss-3.1.exe
+            binary: anstoss-3-1.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +61,7 @@ jobs:
           fi
           dir="anstoss-3.1-${version}-${{ matrix.name }}"
           mkdir "$dir"
-          cp "target/release/${{ matrix.binary }}" "$dir/${{ matrix.program }}"
+          cp "target/release/${{ matrix.binary }}" "$dir/"
           cp README.md LICENSE "$dir/"
           if [[ "$RUNNER_OS" == Windows ]]; then
             7z a "$dir.zip" "$dir" > /dev/null

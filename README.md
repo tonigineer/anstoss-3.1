@@ -1,13 +1,17 @@
 # Anstoss 3.1
 
+> **Work in progress.** Anstoss 3.1 is not playable from start to finish yet:
+> many screens and rules of the original are still being rebuilt.
+> `index.html` in this repository lists what works, screen by screen.
+
 An unofficial, fan-made reimplementation of **ANSTOSS 3 – Der Fußballmanager**
 (Ascaron, 2000), written in Rust. It runs natively on Linux and Windows and
 aims to match the original screen for screen: every finished screen is
-compared pixel by pixel with the original game running under Wine. Beside the
-classic 640×480 look there is a remastered 16:9 one (F9).
+compared pixel by pixel with the original game running under Wine.
 
-It is a work in progress. `index.html` in this repository lists what works,
-screen by screen.
+For now it rebuilds the classic 640×480 game. A remastered 16:9 look will
+follow once the rebuild is complete; F9 shows first drafts of it on a few
+screens.
 
 ## You need the original game
 
@@ -45,7 +49,7 @@ screen by screen.
 2. Download the archive for your system from the
    [releases](../../releases) and unpack it.
 3. Tell Anstoss 3.1 where the game is (next section), and start
-   `anstoss-3.1` (Linux) or `anstoss-3.1.exe` (Windows).
+   `anstoss-3-1` (Linux) or `anstoss-3-1.exe` (Windows).
 
 ## Configuration
 
@@ -53,12 +57,12 @@ Anstoss 3.1 has no settings file of its own. The one thing it needs is the
 game folder — the folder that holds `anstoss3.exe`. It takes the first of:
 
 1. **The first command-line argument:**
-   `anstoss-3.1 "/path/to/ANSTOSS 3"`.
+   `anstoss-3-1 "/path/to/ANSTOSS 3"`.
 2. **The environment variable `ANSTOSS3_DIR`.**
    - Linux: `export ANSTOSS3_DIR="$HOME/Games/ANSTOSS 3"`.
    - Windows: `setx ANSTOSS3_DIR "D:\Games\ANSTOSS 3"`, then open a new
      window.
-3. **The folder the program sits in.** Copy `anstoss-3.1(.exe)` into the
+3. **The folder the program sits in.** Copy `anstoss-3-1(.exe)` into the
    game folder and start it from there.
 4. **Where GOG installs the game:** `C:\GOG Games\ANSTOSS 3` on Windows,
    `~/.local/share/bottles/bottles/ANSTOSS-3/drive_c/GOG Games/ANSTOSS 3` on
@@ -76,25 +80,55 @@ its settings in the game's own files there. You change them in the game under
 | `alltimes.saq` | the all-time records (*Für die Ewigkeit*), read only |
 | `saves/*.an3` | savegames, read only for now |
 
-The remastered look (F9) draws its text with Open Sans or Liberation Sans on
-Linux (from `/usr/share/fonts`) and with Arial on Windows; the classic look
-uses the game's own bitmap fonts.
-
 On Linux the program needs the usual desktop libraries: ALSA
 (`libasound.so.2`), udev, and X11 or Wayland.
 
 ## Building from source
 
+Anstoss 3.1 needs Rust 1.97 or newer; distribution packages are usually
+older, so install it with [rustup](https://rustup.rs) everywhere. The build
+puts the program at `target/release/anstoss-3-1` (`.exe` on Windows).
+
+### Arch Linux
+
 ```sh
-cargo build --release -p a3-app      # target/release/anstoss3-menu
-cargo test                           # the tests that need no game files
-ANSTOSS3_DIR="/path/to/ANSTOSS 3" cargo test -- --include-ignored
+sudo pacman -S --needed base-devel git rustup pkgconf alsa-lib systemd-libs \
+    libxkbcommon wayland libx11
+rustup default stable
+git clone <this repository> anstoss-3.1 && cd anstoss-3.1
+cargo build --release -p a3-app
 ```
 
-The program is called `anstoss3-menu` when you build it yourself; the
-release archives name it `anstoss-3.1`. On Debian or Ubuntu, building needs
-`pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
-libx11-dev`.
+### Debian and Ubuntu
+
+```sh
+sudo apt install build-essential git curl pkg-config libasound2-dev \
+    libudev-dev libwayland-dev libxkbcommon-dev libx11-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+. "$HOME/.cargo/env"
+git clone <this repository> anstoss-3.1 && cd anstoss-3.1
+cargo build --release -p a3-app
+```
+
+### Windows
+
+1. Install [Git for Windows](https://git-scm.com/download/win).
+2. Run `rustup-init.exe` from [rustup.rs](https://rustup.rs) and let it
+   install the Visual Studio Build Tools (the MSVC linker) it asks for.
+3. In a new terminal:
+
+   ```powershell
+   git clone <this repository> anstoss-3.1
+   cd anstoss-3.1
+   cargo build --release -p a3-app
+   ```
+
+### Tests
+
+On Linux, `cargo test` runs the tests that need no game files; with the game,
+`ANSTOSS3_DIR="/path/to/ANSTOSS 3" cargo test -- --include-ignored` runs
+them all. The game's tests set up their folders with Unix symlinks, so they
+don't build on Windows.
 
 ## License
 

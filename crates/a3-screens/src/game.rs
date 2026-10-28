@@ -299,13 +299,13 @@ pub fn transparent_black(mut sprite: RgbaImage) -> RgbaImage {
     sprite
 }
 
-/// Where derived images are kept between runs: `$XDG_CACHE_HOME/anstoss3-menu`,
-/// or `~/.cache/anstoss3-menu`.
+/// Where derived images are kept between runs: `$XDG_CACHE_HOME/anstoss-3.1`,
+/// or `~/.cache/anstoss-3.1`.
 pub fn cache_dir() -> PathBuf {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(&std::env::var_os("HOME").unwrap_or_default()).join(".cache"));
-    base.join("anstoss3-menu")
+    base.join("anstoss-3.1")
 }
 
 fn read_head(path: &Path, len: usize) -> Option<Vec<u8>> {
