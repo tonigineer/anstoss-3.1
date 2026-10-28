@@ -370,6 +370,21 @@ const VALUES_LABEL: u16 = 2533;
 /// 0xffff), the Formverlauf's line the first.
 const LINE_INKS: [[u8; 3]; 6] =
     [[255, 0, 0], [0, 0, 255], [0, 255, 0], [0, 0, 0], [128, 128, 128], [255, 255, 0]];
+/// The Notenschnitt Mannschaft's texts: header, the two lines' legends,
+/// the value axis' label ("Formpunkte/6"); a scale of 6 over 300
+/// pixels, a grade worth two and a half (`DAT_00810190`), the lines red
+/// and white.
+const TEAM_GRADES_HEADER: u16 = 2419;
+const TEAM_GRADES_LEGENDS: [u16; 2] = [3044, 3045];
+const TEAM_GRADES_LABEL: u16 = 3046;
+const GRADE_PIXELS: f64 = 2.5;
+const TEAM_GRADES_INKS: [[u8; 3]; 2] = [[255, 0, 0], [255, 255, 255]];
+/// The Formverlauf Mannschaft's header and its three lines: series 0 to
+/// 2 take the weeks' bytes 2, 1 and 0, red, blue and green, under the
+/// legends "Abwehr", "Mittelfeld", "Sturm".
+const LINES_FORM_HEADER: u16 = 3496;
+const LINES_FORM_SERIES: [(usize, [u8; 3], u16); 3] =
+    [(2, [255, 0, 0], 2534), (1, [0, 0, 255], 2535), (0, [0, 255, 0], 2536)];
 /// The Tabellenplatzentwicklung's header and its axis' label
 /// ("Spieltag"); its graph 310 high.
 const PLACES_HEADER: u16 = 3055;
@@ -1508,10 +1523,13 @@ impl Statistics {
             {
                 self.opponents_page(cx, view, code == statistics::SQUAD_FOES_PAGE)
             }
-            Some(code @ (statistics::SQUAD_FORM_PAGE | statistics::SQUAD_VALUES_PAGE))
-                if self.category == MANNSCHAFT =>
-            {
-                self.weekly_graph_page(cx, view, code == statistics::SQUAD_FORM_PAGE)
+            Some(
+                code @ (statistics::SQUAD_FORM_PAGE
+                | statistics::SQUAD_VALUES_PAGE
+                | statistics::SQUAD_LINES_FORM_PAGE),
+            ) if self.category == MANNSCHAFT => self.weekly_graph_page(cx, view, code),
+            Some(statistics::SQUAD_TEAM_GRADES_PAGE) if self.category == MANNSCHAFT => {
+                self.team_grades_page(cx, view)
             }
             Some(statistics::SQUAD_CHANCES_PAGE) if self.category == MANNSCHAFT => {
                 self.chances_page(cx, view)
@@ -1932,18 +1950,30 @@ impl Statistics {
         true
     }
 
-    /// The Formverlauf (`FUN_0046f282`) or the Mannschaftswerte
-    /// (`FUN_0046f51d`): the club's weeks as lines in the graph window —
-    /// its form, or its six values, each byte worth one and a half pixels,
-    /// cut — the respect's line starting a week later — under one header
-    /// column.
-    fn weekly_graph_page(&self, cx: &Cx, view: &mut View, form: bool) -> bool {
+    /// The Formverlauf (`FUN_0046f282`), the Mannschaftswerte
+    /// (`FUN_0046f51d`) or the Formverlauf Mannschaft (`FUN_0046fbb3`): the
+    /// club's weeks as lines in the graph window — its form, its six
+    /// values, or its three lines' form — each byte worth one and a half
+    /// pixels, cut, the respect's line starting a week later; under one
+    /// header column.
+    fn weekly_graph_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(team) = own_team(cx) else { return false };
         let Some(c) = control(dialog, TABLE) else { return false };
         let pixels = |b: u8| (f64::from(b) * POINT_PIXELS) as i32;
-        let (header, lines, y_max, value_label) = if form {
+        let (header, lines, y_max, value_label) = if code == statistics::SQUAD_LINES_FORM_PAGE {
+            let weeks = statistics::weekly_lines(records, team);
+            let lines = LINES_FORM_SERIES
+                .iter()
+                .map(|&(byte, colour, legend)| GraphLine {
+                    values: weeks.iter().map(|w| pixels(w[byte])).collect(),
+                    colour,
+                    label: game.text(legend).to_owned(),
+                })
+                .collect();
+            (LINES_FORM_HEADER, lines, 20, FORM_LABEL)
+        } else if code == statistics::SQUAD_FORM_PAGE {
             let values = statistics::weekly_form(records, team).into_iter().map(pixels).collect();
             let label = game.text(FORM_LEGEND).to_owned();
             let line = GraphLine { values, colour: LINE_INKS[0], label };
@@ -1964,6 +1994,48 @@ impl Statistics {
         let size = (rect.width() as i32, rect.height() as i32);
         let labels = (game.text(WEEK_LABEL), game.text(value_label));
         let shapes = line_graph(game, size, GRAPH_HEIGHT, y_max, &lines, labels);
+        if let Some(table) = view.table_mut(c) {
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
+                rows: Vec::new(),
+                width: ROW_WIDTH,
+                scroll: 0,
+                cross: None,
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+            };
+        }
+        true
+    }
+
+    /// The Notenschnitt Mannschaft (`FUN_0046ee67`): the club's mean grade
+    /// and its opponents', matchday by matchday, as lines — each point 300
+    /// less two and a half times the grade, cut, so the better grades
+    /// stand higher — the first matchday's twice, as the page hands it in
+    /// once before the loop.
+    fn team_grades_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(TEAM_GRADES_HEADER).to_owned(), &[(0, 0)]);
+        let point = |b: u8| GRAPH_HEIGHT - (f64::from(b) * GRADE_PIXELS) as i32;
+        let lines: Vec<GraphLine> = statistics::team_grades(records, team)
+            .iter()
+            .zip(TEAM_GRADES_LEGENDS.iter().zip(TEAM_GRADES_INKS))
+            .map(|(grades, (&legend, colour))| {
+                let first = grades.first().copied().unwrap_or(0);
+                GraphLine {
+                    values: std::iter::once(first).chain(grades.iter().copied()).map(point).collect(),
+                    colour,
+                    label: game.text(legend).to_owned(),
+                }
+            })
+            .collect();
+        let rect = dialog.controls[c].rect;
+        let size = (rect.width() as i32, rect.height() as i32);
+        let labels = (game.text(WEEK_LABEL), game.text(TEAM_GRADES_LABEL));
+        let shapes = line_graph(game, size, GRAPH_HEIGHT, 6, &lines, labels);
         if let Some(table) = view.table_mut(c) {
             *table = TableState {
                 columns: Vec::new(),

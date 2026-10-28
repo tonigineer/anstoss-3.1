@@ -4890,6 +4890,53 @@ mod tests {
         assert_eq!(table.rows[4].text, "5.\tDiogo Leite\t0\t0\t0\t0\t0\t0\t0\t0.0");
     }
 
+    /// With the department raised the Mannschaft category's Notenschnitt
+    /// Mannschaft draws the club's mean grade and its opponents' by
+    /// matchday.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_draws_the_teams_grades() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 18";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Notenschnitt");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        let segments = |colour: [u8; 3]| {
+            shapes.iter().filter(|s| matches!(s, Shape::Pen { colour: c, .. } if *c == colour)).count()
+        };
+        // Three matchdays, the first handed in twice: three segments each.
+        assert_eq!(segments([255, 0, 0]), 3);
+        assert_eq!(segments([255, 255, 255]), 3);
+    }
+
+    /// The Formverlauf Mannschaft draws the form of the team's three lines
+    /// week by week, the defence red, the midfield blue, the attack green.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_draws_the_lines_form() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 19";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Formverlauf Mannschaft");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        let texts: Vec<&str> = shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["Abwehr", "Mittelfeld", "Sturm", "Woche", "Formpunkte/20"]);
+    }
+
     /// With the department raised the Mannschaft category's Chancen lists
     /// each match's chances and goals and the two sides' rates.
     #[test]

@@ -324,6 +324,12 @@ pub const SQUAD_HOME_SCORERS_PAGE: i16 = 0x12;
 pub const SQUAD_IN_A_ROW_PAGE: i16 = 0x15;
 /// The Chancen under 2410 (`FUN_00469067`), from the second department on.
 pub const SQUAD_CHANCES_PAGE: i16 = 0x14;
+/// The Notenschnitt Mannschaft, a line graph under 2419 (`FUN_0046ee67`),
+/// from the second department on.
+pub const SQUAD_TEAM_GRADES_PAGE: i16 = 0x17;
+/// The Formverlauf Mannschaft, a line graph under 3496 (`FUN_0046fbb3`),
+/// from the second department on.
+pub const SQUAD_LINES_FORM_PAGE: i16 = 0x18;
 /// The Torjäger ewig under 2414 (`FUN_0046a366`), the Einsätze ewig
 /// under 2407 (`FUN_00468695`).
 pub const SQUAD_ALL_TIME_PAGE: i16 = 1;
@@ -604,6 +610,22 @@ pub fn chance_matches(records: &Records, team: &Team) -> Vec<ChanceMatch> {
         .collect()
 }
 
+/// The club's mean grade and its opponents' by league matchday
+/// (`FUN_006323e4`: 46 bytes each at the human club's extra +0xb00 and
+/// +0xb2e), as many as the league has played (`FUN_00692744`).
+pub fn team_grades(records: &Records, team: &Team) -> [Vec<u8>; 2] {
+    const OWN: usize = 0xb00;
+    const THEIRS: usize = 0xb2e;
+    let played = League::of(records, team.country().into(), team.level())
+        .filter(|_| team.level() < 6)
+        .map_or(0, |l| l.played());
+    let Some(extra) = usize::from(team.human()).checked_sub(1).and_then(|s| records.extras.get(s))
+    else {
+        return [Vec::new(), Vec::new()];
+    };
+    [OWN, THEIRS].map(|at| (0..played.min(46)).map(|md| extra.get::<u8>(at + md)).collect())
+}
+
 /// The weeks a human club keeps of itself in its extra block, at most
 /// fifty: its form week by week (`FUN_006325ca`, a count at +0xb5c and the
 /// bytes from +0xb5e), and the team's values (`FUN_00632833`, a count at
@@ -611,6 +633,12 @@ pub fn chance_matches(records: &Records, team: &Team) -> Vec<ChanceMatch> {
 /// cohesion, condition, freshness, respect and one more).
 pub fn weekly_form(records: &Records, team: &Team) -> Vec<u8> {
     weekly(records, team, 0xb5c, 1).into_iter().map(|w| w[0]).collect()
+}
+
+/// The form of the team's three lines week by week (`FUN_00632b5a`, a
+/// count at +0xcf0 and three bytes a week from +0xcf2).
+pub fn weekly_lines(records: &Records, team: &Team) -> Vec<[u8; 3]> {
+    weekly(records, team, 0xcf0, 3).into_iter().map(|w| [w[0], w[1], w[2]]).collect()
 }
 
 pub fn weekly_values(records: &Records, team: &Team) -> Vec<[u8; 7]> {
