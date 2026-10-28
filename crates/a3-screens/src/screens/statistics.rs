@@ -256,6 +256,26 @@ const FIXTURES_ROW_COLUMNS: [(u16, u16); 8] = [
 ];
 const DATE_TEXT: u16 = 1776;
 const WEEKDAY_TEXTS: u16 = 1779;
+/// The Notenschnitt Spieler's header and rows (`FUN_0046e649` with
+/// 0x87e6a0, and 0x87e670): the name, the mean grade, at home and its
+/// matches, away and its matches.
+const GRADES_HEADER: u16 = 3043;
+const GRADES_HEADER_COLUMNS: [(u16, u16); 6] = [
+    (0, 0),
+    (C | 0x91, 0x32),
+    (C | 0xcd, 0x1e),
+    (C | 0xed, 0x1e),
+    (C | 0x113, 0x1e),
+    (C | 0x133, 0x1e),
+];
+const GRADES_ROW_COLUMNS: [(u16, u16); 6] = [
+    (0, 0),
+    (R | 0x96, 0x1e),
+    (R | 0xc8, 0x1e),
+    (R | 0xe6, 0x1e),
+    (R | 0x10e, 0x1e),
+    (R | 0x12c, 0x1e),
+];
 /// The Spielereigenschaften's header and rows (`FUN_00471109` with
 /// 0x87e6d0, and 0x87e6f0): name, position, strength and traits.
 const TRAITS_HEADER: u16 = 4739;
@@ -1133,6 +1153,9 @@ impl Statistics {
             Some(statistics::SQUAD_TRAITS_PAGE) if self.category == MANNSCHAFT => {
                 self.traits_page(cx, view)
             }
+            Some(statistics::SQUAD_GRADES_PAGE) if self.category == MANNSCHAFT => {
+                self.grades_page(cx, view)
+            }
             Some(statistics::SQUAD_FIXTURES_PAGE) if self.category == MANNSCHAFT => {
                 self.fixtures_page(cx, view)
             }
@@ -1524,6 +1547,53 @@ impl Statistics {
             *table = TableState {
                 columns: page.columns.to_vec(),
                 centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Notenschnitt Spieler (`FUN_0046e649`): the squad by its mean
+    /// grade, the best first, "%s\t%s\t%s\t%d\t%s\t%d" — each grade
+    /// halved and "%1.1f", "-" without one. The page keeps a record of 20
+    /// bytes a player — id, mean, sums and counts — and its sort swaps the
+    /// records whole (Ghidra shows them as two arrays 8 bytes apart).
+    fn grades_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(GRADES_HEADER).to_owned(), &GRADES_HEADER_COLUMNS);
+        let grades = statistics::squad_grades(records, &game.calendar, team);
+        let mut sorted = grades;
+        for i in 0..sorted.len() {
+            for j in i + 1..sorted.len() {
+                if sorted[j].1.mean() < sorted[i].1.mean() {
+                    sorted.swap(i, j);
+                }
+            }
+        }
+        let half = |sum: i16, n: i16| tenths(f64::from(f32::from(sum) / f32::from(n)) / 2.0);
+        let rows: Vec<TableRow> = sorted
+            .iter()
+            .filter(|(id, _)| *id != 0)
+            .map(|&(id, g)| {
+                let name = records.known_as(id).unwrap_or_default();
+                let all =
+                    if g.sum == 0 { "-".to_owned() } else { tenths(f64::from(g.mean()) / 2.0) };
+                let home = if g.home[1] < 1 { "-".to_owned() } else { half(g.home[0], g.home[1]) };
+                let away = if g.away[1] < 1 { "-".to_owned() } else { half(g.away[0], g.away[1]) };
+                let text = format!("{name}\t{all}\t{home}\t{}\t{away}\t{}", g.home[1], g.away[1]);
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: GRADES_ROW_COLUMNS.to_vec(),
+                centred: team.players().len() as i32,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

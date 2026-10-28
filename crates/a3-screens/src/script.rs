@@ -4962,6 +4962,30 @@ mod tests {
         assert_eq!(table.rows[12].text, "13.\tLeopold Querfeld\t0\t0\t0\t0\t1\t0");
     }
 
+    /// The Mannschaft category's Notenschnitt Spieler ranks the squad by
+    /// its mean grade, at home and away beside, those without a grade
+    /// last.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_grades_the_squad() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 10";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Name\\tGesamt\\tHeim\\tEins.\\tAusw.\\tEins."
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 26);
+        assert_eq!(table.rows[0].text, "Stanley Nsoki\t2.8\t-\t0\t2.8\t2");
+        assert_eq!(table.rows[1].text, "Toni Lubiniecki\t2.8\t3.0\t1\t2.8\t2");
+        assert_eq!(table.rows[11].text, "Gabriel Moscardo\t4.0\t3.5\t1\t4.3\t2");
+        // Without a grade the mean counts as 101, so they come last.
+        assert_eq!(table.rows[12].text, "David Preu\t-\t-\t0\t-\t0");
+    }
+
     /// The Mannschaft category's Spielereigenschaften names the squad's
     /// traits, the players by name.
     #[test]

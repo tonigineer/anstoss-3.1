@@ -320,6 +320,8 @@ pub const SQUAD_YELLOW_PAGE: i16 = 0xe;
 pub const SQUAD_TRAITS_PAGE: i16 = 0x1d;
 /// The Vereinsresultate under 3041 (`FUN_0046ce89`).
 pub const SQUAD_FIXTURES_PAGE: i16 = 0x19;
+/// The Notenschnitt Spieler under 3043 (`FUN_0046e649`).
+pub const SQUAD_GRADES_PAGE: i16 = 0xf;
 
 /// The own squad by the names its players go by (`FUN_00471109`): the
 /// same exchange sort, a place swapping with the first of the rest whose
@@ -424,6 +426,59 @@ pub fn all_time_matches(records: &Records, team: &Team) -> (usize, Vec<AllTimeMa
         })
         .collect();
     (held, rows)
+}
+
+/// A squad player's grades in this season's league matches
+/// (`FUN_0046e649`): for each of the club's fixtures (`FUN_0062af24`) his
+/// match byte R+0x319 (`FUN_006ff47f`) — played or came on or went off in
+/// bits 6 and 7, a grade in half steps in bits 2 to 5 — summed with the
+/// graded matches counted, at home and away.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Grades {
+    pub sum: i16,
+    pub home: [i16; 2],
+    pub away: [i16; 2],
+}
+
+impl Grades {
+    /// The mean grade in half steps as the page keeps it, a float — 101
+    /// without a graded match.
+    pub fn mean(&self) -> f32 {
+        match self.home[1] + self.away[1] {
+            n if n < 1 => 101.0,
+            n => f32::from(self.sum) / f32::from(n),
+        }
+    }
+}
+
+/// The squad's grades in its order.
+pub fn squad_grades(
+    records: &Records,
+    calendar: &crate::calendar::Calendar,
+    team: &Team,
+) -> Vec<(u16, Grades)> {
+    const PLAYED: u8 = 0xc0;
+    const GRADE: u8 = 0x3c;
+    let fixtures = crate::opponent::fixture_days(records, calendar, team);
+    team.players()
+        .into_iter()
+        .map(|id| {
+            let mut g = Grades::default();
+            let bytes = records.player(id).map_or([0; 46], |p| p.matchdays());
+            for (k, f) in fixtures.iter().enumerate() {
+                let b = bytes.get(k).copied().unwrap_or(0);
+                let grade = i16::from((b & GRADE) >> 2);
+                if b & PLAYED == 0 || grade == 0 {
+                    continue;
+                }
+                g.sum += grade;
+                let side = if f.home { &mut g.home } else { &mut g.away };
+                side[0] += grade;
+                side[1] += 1;
+            }
+            (id, g)
+        })
+        .collect()
 }
 
 /// A player's D-Form (`FUN_006ff257`): the mean of his weekly forms this
