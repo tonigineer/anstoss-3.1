@@ -286,6 +286,13 @@ impl View {
                 }
                 false
             }
+            Target::Across { control, next } => {
+                if let Some(table) = self.table_mut(control) {
+                    table.across_by(if next { 1 } else { -1 });
+                    return true;
+                }
+                false
+            }
             Target::Spin { control, up } | Target::SliderStep { control, up } => {
                 if let Some(value) = self.value_mut(control) {
                     value.step(up);

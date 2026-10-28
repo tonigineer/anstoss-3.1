@@ -113,7 +113,7 @@ pub(crate) fn draw(value: &Value, frame: &mut RgbaImage, paint: &Paint) {
 }
 
 /// A handle cut from its long bar.
-fn cut(bar: &RgbaImage, width: u32) -> RgbaImage {
+pub(crate) fn cut(bar: &RgbaImage, width: u32) -> RgbaImage {
     let height = bar.height();
     let mut handle = RgbaImage::new(width, height);
     let part = |x: u32, w: u32| imageops::crop_imm(bar, x, 0, w, height).to_image();

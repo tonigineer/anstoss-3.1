@@ -9,10 +9,10 @@
 //! Of the pages, the league tables of `FUN_00444ec6` are drawn: the
 //! current one, at home, away, of either half of the season, of either
 //! half of the games, with two points a win; the forecast of the
-//! champion (`FUN_00445ded`); the rounds of the national cups
-//! (`FUN_004469c0`); and the Europa League's round (`FUN_004483c7`) with
-//! the European Supercup's single pairing (`FUN_0044858a`). The others
-//! are crossed out.
+//! champion (`FUN_00445ded`); the season's results in a cross-table
+//! (`FUN_00445951`); the rounds of the national cups (`FUN_004469c0`); and
+//! the Europa League's round (`FUN_004483c7`) with the European Supercup's
+//! single pairing (`FUN_0044858a`). The others are crossed out.
 
 use std::collections::HashMap;
 
@@ -138,10 +138,13 @@ const FORECAST_COLUMNS: [(u16, u16); 10] = [
     (365, 0),
 ];
 const FORECAST_WIDTH: i32 = 0x198;
-/// The tables' category and their codes; the forecast's.
+/// The tables' category and their codes; the forecast's and the season
+/// results' — the cross-table's rows as wide as the frame (`FUN_00458c56`).
 const TABLES: usize = 0;
 const TABLE_CODES: std::ops::RangeInclusive<i16> = 0..=7;
 const FORECAST: i16 = 8;
+const CROSS: i16 = 9;
+const CROSS_WIDTH: i32 = 0x1dd;
 /// The cup rows' columns (`FUN_006df48b` with 0x879428 and 0x879450): the
 /// two sides, the legs' scores in the right-pulled columns, and the note
 /// behind them. A side with no club reads "ohne Verein" (0xfef), the note
@@ -263,6 +266,8 @@ pub struct Statistics {
     /// How far the page's table is scrolled, kept while the page is drawn
     /// anew.
     scrolled: usize,
+    /// How far the cross-table's bar is stepped, kept the same way.
+    across: usize,
     /// The strip: its names and the one chosen; the leagues it stands for
     /// when it steps through them.
     strip: Vec<String>,
@@ -427,6 +432,7 @@ impl Statistics {
         }
         self.page = Some(entry);
         self.scrolled = 0;
+        self.across = 0;
         let Some(&page) = cx.game.rules.statistics.categories[self.category].get(entry) else {
             return;
         };
@@ -533,6 +539,7 @@ impl Statistics {
                 self.table_page(cx, view, code)
             }
             Some(FORECAST) if self.category == TABLES => self.forecast_page(cx, view),
+            Some(CROSS) if self.category == TABLES => self.cross_page(cx, view),
             Some(code) if self.category == TABLES && statistics::CUP_PAGES.contains(&code) => {
                 self.cup_page(cx, view, false)
             }
@@ -616,6 +623,60 @@ impl Statistics {
                 width: ROW_WIDTH,
                 centred: -1,
                 scroll: self.scrolled,
+                cross: None,
+            };
+        }
+        true
+    }
+
+    /// The season's results (`FUN_00445951` into the game's
+    /// `CTabellenWnd`): the league the strip stands on laid crosswise,
+    /// rows and columns in the league's own places — the order the
+    /// season started in, not today's standings — each row the club of
+    /// its place, each of the ten columns shown the club of its number,
+    /// every cell the game the row's club had at home against the
+    /// column's, a club's own cell over a blue box, and the place's
+    /// number over each column.
+    fn cross_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        let pages = &game.rules.statistics.categories[self.category];
+        let Some(page) = self.page.and_then(|e| pages.get(e)) else { return false };
+        set_header(view, dialog, game.text(page.name as u16).to_owned(), &[(0, 0)]);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let cells = statistics::cross_table(&league);
+        let last = (self.across + 10).min(league.teams());
+        let rows = (0..league.teams())
+            .map(|place| {
+                let team = league.team(place);
+                let name = game.club_name(Some(records), country as u8, team);
+                let mut text = format!("{} {}", place + 1, name);
+                for j in self.across..last {
+                    text.push('\t');
+                    if let Some((a, b)) = cells[place][j] {
+                        text.push_str(&format!("{a}:{b}"));
+                    }
+                }
+                let ink = if own == Some((country, team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        // The name stands two in and runs to where the cells begin; each
+        // cell is 30 wide and the next stands 31 over (`FUN_0072cec3`).
+        let mut columns: Vec<(u16, u16)> = vec![(2, 138)];
+        for j in self.across..last {
+            columns.push((C | (139 + 31 * (j - self.across) as u16), 30));
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns,
+                rows,
+                width: CROSS_WIDTH,
+                centred: -1,
+                scroll: 0,
+                cross: Some(self.across),
             };
         }
         true
@@ -700,6 +761,7 @@ impl Statistics {
                     width: ROW_WIDTH,
                     centred: -1,
                     scroll: self.scrolled,
+                    cross: None,
                 };
         }
         true
@@ -726,6 +788,7 @@ impl Statistics {
                     width: ROW_WIDTH,
                     centred: -1,
                     scroll: self.scrolled,
+                    cross: None,
                 };
         }
         true
@@ -818,6 +881,7 @@ impl Statistics {
                     width: ROW_WIDTH,
                     centred: -1,
                     scroll: self.scrolled,
+                    cross: None,
                 };
         }
         true
@@ -842,6 +906,7 @@ impl Statistics {
                     width: ROW_WIDTH,
                     centred: 1,
                     scroll: self.scrolled,
+                    cross: None,
                 };
         }
         true
@@ -943,6 +1008,7 @@ impl Statistics {
                 width: FORECAST_WIDTH,
                 centred: -1,
                 scroll: 0,
+                cross: None,
             };
         }
         true
@@ -1023,6 +1089,16 @@ impl Screen for Statistics {
                 {
                     self.scrolled = t.scroll;
                 }
+            }
+            // The cross-table's window stepped one column over: its cells
+            // stand in the rows, so the page draws them anew.
+            Target::Across { .. } => {
+                if let Some(c) = control(cx.dialog, TABLE)
+                    && let Some(t) = view.table(c)
+                {
+                    self.across = t.cross.unwrap_or(0);
+                }
+                self.draw_page(cx, view);
             }
             // The strip steps: its name, and the page drawn anew.
             Target::SliderStep { control: c, .. }

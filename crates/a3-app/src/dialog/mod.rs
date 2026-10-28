@@ -419,7 +419,11 @@ fn spawn_hotspots(
     let classic = targets(dialog, view, &a3_screens::pointer::Pixels);
     for ((target, at), (_, classic)) in targets(dialog, view, geometry).into_iter().zip(classic) {
         // Scrollbar arrows lie on top of the rows they scroll.
-        let z = if matches!(target, Target::Scroll { .. }) { 3 } else { 2 };
+        let z = if matches!(target, Target::Scroll { .. } | Target::Across { .. }) {
+            3
+        } else {
+            2
+        };
         commands
             .spawn((
                 Hotspot { target, zoom: geometry.zoom(), dialog: view.id, classic },
@@ -590,7 +594,10 @@ fn press(
             pending.0.push((target, press.count));
             if matches!(
                 target,
-                Target::Spin { .. } | Target::SliderStep { .. } | Target::Scroll { .. }
+                Target::Spin { .. }
+                    | Target::SliderStep { .. }
+                    | Target::Scroll { .. }
+                    | Target::Across { .. }
             ) {
                 *held = Held { repeat: Some(target), timer: REPEAT_DELAY, ..default() };
             }

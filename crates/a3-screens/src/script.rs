@@ -4672,6 +4672,45 @@ mod tests {
         );
     }
 
+    /// The archive's season results on A.an3 (bar symbol 14): the
+    /// Bundesliga cross-table in the table's order, the own club red,
+    /// every cell the game its row's club had at home against the
+    /// column's, and the bar's arrows stepping its ten columns over.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_statistics_show_the_season_results() {
+        let game = game();
+        let open = "now click bar 14\nuntil dialog 18";
+        let se = format!("{open}\nnow row 1284 7");
+        let Some(runner) = on_save(&game, "A", &se) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&18];
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Saisonergebnisse");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!((table.rows.len(), table.cross), (18, Some(0)));
+        // Rows and columns stand in the league's own places, the order
+        // the season started in: today's first VfB Stuttgart sits at
+        // nine, the own club Union at thirteen.
+        assert!(table.rows[0].text.starts_with("1 FC Bayern"));
+        assert_eq!(table.rows[0].ink, [0; 3]);
+        assert!(table.rows[8].text.starts_with("9 VfB Stuttgart"));
+        assert!(table.rows[12].text.starts_with("13 1.FC Union Berlin"));
+        assert_eq!(table.rows[12].ink, [255, 0, 0]);
+        let wide = |t: &str| t.split('\t').count();
+        assert_eq!(wide(&table.rows[0].text), 11);
+        let first = table.rows[12].text.clone();
+        // The right arrow of the bar at the table's head: the window one
+        // column further, the same labels, other cells.
+        let on = format!("{se}\nnow click at 290 64");
+        let Some(runner) = on_save(&game, "A", &on) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.cross, Some(1));
+        assert!(table.rows[12].text.starts_with("13 1.FC Union Berlin"));
+        assert_eq!(wide(&table.rows[12].text), 11);
+        assert_ne!(table.rows[12].text, first);
+    }
+
     /// The archive's European pages on A.an3 (bar symbol 15): the Europa
     /// League's strip with its one played round, its qualification's 41
     /// first legs under the cup's own name; and the European Supercup's

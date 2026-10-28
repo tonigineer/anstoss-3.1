@@ -111,6 +111,12 @@ pub enum Target {
         control: usize,
         up: bool,
     },
+    /// An arrow of a table's horizontal bar, moving its window of
+    /// columns one place over.
+    Across {
+        control: usize,
+        next: bool,
+    },
 }
 
 /// Where a look puts things. By default everything stays where the classic

@@ -226,6 +226,27 @@ pub fn table(records: &Records, league: &League, kind: u8) -> Vec<Row> {
     reckon(records, league, kind, true)
 }
 
+/// A league's games in the season results' cross-table (`FUN_00445951`'s
+/// cells into `CTabellenWnd`): row and column by the league place the
+/// schedule plays by, from zero — the season's starting order, not
+/// today's standings; the cell of a row and a column holds the game the
+/// row's club had at home against the column's, its two scores, and none
+/// while it was not played.
+pub fn cross_table(league: &League) -> Vec<Vec<Option<(u8, u8)>>> {
+    let mut cells = vec![vec![None; league.teams()]; league.teams()];
+    for md in 0..league.played() {
+        for (hp, ap, result) in league.games(md) {
+            let Some([home, away, _, _]) = result else { continue };
+            if let Some(row) = cells.get_mut(hp)
+                && let Some(cell) = row.get_mut(ap)
+            {
+                *cell = Some((home, away));
+            }
+        }
+    }
+    cells
+}
+
 /// The table: with `rules` the penalty points and the point for three
 /// goals count.
 fn reckon(records: &Records, league: &League, kind: u8, rules: bool) -> Vec<Row> {

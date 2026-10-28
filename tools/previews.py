@@ -148,6 +148,7 @@ AREAS = {
     # the Europa League's.
     "statistics": [(*bar(15, 18), 18), (*bar(15, 18, "now row 1284 1"), 18),
                    (*bar(15, 18, "now click at 545 436", "now row 1284 6"), 18),
+                   (*bar(15, 18, "now row 1284 7", "now click at 290 64"), 18),
                    (*bar(15, 18, "now row 1284 8"), 18),
                    (*bar(15, 18, "now row 1284 13"), 18),
                    (*bar(15, 18, "now row 1284 15"), 18),
