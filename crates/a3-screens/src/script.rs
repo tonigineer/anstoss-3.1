@@ -5111,6 +5111,34 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// With the department raised, the Historisches category adds the
+    /// Supertransfers, the dearest transfers, and the matches with the
+    /// most spectators in the league and in the international cups.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_transfers_and_crowds() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 4\nnow row 1284 9";
+        let rows = |then: &str| -> Vec<String> {
+            let Some(runner) = on_save(&game, "A2", then) else { return Vec::new() };
+            let view = runner.host.view();
+            let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+            table.rows.iter().map(|r| r.text.clone()).collect()
+        };
+        let transfers = rows(then);
+        if transfers.is_empty() {
+            return;
+        }
+        let first = "1.\tWeah, T.\tRM\t10\t14.47 Mio\tOlympique Marseille\tFC Bayern München";
+        assert_eq!(transfers[0], first);
+        let national = rows(&format!("{then}\nnow row 1284 10"));
+        assert_eq!(national.len(), 20);
+        assert_eq!(national[0], "1\t75000\tFC Bayern München\t-\tBorussia Dortmund\t1\t:\t1");
+        let international = rows(&format!("{then}\nnow row 1284 11"));
+        assert_eq!(international[0], "1\t100000\tFC Liverpool\t-\tCrystal Palace\t0\t:\t2");
+    }
+
     /// The Historisches category's ewige Tabellen rank the clubs of the
     /// country's first league over all its seasons, this one's added: by
     /// points, with Germany's two notes under them, and by points a game.

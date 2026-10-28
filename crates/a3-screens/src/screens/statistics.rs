@@ -248,6 +248,27 @@ const ALL_TIME_GAMES_HEADER_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (C | 200, 40), (C | 242, 40), (C | 285, 50)];
 const ALL_TIME_GAMES_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (R | 200, 30), (R | 240, 30), (R | 280, 35)];
+/// The Supertransfers' header and rows (`FUN_0046217a` with 0x87d320):
+/// place, "Name, I.", position, strength, fee, the clubs from and to; the
+/// positions' short names (0x8a8490).
+const SUPERTRANSFERS_HEADER: u16 = 3025;
+const SUPERTRANSFERS_HEADER_COLUMNS: [(u16, u16); 7] =
+    [(C, 0), (17, 85), (C | 120, 20), (C | 140, 20), (C | 160, 50), (208, 115), (326, 0)];
+/// The place's column has no width there: `FUN_007a756f` ends it at the
+/// next one's left, as the width 17 does here.
+const SUPERTRANSFERS_ROW_COLUMNS: [(u16, u16); 7] =
+    [(R, 17), (17, 85), (C | 120, 20), (R | 140, 15), (R | 155, 50), (208, 115), (326, 0)];
+const POSITION_SHORT: [u16; 11] =
+    [1090, 1134, 1135, 1138, 1136, 1137, 1140, 1139, 1141, 1142, 1143];
+/// The Meiste Zuschauer's header and rows (`FUN_0046556e` with 0x87d628,
+/// and 0x87d5e8): place, attendance, the pairing and the goals; the rows
+/// spread over twenty.
+const CROWDS_HEADER: u16 = 4735;
+const CROWDS_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(R, 25), (C | 45, 70), (C | 120, 200), (C | 340, 60)];
+const CROWDS_SHOWN: i32 = 0x14;
+const CROWDS_ROW_COLUMNS: [(u16, u16); 8] =
+    [(R, 25), (R | 50, 50), (120, 0), (230, 0), (235, 0), (R | 350, 20), (370, 0), (372, 0)];
 /// The Abs. ewige Tabelle's header and rows (`FUN_00460f97` with 0x87d240,
 /// and 0x87d200), and the Rel.'s (`FUN_00461ac7` with 0x87d2b0, and
 /// 0x87d270); Germany's two notes under the first.
@@ -2056,6 +2077,14 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(statistics::SUPERTRANSFERS_PAGE) if self.category == HISTORY => {
+                self.supertransfers_page(cx, view)
+            }
+            Some(code @ (statistics::CROWDS_PAGE | statistics::INTERNATIONAL_CROWDS_PAGE))
+                if self.category == HISTORY =>
+            {
+                self.crowds_page(cx, view, code == statistics::INTERNATIONAL_CROWDS_PAGE)
+            }
             Some(code @ (statistics::ABSOLUTE_PAGE | statistics::RELATIVE_PAGE))
                 if self.category == HISTORY =>
             {
@@ -3632,6 +3661,89 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Supertransfers (`FUN_0046217a`): the dearest transfers, those
+    /// of players with a first name — the others are kept but never shown
+    /// —, numbered as shown, all black. The fee as `FUN_004db87c` writes
+    /// it, without a currency.
+    fn supertransfers_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let header = game.text(SUPERTRANSFERS_HEADER).to_owned();
+        set_header(view, dialog, header, &SUPERTRANSFERS_HEADER_COLUMNS);
+        let fee = |v: u64| match v {
+            1_000_000.. => format!("{}.{:02} Mio", v / 1_000_000, v % 1_000_000 / 10_000),
+            1000.. => format!("{}.{:03}", v / 1000, v % 1000),
+            _ => v.to_string(),
+        };
+        let rows = statistics::supertransfers(records)
+            .iter()
+            .filter(|t| t.names[0] != 0)
+            .enumerate()
+            .map(|(i, t)| {
+                let first = records.name(t.names[0]).chars().next().unwrap_or(' ');
+                let name = format!("{}, {first}.", records.name(t.names[1]));
+                let position =
+                    POSITION_SHORT.get(usize::from(t.position)).map_or("", |&id| game.text(id));
+                let from = game.club_name(Some(records), t.from.0, t.from.1);
+                let to = game.club_name(Some(records), t.to.0, t.to.1);
+                let money = fee(u64::from(t.fee) * 10_000);
+                let text = format!(
+                    "{}.\t{name}\t{position}\t{}\t{money}\t{from}\t{to}",
+                    i + 1,
+                    t.strength
+                );
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        self.plain_table(view, dialog, &SUPERTRANSFERS_ROW_COLUMNS, rows);
+        true
+    }
+
+    /// The Meiste Zuschauer national (`FUN_0046556e`) of the strip's
+    /// country's first league — the page leaves the league as an earlier
+    /// page set it — or intern. (`FUN_004657b4`): all twenty matches, the
+    /// empty ones too, "%d\t%d\t%s\t-\t%s\t%d\t:\t%d"; an international
+    /// match decided in its second leg (flag 0x10) gives that leg's goals,
+    /// turned round.
+    fn crowds_page(&self, cx: &Cx, view: &mut View, international: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        set_header(view, dialog, game.text(CROWDS_HEADER).to_owned(), &CROWDS_HEADER_COLUMNS);
+        let crowds = if international {
+            statistics::international_crowds(records)
+        } else {
+            statistics::crowds(records, self.strip_country(records), 0)
+        };
+        let rows = crowds
+            .iter()
+            .enumerate()
+            .map(|(k, m)| {
+                let home = game.club_name(Some(records), m.home.0, m.home.1);
+                let away = game.club_name(Some(records), m.away.0, m.away.1);
+                let [h, a] = if international && m.flags & 0x10 != 0 {
+                    [m.second[1], m.second[0]]
+                } else {
+                    m.goals
+                };
+                let text =
+                    format!("{}\t{}\t{home}\t-\t{away}\t{h}\t:\t{a}", k + 1, m.attendance);
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: CROWDS_ROW_COLUMNS.to_vec(),
+                centred: CROWDS_SHOWN,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
     }
 
     /// The Abs. or Rel. ewige Tabelle (`FUN_00460f97`, `FUN_00461ac7`) of

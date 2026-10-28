@@ -1037,6 +1037,11 @@ pub const OTHER_TABLES_PAGE: i16 = 0x13;
 /// (`FUN_00463a9b`) and Ligapokal/Supercup (`FUN_0046364c`).
 pub const FIVE_YEARS_PAGE: i16 = 0x17;
 pub const LEADERS_PAGE: i16 = 0x21;
+/// The Supertransfers (`FUN_0046217a`) and the Meiste Zuschauer national
+/// and intern. (`FUN_0046556e`, `FUN_004657b4`).
+pub const SUPERTRANSFERS_PAGE: i16 = 0x27;
+pub const CROWDS_PAGE: i16 = 0x30;
+pub const INTERNATIONAL_CROWDS_PAGE: i16 = 0x31;
 /// The Abs. and Rel. ewige Tabelle (`FUN_00460f97`, `FUN_00461ac7`).
 pub const ABSOLUTE_PAGE: i16 = 0x23;
 pub const RELATIVE_PAGE: i16 = 0x24;
@@ -1554,6 +1559,83 @@ pub fn five_years(records: &Records) -> Vec<(u16, [f32; 7])> {
             let points =
                 [4, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x20].map(|k| f32::from_bits(g.get(at + k)));
             (g.get::<i16>(at) as u16, points)
+        })
+        .collect()
+}
+
+/// A transfer of the Supertransfers (`FUN_0046217a`: fifty of 0x1c bytes
+/// at `DAT_00b1b2e8` in the lists block, the dearest first, as
+/// `FUN_0070eccd` keeps them): the player's names, his fee in ten
+/// thousands, the clubs he came from and went to, his position and
+/// strength.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Supertransfer {
+    pub names: [u16; 2],
+    pub fee: u32,
+    pub from: (u8, i16),
+    pub to: (u8, i16),
+    pub position: u8,
+    pub strength: u8,
+}
+
+const SUPERTRANSFERS: usize = 0xfc30;
+
+pub fn supertransfers(records: &Records) -> Vec<Supertransfer> {
+    let list = SUPERTRANSFERS..SUPERTRANSFERS + 50 * 0x1c;
+    let Some(b) = records.block(LISTS).and_then(|b| b.get(list)) else { return Vec::new() };
+    b.chunks_exact(0x1c)
+        .map(|e| {
+            let word = |at: usize| i16::from_le_bytes([e[at], e[at + 1]]);
+            Supertransfer {
+                names: [word(2) as u16, word(4) as u16],
+                fee: u32::from_le_bytes(e[0xc..0x10].try_into().unwrap()),
+                from: (e[0x10], word(0x12)),
+                to: (e[0x14], word(0x16)),
+                position: e[0x18],
+                strength: e[0x19],
+            }
+        })
+        .collect()
+}
+
+/// A match of the Meiste Zuschauer lists (`FUN_0046556e`, `FUN_004657b4`:
+/// twenty of 0x18 bytes, the league's at `DAT_00af5d94` and 0x214 a
+/// league by its list index, the international one at `DAT_00af725c`):
+/// the attendance, both sides, the goals and the second result, and the
+/// match's flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Crowd {
+    pub attendance: u32,
+    pub home: (u8, i16),
+    pub away: (u8, i16),
+    pub goals: [u8; 2],
+    pub second: [u8; 2],
+    pub flags: u8,
+}
+
+pub fn crowds(records: &Records, country: u16, level: u8) -> Vec<Crowd> {
+    let Some(index) = league_of(records, country, level) else { return Vec::new() };
+    crowd_list(records.block(&format!("0xaf5d74[{index}]")))
+}
+
+pub fn international_crowds(records: &Records) -> Vec<Crowd> {
+    crowd_list(records.block("0xaf723c"))
+}
+
+fn crowd_list(block: Option<&[u8]>) -> Vec<Crowd> {
+    let Some(b) = block else { return Vec::new() };
+    b.chunks_exact(0x18)
+        .take(20)
+        .map(|e| {
+            let word = |at: usize| i16::from_le_bytes([e[at], e[at + 1]]);
+            Crowd {
+                attendance: u32::from_le_bytes(e[0..4].try_into().unwrap()),
+                home: (e[8], word(0xa)),
+                away: (e[0xc], word(0xe)),
+                goals: [e[0x10], e[0x11]],
+                second: [e[0x12], e[0x13]],
+                flags: e[0x14],
+            }
         })
         .collect()
 }
