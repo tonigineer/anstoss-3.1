@@ -5111,6 +5111,28 @@ mod tests {
         assert!(matches!(shapes[0], Shape::Image { at: (162, 305), .. }));
     }
 
+    /// The Historisches category's Häufigstes Ergebnis ranks the league's
+    /// scores by how often they came out; its Trainerrauswürfe stay empty
+    /// before a first sacking.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_scores() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 4\nnow row 1284 10";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts.len(), 10);
+        assert_eq!(texts[0], "1.\t1\t:\t0\t7\t7");
+        assert_eq!(texts[9], "10.\t2\t:\t4\t1\t1");
+        let sacked = format!("{then}\nnow row 1284 9");
+        let Some(runner) = on_save(&game, "A", &sacked) else { return };
+        let view = runner.host.view();
+        assert!(view.table(control(dialog, 29999).unwrap()).unwrap().rows.is_empty());
+    }
+
     /// The Historisches category's Ligapokal/Supercup lists the country's
     /// finals with year and result, and its Tabellenführungen the clubs
     /// that led the first league, the own club red.

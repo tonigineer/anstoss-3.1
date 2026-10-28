@@ -248,6 +248,21 @@ const ALL_TIME_GAMES_HEADER_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (C | 200, 40), (C | 242, 40), (C | 285, 50)];
 const ALL_TIME_GAMES_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 25), (30, 0), (R | 200, 30), (R | 240, 30), (R | 280, 35)];
+/// The Häufigstes Ergebnis' header and rows (`FUN_0046686a` with
+/// 0x87d884, and 0x87d854): place, the score, this season's count and the
+/// total.
+const SCORES_HEADER: u16 = 4738;
+const SCORES_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(R, 25), (C | 50, 50), (C | 110, 70), (C | 180, 70)];
+const SCORES_ROW_COLUMNS: [(u16, u16); 6] =
+    [(R, 25), (R | 55, 20), (77, 0), (80, 0), (R | 120, 35), (R | 180, 40)];
+/// The Trainerrauswürfe's header and rows (`FUN_00465cfa` with 0x87d6fc,
+/// and 0x87d6d4): place, trainer, dismissals, time and last club.
+const SACKED_HEADER: u16 = 4737;
+const SACKED_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(R, 25), (40, 0), (C | 130, 70), (C | 200, 80), (290, 0)];
+const SACKED_ROW_COLUMNS: [(u16, u16); 5] =
+    [(R, 25), (40, 0), (R | 140, 35), (R | 215, 30), (290, 0)];
 /// The Tabellenführungen's header and rows (`FUN_00463a9b`): place, club,
 /// matchdays at the top and seasons in the league; the own club red.
 const LEADERS_HEADER: u16 = 3032;
@@ -2010,6 +2025,8 @@ impl Statistics {
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
+            Some(statistics::SCORES_PAGE) if self.category == HISTORY => self.scores_page(cx, view),
+            Some(statistics::SACKED_PAGE) if self.category == HISTORY => self.sacked_page(cx, view),
             Some(statistics::LEADERS_PAGE) if self.category == HISTORY => {
                 self.leaders_page(cx, view)
             }
@@ -3579,6 +3596,68 @@ impl Statistics {
         let country = self.strip_country(records);
         let eleven = statistics::year_eleven(records, country).map(|(id, t, n)| (id, t, Some(n)));
         eleven_page(cx, view, YEAR_ELEVEN_HEADER, country, &eleven)
+    }
+
+    /// The Häufigstes Ergebnis (`FUN_0046686a`): the league's twenty most
+    /// frequent scores, "%d.\t%d\t:\t%d\t%d\t%d".
+    fn scores_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        set_header(view, dialog, game.text(SCORES_HEADER).to_owned(), &SCORES_HEADER_COLUMNS);
+        let rows = statistics::frequent_scores(records, country, level)
+            .iter()
+            .enumerate()
+            .map(|(k, s)| {
+                let [h, a] = s.goals;
+                let text = format!("{}.\t{h}\t:\t{a}\t{}\t{}", k + 1, s.season, s.total);
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        self.plain_table(view, dialog, &SCORES_ROW_COLUMNS, rows);
+        true
+    }
+
+    /// The Trainerrauswürfe (`FUN_00465cfa`): the country's trainers sacked
+    /// most often, "%d\t%s\t%d\t%d\t%s".
+    fn sacked_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let country = self.strip_country(records);
+        set_header(view, dialog, game.text(SACKED_HEADER).to_owned(), &SACKED_HEADER_COLUMNS);
+        let rows = statistics::sacked(records, country)
+            .iter()
+            .enumerate()
+            .map(|(k, t)| {
+                let club = game.club_name(Some(records), t.club.0, t.club.1);
+                let text =
+                    format!("{}\t{}\t{}\t{}\t{club}", k + 1, t.name, t.dismissals, t.time);
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        self.plain_table(view, dialog, &SACKED_ROW_COLUMNS, rows);
+        true
+    }
+
+    /// A page's rows in its columns, from the window's top.
+    fn plain_table(
+        &self,
+        view: &mut View,
+        dialog: &Dialog,
+        columns: &[(u16, u16)],
+        rows: Vec<TableRow>,
+    ) {
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: columns.to_vec(),
+                centred: -1,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
     }
 
     /// The Tabellenführungen (`FUN_00463a9b`): the clubs of the country

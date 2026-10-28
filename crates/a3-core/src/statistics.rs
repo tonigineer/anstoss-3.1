@@ -1037,6 +1037,10 @@ pub const OTHER_TABLES_PAGE: i16 = 0x13;
 /// (`FUN_00463a9b`) and Ligapokal/Supercup (`FUN_0046364c`).
 pub const FIVE_YEARS_PAGE: i16 = 0x17;
 pub const LEADERS_PAGE: i16 = 0x21;
+/// The Trainerrauswürfe (`FUN_00465cfa`) and the Häufigstes Ergebnis
+/// (`FUN_0046686a`).
+pub const SACKED_PAGE: i16 = 0x33;
+pub const SCORES_PAGE: i16 = 0x39;
 pub const FINALS_PAGE: i16 = 0x28;
 /// The Historisches' Rekorde (`FUN_0045f7a5`) and Für die Ewigkeit
 /// (`FUN_0045f8e5`).
@@ -1547,6 +1551,73 @@ pub fn five_years(records: &Records) -> Vec<(u16, [f32; 7])> {
             let points =
                 [4, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x20].map(|k| f32::from_bits(g.get(at + k)));
             (g.get::<i16>(at) as u16, points)
+        })
+        .collect()
+}
+
+/// The league's results by score (`FUN_0046686a` by `FUN_007218db`: the
+/// object at `DAT_01a06008` and 0x620 a league by its list index, its
+/// data from +0x20): how often each score up to 15 goals a side came out,
+/// in all and this season. The most frequent twenty, those of a count
+/// alike in the order of their goals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Score {
+    pub goals: [u8; 2],
+    pub season: i16,
+    pub total: u32,
+}
+
+const SCORES: u32 = 0x1a06008;
+const SCORES_SHOWN: usize = 20;
+
+pub fn frequent_scores(records: &Records, country: u16, level: u8) -> Vec<Score> {
+    let Some(index) = league_of(records, country, level) else { return Vec::new() };
+    let Some(b) = records.block(&format!("{SCORES:#x}[{index}]")) else { return Vec::new() };
+    let mut scores: Vec<Score> = (0..16u8)
+        .flat_map(|h| (0..16u8).map(move |a| (h, a)))
+        .filter_map(|(h, a)| {
+            let k = usize::from(h) * 16 + usize::from(a);
+            let total = u32::from_le_bytes(b.get(4 * k..4 * k + 4)?.try_into().ok()?);
+            let season = b.get(0x400 + 2 * k..0x402 + 2 * k)?;
+            let season = i16::from_le_bytes([season[0], season[1]]);
+            (total != 0).then_some(Score { goals: [h, a], season, total })
+        })
+        .collect();
+    scores.sort_by_key(|s| std::cmp::Reverse(s.total));
+    scores.truncate(SCORES_SHOWN);
+    scores
+}
+
+/// The trainers sacked most often in a country (`FUN_00465cfa` by
+/// `FUN_007213cd`: the object at `DAT_00af85bc` and 0x354 a country by its
+/// slot, its data from +0x20): twenty entries of an id, a name, the
+/// dismissals, the time as a trainer and the club that sacked him last;
+/// those with a name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sacked {
+    pub name: String,
+    pub dismissals: i16,
+    pub time: i16,
+    pub club: (u8, i16),
+}
+
+const SACKED: u32 = 0xaf85bc;
+
+pub fn sacked(records: &Records, country: u16) -> Vec<Sacked> {
+    let slot = records.countries.slot(country.into());
+    let Some(b) = records.block(&format!("{SACKED:#x}[{slot}]")) else { return Vec::new() };
+    b.chunks_exact(0x28)
+        .take(20)
+        .filter(|e| e[2] != 0)
+        .map(|e| {
+            let word = |at: usize| i16::from_le_bytes([e[at], e[at + 1]]);
+            let end = e[2..0x20].iter().position(|&c| c == 0).unwrap_or(30);
+            Sacked {
+                name: a3_files::sav::cp1252(&e[2..2 + end]),
+                dismissals: word(0x20),
+                time: word(0x22),
+                club: (e[0x24], word(0x26)),
+            }
         })
         .collect()
 }
