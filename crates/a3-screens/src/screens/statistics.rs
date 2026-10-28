@@ -241,6 +241,14 @@ const EIGENTORE_COLUMNS: [(u16, u16); 4] = [
     (C | 0x122, 0x3c),
 ];
 const TOR_OWN_INK: [u8; 3] = [0, 0, 255];
+/// The Chancenverwertung's header and rows (`FUN_0044c08e` with
+/// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
+/// club red.
+const CHANCEN_HEADER: u16 = 0xaa2;
+const CHANCEN_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(R, 0x14), (0x19, 0), (C | 0xb4, 0x3c), (C | 0xf0, 0x3c), (C | 0x136, 0x3c)];
+const CHANCEN_ROW_COLUMNS: [(u16, u16); 5] =
+    [(R, 0x14), (0x19, 0), (R | 0xbe, 0x1e), (R | 0xff, 0x1e), (R | 0x136, 0x28)];
 /// The cup rows' columns (`FUN_006df48b` with 0x879428 and 0x879450): the
 /// two sides, the legs' scores in the right-pulled columns, and the note
 /// behind them. A side with no club reads "ohne Verein" (0xfef), the note
@@ -659,6 +667,9 @@ impl Statistics {
             {
                 self.liga_page(cx, view, code)
             }
+            Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
+                self.chance_page(cx, view)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -969,6 +980,40 @@ impl Statistics {
                 rows,
                 width: ROW_WIDTH,
                 centred,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Chancenverwertung (`FUN_0044c08e`): the league's clubs by
+    /// their quote, the rank without a dot ("%d\t%s\t%d%%\t%d\t%d", a
+    /// plain 0% without a chance), from the top of the window.
+    fn chance_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        set_header(view, dialog, game.text(CHANCEN_HEADER).to_owned(), &CHANCEN_HEADER_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let rows = statistics::chancen(records, country, level)
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let club = game.club_name(Some(records), country as u8, row.team);
+                let text =
+                    format!("{}\t{club}\t{}%\t{}\t{}", i + 1, row.quote, row.chances, row.goals);
+                let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: CHANCEN_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,

@@ -4983,4 +4983,29 @@ mod tests {
         let table = view.table(control(dialog, 29999).unwrap()).unwrap();
         assert!(table.rows.is_empty());
     }
+
+    /// The Chancenverwertung reckons each club's quote of goals from its
+    /// chances and ranks the league by it.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_leagues_chances() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 6";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tVerein\\tQuote\\tChancen\\tTore"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.centred, -1);
+        // The own club leads with four goals from five chances, in red;
+        // no dot after the rank.
+        assert_eq!(table.rows[0].text, "1\t1.FC Union Berlin\t80%\t5\t4");
+        assert_eq!(table.rows[0].ink, [255, 0, 0]);
+        assert_eq!(table.rows[1].text, "2\tBorussia Dortmund\t44%\t9\t4");
+        assert_eq!(table.rows[17].text, "18\t1.FC Heidenheim\t0%\t4\t0");
+    }
 }

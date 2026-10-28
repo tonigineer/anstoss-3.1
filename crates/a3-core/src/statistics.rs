@@ -310,8 +310,10 @@ pub const FREISTOSS_PAGE: i16 = 3;
 pub const ELFMETER_PAGE: i16 = 4;
 /// The Elfmeterkiller and the Eigentore, under 0xa9f and 0xa9c
 /// (`FUN_0044b2fc`, `FUN_0044a810`); the Fairneß and the
-/// Chancenverwertung between them draw from other data.
+/// Chancenverwertung between them draw from other data, the latter
+/// under 0xaa2 (`FUN_0044c08e`).
 pub const KILLER_PAGE: i16 = 5;
+pub const CHANCEN_PAGE: i16 = 7;
 pub const EIGENTORE_PAGE: i16 = 8;
 
 /// One player of the Liga lists: the name pool's ids of the name as the
@@ -476,6 +478,50 @@ pub fn eigentore(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
             })
         })
         .collect()
+}
+
+/// A club of the Chancenverwertung: its number, its quote in whole
+/// percent, its chances and its goals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChanceRow {
+    pub team: i16,
+    pub quote: i16,
+    pub chances: i16,
+    pub goals: i16,
+}
+
+/// A team's goals this season (a byte at +0xea) and its chances (+0x2c8).
+const TEAM_GOALS: usize = 0xea;
+const TEAM_CHANCES: usize = 0x2c8;
+
+/// The Chancenverwertung (`FUN_0044c08e`): no saved list, but the
+/// league's clubs in the order of its table as `FUN_006430e4` copies
+/// them out, each with its goals and chances and the quote of the two,
+/// goals·100 / chances cut to a whole number, 0 without a chance — then
+/// the page's own exchange sort by the quote, every place from the first
+/// up swapping with the first of the rest that beats it, so equal quotes
+/// can still change order.
+pub fn chancen(records: &Records, country: u16, level: u8) -> Vec<ChanceRow> {
+    let Some(league) = League::of(records, country, level) else { return Vec::new() };
+    let mut rows: Vec<ChanceRow> = (0..league.teams())
+        .map(|place| {
+            let team = league.team(place);
+            let record = u16::try_from(team).ok().and_then(|t| records.team(country, t));
+            let goals = record.map_or(0, |t| i16::from(t.get::<u8>(TEAM_GOALS)));
+            let chances = record.map_or(0, |t| t.get::<i16>(TEAM_CHANCES));
+            let quote =
+                if chances == 0 { 0 } else { (i32::from(goals) * 100 / i32::from(chances)) as i16 };
+            ChanceRow { team, quote, chances, goals }
+        })
+        .collect();
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            if rows[i].quote < rows[j].quote {
+                rows.swap(i, j);
+            }
+        }
+    }
+    rows
 }
 
 /// The league's scorers and assisters this season (`FUN_0044a3fa`): the
