@@ -3593,8 +3593,9 @@ mod tests {
         assert_eq!(text(2689), word(1).unwrap_or(1).to_string());
         let longest = word(3).unwrap_or(0);
         assert_eq!(text(6412), a3_core::playtime::split(longest).1);
-        // Probe1 was saved after 162 seconds of play.
-        assert!(text(2691).starts_with("00:02:4"), "{}", text(2691));
+        // Probe1 was saved after 184 seconds of play: the original's own
+        // clock, so another oracle run of the same game stores another.
+        assert!(text(2691).starts_with("00:03:0"), "{}", text(2691));
         assert_eq!(text(2686), "");
     }
 
