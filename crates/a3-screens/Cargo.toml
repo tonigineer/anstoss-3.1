@@ -3,6 +3,7 @@ name = "a3-screens"
 description = "The game's dialogs, drawn from the installation; no Bevy."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 a3-core.workspace = true

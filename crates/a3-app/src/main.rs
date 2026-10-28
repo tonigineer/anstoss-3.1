@@ -9,8 +9,9 @@
 //!
 //! Nothing from the game is bundled. Graphics, video, sound, texts and the
 //! football data are read at runtime from an installed copy, taken from the
-//! first command-line argument, `$ANSTOSS3_DIR`, or the Bottles prefix — in
-//! that order.
+//! first command-line argument or `$ANSTOSS3_DIR`; without either, from the
+//! folder the program sits in, else from where GOG installs the game — the
+//! Bottles prefix on Linux, `C:\GOG Games` on Windows.
 //!
 //! `--export-backgrounds` writes the artwork of every remastered dialog to the
 //! cache directory and exits, for `tools/outpaint.py` to extend to 16:9.
@@ -39,15 +40,20 @@ const EXPLORE_FLAG: &str = "--explore";
 const SHOT_FLAG: &str = "--shot";
 const DEFAULT_PROBE_PORT: u16 = 47300;
 const SCREENS_FLAG: &str = "--screens";
+/// Where GOG's installer puts the game: in the home's Bottles prefix on
+/// Linux, on drive C on Windows.
 const DEFAULT_DIR: &str = ".local/share/bottles/bottles/ANSTOSS-3/drive_c/GOG Games/ANSTOSS 3";
+const WINDOWS_DIR: &str = r"C:\GOG Games\ANSTOSS 3";
 /// Fonts for the remastered look, in order of preference.
-const REGULAR_FONTS: [&str; 2] = [
+const REGULAR_FONTS: [&str; 3] = [
     "/usr/share/fonts/OpenSans/OpenSans-Regular.ttf",
     "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
 ];
-const BOLD_FONTS: [&str; 2] = [
+const BOLD_FONTS: [&str; 3] = [
     "/usr/share/fonts/OpenSans/OpenSans-Bold.ttf",
     "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
+    r"C:\Windows\Fonts\arialbd.ttf",
 ];
 
 #[derive(States, Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -84,7 +90,10 @@ fn main() -> AppExit {
     let dir = args.game_dir();
     if !dir.join("anstoss3.exe").is_file() {
         eprintln!("No ANSTOSS 3 installation found at {}", dir.display());
-        eprintln!("Pass the game directory as the first argument or set ANSTOSS3_DIR.");
+        eprintln!(
+            "Pass the game directory as the first argument, set ANSTOSS3_DIR, \
+             or put this program into the game directory."
+        );
         return AppExit::error();
     }
     let mut game = match a3_screens::game::Game::load(&dir) {
@@ -119,7 +128,7 @@ fn main() -> AppExit {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "ANSTOSS 3".into(),
+                title: "Anstoss 3.1".into(),
                 resolution: (1600, 900).into(),
                 ..default()
             }),
@@ -173,14 +182,22 @@ impl Args {
         args
     }
 
+    /// The game directory named, else the first that holds the game of the
+    /// program's own folder and GOG's.
     fn game_dir(&self) -> PathBuf {
-        self.dir
-            .clone()
-            .or_else(|| std::env::var_os("ANSTOSS3_DIR").map(PathBuf::from))
-            .unwrap_or_else(|| {
-                let home = std::env::var_os("HOME").unwrap_or_default();
-                Path::new(&home).join(DEFAULT_DIR)
-            })
+        let env = || std::env::var_os("ANSTOSS3_DIR").map(PathBuf::from);
+        let named = self.dir.clone().or_else(env);
+        if let Some(dir) = named {
+            return dir;
+        }
+        let gog = if cfg!(windows) {
+            PathBuf::from(WINDOWS_DIR)
+        } else {
+            let home = std::env::var_os("HOME").unwrap_or_default();
+            Path::new(&home).join(DEFAULT_DIR)
+        };
+        let own = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
+        own.into_iter().find(|dir| dir.join("anstoss3.exe").is_file()).unwrap_or(gog)
     }
 }
 

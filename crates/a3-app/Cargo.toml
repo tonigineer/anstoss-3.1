@@ -3,6 +3,7 @@ name = "a3-app"
 description = "The replica's window: Bevy, input, the looks, intro, music and sound."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "anstoss3-menu"

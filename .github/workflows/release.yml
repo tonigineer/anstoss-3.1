@@ -1,0 +1,111 @@
+name: Release
+
+# Builds Anstoss 3.1 for Windows and Linux. For a pushed version tag (v0.1.0,
+# …) it publishes both archives as a GitHub release; started by hand, it only
+# builds them and keeps them as the run's artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            binary: anstoss3-menu
+            program: anstoss-3.1
+          - name: windows-x86_64
+            os: windows-latest
+            binary: anstoss3-menu.exe
+            program: anstoss-3.1.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Bevy's system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev
+
+      # The tests that need the game are ignored by default; the helpers of
+      # those tests use Unix symlinks, so they run on Linux only.
+      - name: Test
+        if: runner.os == 'Linux'
+        run: cargo test --workspace --locked
+
+      - name: Build
+        run: cargo build --release --locked -p a3-app
+
+      - name: Package
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          dir="anstoss-3.1-${version}-${{ matrix.name }}"
+          mkdir "$dir"
+          cp "target/release/${{ matrix.binary }}" "$dir/${{ matrix.program }}"
+          cp README.md LICENSE "$dir/"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            7z a "$dir.zip" "$dir" > /dev/null
+            echo "ARCHIVE=$dir.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "$dir.tar.gz" "$dir"
+            echo "ARCHIVE=$dir.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          An unofficial, fan-made reimplementation of ANSTOSS 3 – Der Fußballmanager
+          (Ascaron, 2000), for Windows and Linux.
+
+          **You need your own copy of ANSTOSS 3.** This release contains no files of
+          the game; it reads them from an installed copy, such as the one sold DRM-free
+          on GOG. Put the program into the game's folder, or pass the folder as the
+          first argument; the README in the archive has the details.
+
+          Not affiliated with or endorsed by Ascaron or the rights holders of ANSTOSS.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Anstoss 3.1 $GITHUB_REF_NAME" \
+            --notes-file notes.md
