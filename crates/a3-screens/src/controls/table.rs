@@ -49,6 +49,9 @@ pub struct TableRow {
     pub ink: [u8; 3],
     /// The colour of the box at its start, if it has one.
     pub mark: Option<[u8; 3]>,
+    /// The row's own columns, where the page set them for this one row
+    /// (`FUN_006df44c` and `FUN_006df73a`); else the table's.
+    pub columns: Option<Vec<(u16, u16)>>,
 }
 
 impl TableState {
@@ -99,18 +102,32 @@ impl TableState {
 
     /// Each column's left edge, alignment and right edge.
     fn cells(&self) -> Vec<(i32, u16, i32)> {
-        let lefts: Vec<i32> = self.columns.iter().map(|&(x, _)| i32::from(x & PLACE)).collect();
-        self.columns
+        Self::cells_of(&self.columns, self.width)
+    }
+
+    /// The same for one row's own columns.
+    fn cells_of(columns: &[(u16, u16)], width: i32) -> Vec<(i32, u16, i32)> {
+        let lefts: Vec<i32> = columns.iter().map(|&(x, _)| i32::from(x & PLACE)).collect();
+        columns
             .iter()
             .enumerate()
             .map(|(i, &(x, w))| {
                 let left = lefts[i];
+                let align = x & (CENTRE | RIGHT);
                 let right = if w >= 1 {
                     left + i32::from(w)
                 } else {
-                    lefts.get(i + 1).copied().unwrap_or(self.width)
+                    // `FUN_006df779` gives a width-less column the next
+                    // one's left as its right edge; a right-aligned cell
+                    // ends 2 before it, as on the Champions League group
+                    // tables (`FUN_00447c15`'s columns at 0x879508).
+                    match lefts.get(i + 1) {
+                        Some(&n) if align == RIGHT => n - 2,
+                        Some(&n) => n,
+                        None => width,
+                    }
                 };
-                (left, x & (CENTRE | RIGHT), right)
+                (left, align, right)
             })
             .collect()
     }
@@ -134,7 +151,15 @@ impl TableState {
             }
             let [r, g, b] = row.ink;
             let ink = Rgba([r, g, b, 255]);
-            for (k, (text, &(left, align, right))) in row.text.split('\t').zip(&cells).enumerate()
+            let own;
+            let cells = match &row.columns {
+                Some(columns) => {
+                    own = Self::cells_of(columns, self.width);
+                    &own
+                }
+                None => &cells,
+            };
+            for (k, (text, &(left, align, right))) in row.text.split('\t').zip(cells).enumerate()
             {
                 if left >= self.width {
                     break;

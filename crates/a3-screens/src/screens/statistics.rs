@@ -177,6 +177,33 @@ const EUROPA_COLUMNS: [(u16, u16); 10] = [
     (365, 0),
 ];
 const SUPERCUP_HEADER: u16 = 0xa4e;
+/// The Champions League's group pages (`FUN_00447c15`): each group's
+/// header "Gruppe %i:" (text 0xc44) and its blanks stand in one column of
+/// their own (`FUN_006df44c`), its played pairs in the seven columns at
+/// 0x879508 and 0x879524, and its table in the eight at 0x8794c8 and
+/// 0x8794e8 — the place right, the club with its country's letters, and
+/// the figures.
+const GROUP_HEADER: u16 = 0xc44;
+const GROUP_COLUMNS: [(u16, u16); 1] = [(0, 0)];
+const MATCH_COLUMNS: [(u16, u16); 7] = [
+    (15, 0),
+    (165, 0),
+    (170, 0),
+    (R | 320, 0),
+    (342, 0),
+    (345, 0),
+    (380, 20),
+];
+const STANDINGS_COLUMNS: [(u16, u16); 8] = [
+    (R | 15, 15),
+    (35, 0),
+    (R | 175, 25),
+    (R | 210, 25),
+    (R | 240, 25),
+    (R | 285, 20),
+    (307, 0),
+    (310, 0),
+];
 /// The own club's rows red, the others black (COLORREF 0xff).
 const OWN_INK: [u8; 3] = [255, 0, 0];
 const INK: [u8; 3] = [0, 0, 0];
@@ -455,6 +482,12 @@ impl Statistics {
                     .map(|r| text(statistics::CUP_ROUND_NAMES[r as usize]))
                     .collect()
             }
+            // The Champions League: the rounds up to the stage it has
+            // reached, by the counter at 0xb5d164.
+            k if k == statistics::CL_STRIP => {
+                let n = statistics::cl_strip_count(records);
+                statistics::CL_ROUND_NAMES[..n].iter().map(|&r| text(r)).collect()
+            }
             // The Europa League: as many round names as are played, the
             // counter at 0xb5d166 one below the round being played.
             k if k == statistics::UEFA_STRIP => {
@@ -508,6 +541,7 @@ impl Statistics {
             {
                 self.cup_page(cx, view, true)
             }
+            Some(statistics::CL_PAGE) if self.category == TABLES => self.cl_page(cx, view),
             Some(statistics::UEFA_PAGE) if self.category == TABLES => self.uefa_page(cx, view),
             Some(statistics::SUPERCUP_PAGE) if self.category == TABLES => {
                 self.supercup_page(cx, view)
@@ -572,7 +606,7 @@ impl Statistics {
                     .ok()
                     .and_then(|k| MARK_COLOURS.get(k).copied());
                 let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
-                TableRow { text, ink, mark }
+                TableRow { text, ink, mark, columns: None }
             })
             .collect();
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
@@ -655,7 +689,7 @@ impl Statistics {
                 } else {
                     INK
                 };
-                TableRow { text, ink, mark: None }
+                TableRow { text, ink, mark: None, columns: None }
             })
             .collect();
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
@@ -684,6 +718,98 @@ impl Statistics {
         let pairings = statistics::uefa_pairings(records, self.chosen);
         let own = own_team(cx).map(|t| t.country());
         let rows = europa_rows(game, records, own, &pairings);
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table =
+                TableState {
+                    columns: EUROPA_COLUMNS.to_vec(),
+                    rows,
+                    width: ROW_WIDTH,
+                    centred: -1,
+                    scroll: self.scrolled,
+                };
+        }
+        true
+    }
+
+    /// The Champions League (`FUN_00448131`): the qualification's and the
+    /// knock-outs' pairs as on the other European pages; and a group
+    /// page as `FUN_00447c15` fills it — each group its header, its
+    /// played pairs, a blank, its table and a blank again. A table row
+    /// stands red by `FUN_00677428` and `FUN_004497b4`: a human club's,
+    /// or one of the own country.
+    fn cl_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let pages = &game.rules.statistics.categories[self.category];
+        let Some(page) = self.page.and_then(|e| pages.get(e)) else { return false };
+        set_header(view, dialog, cup_title(records, page), &[(0, 0)]);
+        let own = own_team(cx).map(|t| t.country());
+        let mut rows = match self.chosen {
+            0 | 4..=6 => europa_rows(game, records, own, &statistics::cl_pairings(records, self.chosen)),
+            _ => Vec::new(),
+        };
+        for group in statistics::cl_groups(records, self.chosen) {
+            let header = game.text(GROUP_HEADER).replace("%i", &(group.number + 1).to_string());
+            rows.push(TableRow {
+                text: header,
+                ink: INK,
+                mark: None,
+                columns: Some(GROUP_COLUMNS.to_vec()),
+            });
+            let played: Vec<_> =
+                group.pairings.iter().filter(|p| p.first.is_some()).copied().collect();
+            for mut row in europa_rows(game, records, own, &played) {
+                row.columns = Some(MATCH_COLUMNS.to_vec());
+                rows.push(row);
+            }
+            rows.push(TableRow {
+                text: String::new(),
+                ink: INK,
+                mark: None,
+                columns: Some(GROUP_COLUMNS.to_vec()),
+            });
+            for (i, line) in group.table.iter().enumerate() {
+                let name = if line.country == 0 {
+                    game.text(NO_CLUB).to_owned()
+                } else {
+                    game.club_name(Some(records), line.country, line.club)
+                };
+                let letters = game
+                    .world
+                    .nation_codes
+                    .get(usize::from(line.country))
+                    .cloned()
+                    .unwrap_or_default();
+                let text = format!(
+                    "{}.\t{name} ({letters})\t{}\t{}\t{}\t{}\t:{}\t",
+                    i + 1,
+                    line.games,
+                    line.points,
+                    line.goals_for - line.goals_against,
+                    line.goals_for,
+                    line.goals_against
+                );
+                let ink = if statistics::is_human(records, line.country, line.club)
+                    || own == Some(line.country)
+                {
+                    OWN_INK
+                } else {
+                    INK
+                };
+                rows.push(TableRow {
+                    text,
+                    ink,
+                    mark: None,
+                    columns: Some(STANDINGS_COLUMNS.to_vec()),
+                });
+            }
+            rows.push(TableRow {
+                text: String::new(),
+                ink: INK,
+                mark: None,
+                columns: Some(GROUP_COLUMNS.to_vec()),
+            });
+        }
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table =
                 TableState {
@@ -775,7 +901,7 @@ fn europa_rows(
             } else {
                 INK
             };
-            TableRow { text, ink, mark: None }
+            TableRow { text, ink, mark: None, columns: None }
         })
         .collect()
 }
@@ -807,7 +933,7 @@ impl Statistics {
                     row.goals_against
                 );
                 let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
-                TableRow { text, ink, mark: None }
+                TableRow { text, ink, mark: None, columns: None }
             })
             .collect();
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {

@@ -4708,4 +4708,65 @@ mod tests {
             "Paris Saint-Germain (FRA)\t-\tTottenham Hotspur (ENG)\t\t\t\t "
         );
     }
+
+    /// The archive's Champions League page on A.an3: the strip with its
+    /// three rounds so far, the qualification's 16 played pairs (two of
+    /// them after extra time, and the one against Eintracht Frankfurt in
+    /// red), and the groups' pages as `FUN_00447c15` fills them: each
+    /// group its header, its first matchday and its fresh table.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_statistics_show_the_champions_league() {
+        let game = game();
+        let open = "now click bar 14\nuntil dialog 18";
+        let cl = format!("{open}\nnow row 1284 15");
+        let Some(runner) = on_save(&game, "A", &cl) else { return };
+        let view = runner.host.view();
+        let dialog = &game.dialogs[&18];
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Champions League");
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Qualifikation");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 16);
+        assert_eq!(
+            table.rows[0].text,
+            "Glasgow Rangers (SCO)\t-\tManchester City (ENG)\t0\t:\t0\t1\t:\t0\t "
+        );
+        assert_eq!(
+            table.rows[12].text,
+            "Atromitos Athen (GRE)\t-\tMFK Karvina (CZE)\t0\t:\t2\t4\t:\t0\tn.V."
+        );
+        assert_eq!(
+            table.rows[3].text,
+            "Silkeborg IF (DEN)\t-\tEintracht Frankfurt (DEU)\t1\t:\t0\t1\t:\t3\t "
+        );
+        assert_eq!(table.rows[3].ink, [255, 0, 0]);
+        let groups = format!("{cl}\nnow click at 545 436");
+        let Some(runner) = on_save(&game, "A", &groups) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Gruppen 1-4");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 36);
+        assert_eq!(table.rows[0].text, "Gruppe 1:");
+        assert_eq!(
+            table.rows[1].text,
+            "FC Barcelona (ESP)\t-\tFC Basel (SUI)\t0\t:\t1\t "
+        );
+        assert_eq!(
+            table.rows[2].text,
+            "Bayer 04 Leverkusen (DEU)\t-\tAjax Amsterdam (NED)\t1\t:\t1\t "
+        );
+        assert_eq!(table.rows[2].ink, [255, 0, 0]);
+        assert_eq!(table.rows[4].text, "1.\tFC Basel (SUI)\t1\t3\t1\t1\t:0\t");
+        assert_eq!(
+            table.rows[5].text,
+            "2.\tBayer 04 Leverkusen (DEU)\t1\t1\t0\t1\t:1\t"
+        );
+        assert_eq!(table.rows[5].ink, [255, 0, 0]);
+        let second = format!("{groups}\nnow click at 545 436");
+        let Some(runner) = on_save(&game, "A", &second) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Gruppen 5-8");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "Gruppe 5:");
+    }
 }

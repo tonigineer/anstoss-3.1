@@ -636,3 +636,208 @@ pub fn supercup_pairing(records: &Records) -> Option<CupPairing> {
     let at = SUPERCUP_PAIRING;
     records.block(SUPERCUP_AT)?.get(at..at + PAIRING).map(pairing)
 }
+
+/// The Champions League's page (`FUN_00448131`) and its kind of strip
+/// (`FUN_004599d8`'s case 6).
+pub const CL_PAGE: i16 = 0xd;
+pub const CL_STRIP: i16 = 6;
+
+/// The CL rounds' names as the strip shows them (the table at
+/// `0x87ca40`); `0x87ca30` beside it counts the names by the stage the
+/// competition has reached.
+pub const CL_ROUND_NAMES: [u16; 7] = [2118, 4800, 4801, 4802, 2122, 2123, 2124];
+const CL_STAGE_NAMES: [usize; 8] = [1, 3, 4, 4, 4, 5, 6, 7];
+
+/// Where the CL keeps its pairs (the object at `0x8e91e0`; its member at
+/// 0x20, the decompile's pairing base, starts the block's data): the
+/// groups' seeds — round 1's eight groups at 0x922, round 2's four at
+/// 0xaa2, four 0xc-byte slots 0x30 apart —, the five ends of the
+/// pairing runs (0xf28: the qualification's, round 1's, round 2's, the
+/// semifinals', the final's), the win points home and away, and the goal
+/// bonus's flag.
+const CL_AT: &str = "0x8e91e0";
+const CL_PAIRINGS: usize = 0x0;
+const CL_SEEDS: [usize; 2] = [0x922, 0xaa2];
+const CL_RUNS: usize = 0xf28;
+const CL_WIN: usize = 0xf44;
+const CL_BONUS: usize = 0xf48;
+
+/// How many names the CL's strip has: as many as the stage reached.
+pub fn cl_strip_count(records: &Records) -> usize {
+    let stage = usize::try_from(records.globals.europe_stage()).unwrap_or(0).min(7);
+    CL_STAGE_NAMES[stage]
+}
+
+/// Where an entry's pairings start (`FUN_0041e4f4`): the qualification
+/// before round 1, the groups and their second round between the runs'
+/// ends, the quarter-finals, semifinals and final behind them.
+fn cl_start(cl: &[u8], i: usize) -> usize {
+    let end = |k: usize| {
+        usize::from(cl.get(CL_RUNS + 2 * k..CL_RUNS + 2 * k + 2).map_or(0, |b| u16::from_le_bytes([b[0], b[1]])))
+    };
+    match i {
+        0 => 0,
+        1 => end(0),
+        2 | 4 => end(1),
+        5 => end(2),
+        6 => end(3),
+        3 | 7 => end(4),
+        _ => end(4) + 1,
+    }
+}
+
+/// The pairings of the CL page's strip entry (`FUN_00448131`): the
+/// qualification and the knock-outs as ranges over the pairings, the
+/// knock-out rounds one further than the strip names them — the original
+/// notes that step in its own copy of the strip's position, but the
+/// replica draws the step from the strip as it stands.
+pub fn cl_pairings(records: &Records, entry: usize) -> Vec<CupPairing> {
+    let Some(cl) = records.block(CL_AT) else { return Vec::new() };
+    let (from, to) = match entry {
+        0 => (cl_start(cl, 0), cl_start(cl, 1)),
+        e @ 4..=6 => (cl_start(cl, e + 1), cl_start(cl, e + 2)),
+        _ => return Vec::new(),
+    };
+    (from..to)
+        .filter_map(|q| cl.get(CL_PAIRINGS + q * PAIRING..CL_PAIRINGS + (q + 1) * PAIRING))
+        .map(pairing)
+        .collect()
+}
+
+/// One group as the page draws it: its number, the pairings played on
+/// its six days, and its table.
+#[derive(Clone, Debug)]
+pub struct ClGroup {
+    pub number: usize,
+    pub pairings: Vec<CupPairing>,
+    pub table: Vec<ClRow>,
+}
+
+/// A row of a group's table: the club and the figures the page shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClRow {
+    pub country: u8,
+    pub club: i16,
+    pub games: i16,
+    pub points: i16,
+    pub goals_for: i16,
+    pub goals_against: i16,
+}
+
+/// The groups the strip entry stands on (`FUN_00448131` with
+/// `FUN_00447c15`): round 1's groups 1-4 or 5-8, or the second round's.
+/// A group's twelve pairings stand in six days of two, the day's stride
+/// being the round's group count doubled.
+pub fn cl_groups(records: &Records, entry: usize) -> Vec<ClGroup> {
+    let Some(cl) = records.block(CL_AT) else { return Vec::new() };
+    let (round, first) = match entry {
+        1 => (0, 0),
+        2 => (0, 4),
+        3 => (1, 0),
+        _ => return Vec::new(),
+    };
+    let total = if round == 0 { 8 } else { 4 };
+    let start = cl_start(cl, if round == 0 { 1 } else { 2 });
+    let tables = cl_table(cl, round);
+    (first..first + 4)
+        .map(|g| ClGroup {
+            number: g,
+            pairings: (0..6)
+                .flat_map(|d| [0, 1].map(|k| start + g * 2 + d * total * 2 + k))
+                .filter_map(|q| {
+                    cl.get(CL_PAIRINGS + q * PAIRING..CL_PAIRINGS + (q + 1) * PAIRING)
+                })
+                .map(pairing)
+                .collect(),
+            table: tables[g].clone(),
+        })
+        .collect()
+}
+
+/// The groups' tables as `FUN_0041d6c1`, `FUN_0041d7f8` and `FUN_0041d931`
+/// build them and the page never stores them: the seeds' four clubs each,
+/// the played games of the round's pairing run added up, and the order by
+/// points, goal difference, goals and games (`FUN_0072bc49`, kept by the
+/// game's stable bubble sort).
+fn cl_table(cl: &[u8], round: usize) -> Vec<Vec<ClRow>> {
+    let total = if round == 0 { 8 } else { 4 };
+    let start = cl_start(cl, if round == 0 { 1 } else { 2 });
+    let days = if round == 0 { 0x60 } else { 0x30 };
+    let win = |away: bool| {
+        i16::try_from(
+            cl.get(CL_WIN + if away { 2 } else { 0 }..CL_WIN + if away { 4 } else { 2 })
+                .map_or(0, |b| u16::from_le_bytes([b[0], b[1]])),
+        )
+        .unwrap_or(3)
+    };
+    let bonus = cl
+        .get(CL_BONUS..CL_BONUS + 4)
+        .is_some_and(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) & 0x80 != 0);
+    (0..total)
+        .map(|g| {
+            let mut rows: Vec<ClRow> = (0..4)
+                .map(|k| {
+                    let at = CL_SEEDS[round] + g * 0x30 + k * 0xc;
+                    ClRow {
+                        country: cl.get(at).copied().unwrap_or(0),
+                        club: cl
+                            .get(at + 2..at + 4)
+                            .map_or(0, |b| i16::from_le_bytes([b[0], b[1]])),
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            for q in start..start + days {
+                let Some(p) = cl.get(CL_PAIRINGS + q * PAIRING..CL_PAIRINGS + (q + 1) * PAIRING)
+                else {
+                    continue;
+                };
+                if p[0xc] & 0x20 == 0 {
+                    continue;
+                }
+                let team = |c: usize| i16::from_le_bytes([p[c + 2], p[c + 3]]);
+                let (a, b) = (i16::from(p[8]), i16::from(p[9]));
+                for row in rows.iter_mut() {
+                    let home = p[0] == row.country && team(0) == row.club;
+                    let away = !home && p[4] == row.country && team(4) == row.club;
+                    if !home && !away {
+                        continue;
+                    }
+                    let (own, other) = if home { (a, b) } else { (b, a) };
+                    row.games += 1;
+                    row.goals_for += own;
+                    row.goals_against += other;
+                    row.points += if own > other {
+                        win(!home)
+                    } else if own == other {
+                        1
+                    } else {
+                        0
+                    };
+                    if bonus && a + b > 3 {
+                        row.points += 1;
+                    }
+                }
+            }
+            rows.sort_by(|x, y| {
+                let key = |r: &ClRow| {
+                    (i32::from(r.points), i32::from(r.goals_for - r.goals_against), i32::from(r.goals_for), i32::from(r.games))
+                };
+                key(y).cmp(&key(x))
+            });
+            rows
+        })
+        .collect()
+}
+
+/// Whether the club is one of the game's human ones (`FUN_00677428`):
+/// a national team, number 200, among the four at `0xb5d17a`, other
+/// clubs among those at `0xb5cbe2` — up to `0xb5cc02` of them.
+pub fn is_human(records: &Records, country: u8, club: i16) -> bool {
+    let at = if club == 200 { 0xb5d17a } else { 0xb5cbe2 };
+    let count = if club == 200 { 4 } else { usize::from(records.globals.get::<u16>(0xb5cc02)) };
+    (0..count).any(|k| {
+        records.globals.get::<u8>(at + 8 * k) == country
+            && records.globals.get::<i16>(at + 8 * k + 2) == club
+    })
+}
