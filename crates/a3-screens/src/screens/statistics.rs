@@ -184,6 +184,8 @@ const CLUB_RANKING_SHOWN: usize = 25;
 const NEWSPAPER_HEADER: u16 = 4709;
 const NEWSPAPER_COLUMNS: [(u16, u16); 2] = [(0, 0), (0x37, 0)];
 const SHORT_DATE: u16 = 1997;
+/// The Serien's header, one column.
+const SERIES_HEADER: u16 = 2928;
 /// The Letzter Spieltag's header and rows (`FUN_0045491f` with 0x87a1d8,
 /// and 0x87a1a0): the pairing, its result and half time, its gate.
 const LAST_MATCHDAY_HEADER: u16 = 3530;
@@ -1671,6 +1673,7 @@ impl Statistics {
             Some(statistics::CLUB_RANKING_PAGE) if self.category == AKTUELLES => {
                 self.club_ranking_page(cx, view)
             }
+            Some(statistics::SERIES_PAGE) if self.category == AKTUELLES => self.series_page(cx, view),
             Some(statistics::LAST_MATCHDAY_PAGE) if self.category == AKTUELLES => {
                 self.last_matchday_page(cx, view)
             }
@@ -3006,6 +3009,43 @@ impl Statistics {
             *table = TableState {
                 columns: CLUB_RANKING_ROW_COLUMNS.to_vec(),
                 centred: CLUB_RANKING_SHOWN as i32,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Serien (`FUN_0044ffb3`): a sentence for each of the club's runs
+    /// that has reached its mark, and its biggest wins and defeats, black,
+    /// in no columns — the page sets only a tab stop at 140 its texts
+    /// never use (`FUN_006df3e7`); from the top of the window.
+    fn series_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(SERIES_HEADER).to_owned(), &[(0, 0)]);
+        let printf = super::finances::printf;
+        let rows: Vec<TableRow> = statistics::runs(records, team)
+            .iter()
+            .map(|run| {
+                let text = match *run {
+                    statistics::Run::Count(id, n) => printf(game.text(id), &[&n]),
+                    statistics::Run::Record(id, club, [own, other]) => {
+                        let name = game.club_name(Some(records), team.country(), club);
+                        printf(game.text(id), &[&name, &own, &other])
+                    }
+                };
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

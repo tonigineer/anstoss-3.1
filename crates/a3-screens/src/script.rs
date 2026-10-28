@@ -5056,6 +5056,30 @@ mod tests {
         assert_eq!(rows.len(), 9);
     }
 
+    /// The Aktuelles category's Serien states the club's runs that reached
+    /// their marks and its biggest wins and defeats that scored.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_states_the_clubs_runs() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 3\nnow row 1284 1";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Aktuelles Mannschaft");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        // The 0:2 at Wolfsburg scored nothing, so it stands out of the list.
+        assert_eq!(
+            texts,
+            [
+                "Höchste Heimniederlage gegen: Borussia Dortmund 1:2",
+                "Höchster Auswärtssieg bei: Hamburger SV 3:0"
+            ]
+        );
+        assert!(table.columns.is_empty());
+    }
+
     /// The Aktuelles category's Letzter Spieltag shows the league's last
     /// matchday: places before it, results, half time and gates.
     #[test]

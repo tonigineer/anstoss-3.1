@@ -1023,10 +1023,72 @@ pub const REFEREES_PAGE: i16 = 0x14;
 /// The Zeitungsmeldungen under 4709 (`FUN_004571ee`) and the europ.
 /// Vereinsrangliste under 4717 (`FUN_00457b04`).
 pub const NEWSPAPER_PAGE: i16 = 0x12;
+/// The Serien under 2928 (`FUN_0044ffb3`).
+pub const SERIES_PAGE: i16 = 1;
 /// The Letzter Spieltag under 3530 (`FUN_0045491f`).
 pub const LAST_MATCHDAY_PAGE: i16 = 6;
 /// The Tab. sonstige Länder under 4711 (`FUN_00457449`).
 pub const OTHER_TABLES_PAGE: i16 = 0x13;
+
+/// The human club's runs (`FUN_00632de8`: 0x56 bytes at its extra block's
+/// +0xd88), as the Serien states them (`FUN_0044ffb3`): each run that has
+/// reached its mark, by its text and its count, then the season's
+/// biggest home and away wins and defeats where they scored, by text,
+/// opponent and the two scores.
+pub enum Run {
+    Count(u16, i32),
+    Record(u16, i16, [i16; 2]),
+}
+
+pub fn runs(records: &Records, team: &Team) -> Vec<Run> {
+    const RUNS: usize = 0xd88;
+    const SIZE: usize = 0x56;
+    let Some(extra) = usize::from(team.human()).checked_sub(1).and_then(|s| records.extras.get(s))
+    else {
+        return Vec::new();
+    };
+    let b: [u8; SIZE] = extra.get(RUNS);
+    let byte = |at: usize| i32::from(b[at]);
+    let word = |at: usize| i32::from(i16::from_le_bytes([b[at], b[at + 1]]));
+    // Field, its mark, the fields it must differ from, its text.
+    let counts: [(i32, i32, &[i32], u16); 23] = [
+        (byte(0), 3, &[], 2929),
+        (byte(1), 3, &[], 2930),
+        (byte(2), 3, &[], 2931),
+        (byte(4), 5, &[byte(0)], 2932),
+        (byte(3), 5, &[byte(1), byte(2)], 2933),
+        (byte(5), 3, &[], 2934),
+        (byte(6), 3, &[], 2935),
+        (byte(7), 25, &[], 2936),
+        (byte(8), 3, &[], 2937),
+        (word(0xa), 200, &[], 2938),
+        (word(0xc), 360, &[], 2939),
+        (word(0xe), 300, &[], 2940),
+        (word(0x10), 180, &[], 2941),
+        (byte(0x12), 11, &[], 2942),
+        (byte(0x13), 5, &[], 2943),
+        (byte(0x14), 5, &[byte(0x13)], 2944),
+        (byte(0x15), 5, &[], 2945),
+        (byte(0x16), 5, &[], 2946),
+        (word(0x18), 1500, &[], 2947),
+        (byte(0x22), 4, &[], 2948),
+        (byte(0x23), 5, &[], 2949),
+        (byte(0x24), 5, &[], 2950),
+        (byte(0x25), 10, &[], 2951),
+    ];
+    let mut runs: Vec<Run> = counts
+        .iter()
+        .filter(|(value, mark, unlike, _)| value >= mark && !unlike.contains(value))
+        .map(|&(value, _, _, text)| Run::Count(text, value))
+        .collect();
+    for (at, text) in [(0x2a, 2952), (0x34, 2953), (0x3e, 2954), (0x48, 2955)] {
+        let scores = [word(at) as i16, word(at + 2) as i16];
+        if scores[0] != 0 {
+            runs.push(Run::Record(text, word(at + 4) as i16, scores));
+        }
+    }
+    runs
+}
 
 /// A club's gate at its last home game (`FUN_0063f021`): of the gates its
 /// record keeps, the one its count of home games names, none past 23.
