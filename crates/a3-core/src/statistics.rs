@@ -312,6 +312,31 @@ pub const SQUAD_MATCHES_PAGE: i16 = 4;
 pub const SQUAD_FAIRNESS_PAGE: i16 = 6;
 pub const SQUAD_ASSISTS_PAGE: i16 = 0xc;
 pub const SQUAD_YELLOW_PAGE: i16 = 0xe;
+/// The Spielereigenschaften under 4739 (`FUN_00471109`).
+pub const SQUAD_TRAITS_PAGE: i16 = 0x1d;
+
+/// The own squad by the names its players go by (`FUN_00471109`): the
+/// same exchange sort, a place swapping with the first of the rest whose
+/// name `strcmp` puts before its own, byte by byte in the game's code
+/// page.
+pub fn squad_by_name(records: &Records, team: &Team) -> Vec<u16> {
+    use a3_files::bitmap_font::to_cp1252;
+    let ids = team.players();
+    let name = |id: u16| -> Vec<u8> {
+        let name = records.known_as(id).unwrap_or_default();
+        name.chars().map(|c| to_cp1252(c).unwrap_or(b'?')).collect()
+    };
+    let names: Vec<Vec<u8>> = ids.iter().map(|&id| name(id)).collect();
+    let mut order: Vec<usize> = (0..ids.len()).collect();
+    for i in 0..order.len() {
+        for j in i + 1..order.len() {
+            if names[order[j]] < names[order[i]] {
+                order.swap(i, j);
+            }
+        }
+    }
+    order.iter().map(|&k| ids[k]).collect()
+}
 
 /// A player's D-Form (`FUN_006ff257`): the mean of his weekly forms this
 /// season, ten times over and cut to a whole number — the sum at R+0x1e0

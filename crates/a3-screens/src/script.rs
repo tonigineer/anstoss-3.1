@@ -4892,6 +4892,27 @@ mod tests {
         assert!(table.rows.iter().all(|r| r.ink == [0, 0, 0]));
     }
 
+    /// The Mannschaft category's Spielereigenschaften names the squad's
+    /// traits, the players by name.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_names_the_squads_traits() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 18";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Name\\tPos\\tStk\\tSpielereigenschaften"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 26);
+        assert_eq!(table.rows[0].text, "Alex Král\tOM\t9\tAllrounder");
+        assert_eq!(table.rows[2].text, "András Schäfer\tOM\t9\tEgoist");
+        assert_eq!(table.rows[3].text, "Carl Klaus\tTO\t6\t");
+    }
+
     /// The Mannschaft category's Einsätze counts the squad's league
     /// matches and weighs its form this season against today's.
     #[test]

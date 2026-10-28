@@ -178,6 +178,17 @@ fn scorer_points(p: &Player) -> i32 {
     i32::from(p.goals()[0]) + i32::from(p.assists())
 }
 
+/// The Spielereigenschaften's header and rows (`FUN_00471109` with
+/// 0x87e6d0, and 0x87e6f0): name, position, strength and traits.
+const TRAITS_HEADER: u16 = 4739;
+const TRAITS_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(3, 0), (C | 0x8c, 0x1e), (C | 0xaa, 0x1e), (0xd2, 0)];
+const TRAITS_ROW_COLUMNS: [(u16, u16); 4] = [(0, 0), (C | 0x8c, 0x1e), (R | 0xaa, 0x19), (0xd2, 0)];
+/// The most traits a row names, and the bit of R+0x271 that hides a
+/// player's strength.
+const TRAITS_SHOWN: usize = 4;
+const STRENGTH_HIDDEN: u8 = 0x40;
+
 /// The Mannschaft pages built, by their codes, with their blocks:
 /// - the Torjägerliste (`FUN_00469f05(0)`, 0x87e1d8 and 0x87e160): all
 ///   by league goals, with cup and European goals;
@@ -1016,6 +1027,9 @@ impl Statistics {
             Some(code) if self.category == MANNSCHAFT && squad_page(code).is_some() => {
                 self.squad_stats_page(cx, view, code)
             }
+            Some(statistics::SQUAD_TRAITS_PAGE) if self.category == MANNSCHAFT => {
+                self.traits_page(cx, view)
+            }
             Some(statistics::FAIRNESS_PAGE) if self.category == LIGA => {
                 self.fairness_page(cx, view)
             }
@@ -1398,6 +1412,59 @@ impl Statistics {
             *table = TableState {
                 columns: page.columns.to_vec(),
                 centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Spielereigenschaften (`FUN_00471109`): the squad by name,
+    /// "%s\t%s\t%s\t%s" — the name, the abbreviation of his position's
+    /// kind (`FUN_00731356`), his strength or "?" where it is hidden
+    /// (`FUN_006ff294`), and the first four of his traits by bit of
+    /// R+0x1c8, joined by ", " — black, the window handed the squad's
+    /// size.
+    fn traits_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(TRAITS_HEADER).to_owned(), &TRAITS_HEADER_COLUMNS);
+        let words = &game.rules.words;
+        let rows: Vec<TableRow> = statistics::squad_by_name(records, team)
+            .iter()
+            .filter_map(|&id| {
+                let p = records.player(id)?;
+                let name = records.known_as(id).unwrap_or_default();
+                let kind = p.positions()[0];
+                let abbreviation =
+                    game.rules.pitch.abbreviations.get(usize::from(kind)).copied().unwrap_or(0);
+                let strength = if p.picks() & STRENGTH_HIDDEN != 0 {
+                    "?".to_owned()
+                } else {
+                    p.strength().to_string()
+                };
+                let traits = p.traits()[0];
+                let named: Vec<&str> = (0..16)
+                    .filter(|b| traits & 1 << b != 0)
+                    .take(TRAITS_SHOWN)
+                    .map(|b| game.text(words.traits[0].get(b).copied().unwrap_or(0)))
+                    .collect();
+                let text = format!(
+                    "{name}\t{}\t{strength}\t{}",
+                    game.text(abbreviation as u16),
+                    named.join(", ")
+                );
+                Some(TableRow { text, ink: INK, mark: None, columns: None })
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: TRAITS_ROW_COLUMNS.to_vec(),
+                centred: team.players().len() as i32,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,
