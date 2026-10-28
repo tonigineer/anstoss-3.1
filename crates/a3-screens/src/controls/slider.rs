@@ -1,7 +1,8 @@
 //! Sliders, the game's horizontal scrollbars (`CMyScrBar`): an arrow at
-//! each end and a handle that runs between them, twenty pixels of a long
-//! bar in the slider's colour — its first and last three pixels, and the
-//! middle between (`FUN_007ae2c4`).
+//! each end and a handle that runs between them. The usual handle is twenty
+//! pixels of a long bar in the slider's colour — its first and last three
+//! pixels, and the middle between (`FUN_007ae2c4`); a handle of a length a
+//! screen set is simply that many pixels from the bar's start.
 
 use bevy_math::Rect;
 use image::{RgbaImage, imageops};
@@ -108,11 +109,22 @@ pub(crate) fn draw(value: &Value, frame: &mut RgbaImage, paint: &Paint) {
     let name = HANDLES[usize::from(style).min(HANDLES.len() - 1)];
     if let Some(bar) = paint.widget(name) {
         let at = handle(paint.control, value);
-        paste(frame, &cut(bar, at.width() as u32), at.min);
+        let width = at.width() as u32;
+        // A bar whose length the screen set keeps its long picture and shows
+        // a window of it: the paint blits the bar from its own start for the
+        // handle's width, so no end cap appears there (`FUN_007ad236` with
+        // the control's image in its 0xbc).
+        let handle = if value.handle.is_some() {
+            imageops::crop_imm(bar, 0, 0, width, bar.height()).to_image()
+        } else {
+            cut(bar, width)
+        };
+        paste(frame, &handle, at.min);
     }
 }
 
-/// A handle cut from its long bar.
+/// A twenty-pixel handle cut from its long bar, with the bar's right end
+/// moved up to it (`FUN_007ae2c4`).
 pub(crate) fn cut(bar: &RgbaImage, width: u32) -> RgbaImage {
     let height = bar.height();
     let mut handle = RgbaImage::new(width, height);
