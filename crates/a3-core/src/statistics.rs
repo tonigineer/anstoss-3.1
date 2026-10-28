@@ -331,6 +331,8 @@ pub const SQUAD_FIXTURES_PAGE: i16 = 0x19;
 pub const SQUAD_GRADES_PAGE: i16 = 0xf;
 /// The Wer kam? Wer ging? under 2628 (`FUN_0046ad89`).
 pub const SQUAD_TRANSFERS_PAGE: i16 = 8;
+/// The Trefferverteilung under 2415 (`FUN_004704ea`).
+pub const SQUAD_GOAL_MINUTES_PAGE: i16 = 0xb;
 /// The Spielertrends under 2421 (`FUN_0046dbe2`).
 pub const SQUAD_TRENDS_PAGE: i16 = 7;
 /// The Angstgegner and the Lieblingsgegner under 3040 and 3039
@@ -492,6 +494,23 @@ pub fn transfers(records: &Records, team: &Team) -> Vec<Transfer> {
             }
         })
         .collect()
+}
+
+/// The club's goals and the goals against it by the minute they fell
+/// (`FUN_00632068` at the human club's extra +0x914, `FUN_00632133` at
+/// +0x9dc): a hundred minutes of two bytes, in home and in away matches.
+pub fn goal_minutes(records: &Records, team: &Team) -> [[[u8; 2]; 100]; 2] {
+    const OWN: usize = 0x914;
+    const AGAINST: usize = 0x9dc;
+    let mut minutes = [[[0; 2]; 100]; 2];
+    let Some(slot) = usize::from(team.human()).checked_sub(1) else { return minutes };
+    let Some(extra) = records.extras.get(slot) else { return minutes };
+    for (side, at) in [OWN, AGAINST].into_iter().enumerate() {
+        for (m, minute) in minutes[side].iter_mut().enumerate() {
+            *minute = extra.get(at + 2 * m);
+        }
+    }
+    minutes
 }
 
 /// The club's league record against one club of its country

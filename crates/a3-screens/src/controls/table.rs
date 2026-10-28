@@ -73,13 +73,27 @@ pub struct TableState {
 
 /// The goal pages' bars (`CStatGFXWnd`): the graph window's rows hold a
 /// length and a colour instead of cells, drawn semi-transparent from the
-/// left edge under a label.
+/// left edge under a label. Or, with shapes, the same window as a canvas
+/// a page draws on itself (`FUN_0071f791`).
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     /// One per row: the bar's length in pixels (`+0x334`, capped to the
     /// window's width less sixteen), green where the value is negative
     /// (the colour at `+500` is then 0xff00).
     pub bars: Vec<(i32, bool)>,
+    /// The canvas's drawing, in its order; the bars are left out then.
+    pub shapes: Vec<Shape>,
+}
+
+/// What a page draws on the canvas, opaque in its colour: a box
+/// (`FUN_0071f9d8`, nothing where it has no width or height), a line from
+/// the pen's place (`FUN_0071f8df`, `FUN_0071f904`) and a text in the
+/// plain font (`FUN_0071fa93`).
+#[derive(Clone, Debug)]
+pub enum Shape {
+    Fill { at: (i32, i32), size: (i32, i32), colour: [u8; 3] },
+    Line { from: (i32, i32), to: (i32, i32), colour: [u8; 3] },
+    Text { at: (i32, i32), text: String, colour: [u8; 3] },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -222,7 +236,11 @@ impl TableState {
         // It paints on a window of its own, and so not past its edges.
         let mut area = imageops::crop_imm(frame, x0 as u32, y0 as u32, width, height).to_image();
         if let Some(graph) = &self.graph {
-            self.graph_bars(&mut area, height as i32, graph, font);
+            if graph.shapes.is_empty() {
+                self.graph_bars(&mut area, height as i32, graph, font);
+            } else {
+                Self::canvas(&mut area, &graph.shapes, font);
+            }
             imageops::replace(frame, &area, i64::from(x0), i64::from(y0));
             return;
         }
@@ -295,6 +313,29 @@ impl TableState {
     /// the last bar's bottom, to the window's right edge and its
     /// arrowhead. The tick marks' places are lost in the decompile; they
     /// fall outside the window, so nothing of them is ever seen.
+    fn canvas(area: &mut RgbaImage, shapes: &[Shape], font: &BitmapFont) {
+        let ink = |[r, g, b]: [u8; 3]| Rgba([r, g, b, 255]);
+        for shape in shapes {
+            match shape {
+                Shape::Fill { at: (x, y), size: (w, h), colour } => {
+                    if *w > 0 && *h > 0 {
+                        fill(area, *x, *y, *w, *h, ink(*colour));
+                    }
+                }
+                // The canvas's lines end on their last pixel, where the
+                // graph's own axes stop short of it (seen on the
+                // Trefferverteilung's ticks and axes).
+                Shape::Line { from, to, colour } => {
+                    line(area, *from, *to, ink(*colour));
+                    fill(area, to.0, to.1, 1, 1, ink(*colour));
+                }
+                Shape::Text { at: (x, y), text, colour } => {
+                    font.draw(area, *x, *y, text, ink(*colour), false);
+                }
+            }
+        }
+    }
+
     fn graph_bars(&self, area: &mut RgbaImage, height: i32, graph: &Graph, font: &BitmapFont) {
         let black = Rgba([0, 0, 0, 255]);
         let (first, pitch) = self.layout(height);

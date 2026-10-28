@@ -29,7 +29,7 @@ use super::hub::{self, STATISTICS_SYMBOL};
 use super::squad::own_team;
 use super::{Args, Cx, Outcome, Reply, Screen, control, mark_inert, set};
 use crate::controls::slider;
-use crate::controls::table::{Graph, TableRow, TableState};
+use crate::controls::table::{Graph, Shape, TableRow, TableState};
 use crate::game::Game;
 use crate::pointer::Target;
 use crate::view::View;
@@ -314,6 +314,21 @@ const NO_TRANSFER: u16 = 3690;
 const TRANSFER_INCOME: [u8; 2] = [2, 3];
 /// The most rows shown, the newest.
 const TRANSFERS_SHOWN: usize = 90;
+/// The Trefferverteilung's header, one column (`FUN_004704ea` with
+/// 0x8ec1c8), and its canvas's texts: "Min.", "Mannschaft", "Gegner",
+/// the goals and goals against by half, "Heimtore", "Auswärtstore".
+const GOAL_MINUTES_HEADER: u16 = 2415;
+const MINUTES_TEXT: u16 = 3057;
+const TEAM_TEXT: u16 = 3058;
+const OPPONENTS_TEXT: u16 = 3059;
+const HALF_TEXTS: [u16; 4] = [3060, 3061, 3062, 3063];
+const HOME_GOALS_TEXT: u16 = 3064;
+const AWAY_GOALS_TEXT: u16 = 3065;
+/// Home goals red, away goals blue (COLORREF 0xfa and 0xff0000).
+const HOME_GOALS_INK: [u8; 3] = [0xfa, 0, 0];
+const AWAY_GOALS_INK: [u8; 3] = [0, 0, 0xff];
+/// The minutes that count to the first half.
+const FIRST_HALF_MINUTES: usize = 45;
 /// The Angstgegner's and Lieblingsgegner's header and rows (0x87e530 and
 /// 0x87e4f0 for both): club, games, points, difference, goals and the
 /// goals against behind a colon; the sections at home, away and in all
@@ -1250,6 +1265,9 @@ impl Statistics {
             {
                 self.opponents_page(cx, view, code == statistics::SQUAD_FOES_PAGE)
             }
+            Some(statistics::SQUAD_GOAL_MINUTES_PAGE) if self.category == MANNSCHAFT => {
+                self.goal_minutes_page(cx, view)
+            }
             Some(statistics::SQUAD_TRENDS_PAGE) if self.category == MANNSCHAFT => {
                 self.trends_page(cx, view)
             }
@@ -1464,7 +1482,7 @@ impl Statistics {
                 centred: -1,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars }),
+                graph: Some(Graph { bars, shapes: Vec::new() }),
             };
         }
         true
@@ -1655,6 +1673,85 @@ impl Statistics {
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Trefferverteilung (`FUN_004704ea`): no table, but the graph
+    /// window as a canvas — for the club's goals over the upper axis and
+    /// the goals against over the lower (half the height below its top
+    /// twenty pixels, and twenty above its bottom), a bar two pixels wide
+    /// for each of a hundred minutes, ten pixels a goal, the home goals red
+    /// and the away goals blue on top; each axis from 20 to 440 with a
+    /// tick and its minute every ten ("1" for the first), "Min." at its
+    /// end, its caption 119 above; and at the top the goals of either
+    /// half, minutes 1 to 45 and the rest, and the two colours' key.
+    fn goal_minutes_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(GOAL_MINUTES_HEADER).to_owned(), &[(0, 0)]);
+        let bottom = dialog.controls[c].rect.height() as i32;
+        let axes = [(bottom - 20) / 2 + 20, bottom - 20];
+        let minutes = statistics::goal_minutes(records, team);
+        let mut shapes = Vec::new();
+        let mut halves = [[0u16; 2]; 2];
+        for m in 0..minutes[0].len() {
+            let x = 20 + 4 * m as i32;
+            for (side, &y) in axes.iter().enumerate() {
+                let [home, away] = minutes[side][m].map(i32::from);
+                if home != 0 {
+                    let colour = HOME_GOALS_INK;
+                    shapes.push(Shape::Fill { at: (x, y - home * 10), size: (2, home * 10), colour });
+                }
+                if away != 0 {
+                    let at = (x, y - (home + away) * 10);
+                    shapes.push(Shape::Fill { at, size: (2, away * 10), colour: AWAY_GOALS_INK });
+                }
+                halves[side][usize::from(m >= FIRST_HALF_MINUTES)] += (home + away) as u16;
+            }
+        }
+        for &y in &axes {
+            shapes.push(Shape::Line { from: (20, y), to: (440, y), colour: INK });
+        }
+        let text = |at: (i32, i32), text: String| Shape::Text { at, text, colour: INK };
+        for m in (0..=100).step_by(10) {
+            let x = 4 * m + 20;
+            for &y in &axes {
+                shapes.push(Shape::Line { from: (x, y + 1), to: (x, y + 8), colour: INK });
+            }
+            let label = if m == 0 { "1".to_owned() } else { m.to_string() };
+            for &y in &axes {
+                shapes.push(text((x + 3, y + 1), label.clone()));
+            }
+        }
+        for &y in &axes {
+            shapes.push(text((447, y + 1), game.text(MINUTES_TEXT).to_owned()));
+        }
+        shapes.push(text((171, axes[0] - 119), game.text(TEAM_TEXT).to_owned()));
+        shapes.push(text((181, axes[1] - 119), game.text(OPPONENTS_TEXT).to_owned()));
+        let goals = [halves[0][0], halves[0][1], halves[1][0], halves[1][1]];
+        for (k, (&id, n)) in HALF_TEXTS.iter().zip(goals).enumerate() {
+            let at = (if k < 2 { 1 } else { 151 }, if k % 2 == 0 { 21 } else { 41 });
+            shapes.push(text(at, format!("{}{n}", game.text(id))));
+        }
+        for (y, id, colour) in
+            [(21, HOME_GOALS_TEXT, HOME_GOALS_INK), (41, AWAY_GOALS_TEXT, AWAY_GOALS_INK)]
+        {
+            shapes.push(text((351, y), game.text(id).to_owned()));
+            shapes.push(Shape::Fill { at: (342, y), size: (5, 12), colour });
+        }
+        if let Some(table) = view.table_mut(c) {
+            *table = TableState {
+                columns: Vec::new(),
+                centred: -1,
+                rows: Vec::new(),
+                width: ROW_WIDTH,
+                scroll: 0,
+                cross: None,
+                graph: Some(Graph { bars: Vec::new(), shapes }),
             };
         }
         true

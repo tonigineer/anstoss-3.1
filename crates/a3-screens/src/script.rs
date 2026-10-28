@@ -4962,6 +4962,40 @@ mod tests {
         assert_eq!(table.rows[12].text, "13.\tLeopold Querfeld\t0\t0\t0\t0\t1\t0");
     }
 
+    /// The Mannschaft category's Trefferverteilung draws the club's goals
+    /// and those against it minute by minute, and counts them by half.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_draws_the_goals_by_minute() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 17";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Trefferverteilung");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        let texts: Vec<&str> = shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        for half in [
+            "Tore 1.Halbzeit :2",
+            "Tore 2.Halbzeit :2",
+            "Gegentore 1.Halbzeit :3",
+            "Gegentore 2.Halbzeit :1",
+        ] {
+            assert!(texts.contains(&half), "{half}");
+        }
+        // Four goals each way, a bar each, and the key's two boxes.
+        let fills = shapes.iter().filter(|s| matches!(s, Shape::Fill { .. })).count();
+        assert_eq!(fills, 4 + 4 + 2);
+    }
+
     /// The Mannschaft category's Angstgegner and Lieblingsgegner name the
     /// clubs the own club lost and won against, at home, away and in all.
     #[test]
