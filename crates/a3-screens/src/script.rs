@@ -4913,6 +4913,27 @@ mod tests {
         assert_eq!(table.rows[4].text, "5.\tMarin Ljubicic\t0\t3\t0.0\t0\t0\t0\t0\t0\t0");
     }
 
+    /// The Mannschaft category's Einsätze ewig lists the club's most
+    /// fielded players under its manager as the club keeps them.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_clubs_all_time_appearances() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 5";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tName\\tEinsätze\\t1.Liga\\t2.Liga\\t3.Liga\\tPokal\\tLändersp."
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 13);
+        assert_eq!(table.centred, 13);
+        assert_eq!(table.rows[0].text, "1.\tMarin Ljubicic\t3\t3\t0\t0\t1\t0");
+        assert_eq!(table.rows[12].text, "13.\tLeopold Querfeld\t0\t0\t0\t0\t1\t0");
+    }
+
     /// The Mannschaft category's Spielereigenschaften names the squad's
     /// traits, the players by name.
     #[test]

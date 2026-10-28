@@ -213,6 +213,30 @@ const ALL_TIME_ROW_COLUMNS: [(u16, u16); 11] = [
 /// (0x87e908).
 const NO_ALL_TIME_SCORER: &str =
     "Keiner Ihrer Spieler hat bisher unter Ihrer Leitung ein Tor erzielt!";
+/// The Einsätze ewig's header and rows (`FUN_00468695` with 0x87df80,
+/// and 0x87df40): rank, name, matches in all, by league level, in the
+/// cup and for his country.
+const ALL_TIME_MATCHES_HEADER: u16 = 2407;
+const ALL_TIME_MATCHES_HEADER_COLUMNS: [(u16, u16); 8] = [
+    (C, 0x14),
+    (0x19, 0),
+    (C | 0xaa, 0x28),
+    (C | 0xd2, 0x28),
+    (C | 0xfa, 0x28),
+    (C | 0x122, 0x28),
+    (R | 0x14a, 0x28),
+    (C | 0x17c, 0x37),
+];
+const ALL_TIME_MATCHES_ROW_COLUMNS: [(u16, u16); 8] = [
+    (R, 0x14),
+    (0x19, 0),
+    (R | 0xaa, 0x23),
+    (R | 0xd2, 0x23),
+    (R | 0xfa, 0x23),
+    (R | 0x122, 0x23),
+    (R | 0x14a, 0x23),
+    (R | 0x17a, 0x23),
+];
 /// The Spielereigenschaften's header and rows (`FUN_00471109` with
 /// 0x87e6d0, and 0x87e6f0): name, position, strength and traits.
 const TRAITS_HEADER: u16 = 4739;
@@ -848,6 +872,16 @@ fn per_matchday(points: i16, played: i16) -> String {
     format!("{}.{:02}", hundredths / 100, hundredths % 100)
 }
 
+/// A name from the pool's ids as `FUN_00637cbb` spells it, "%s %s", or
+/// just one of the two where the other's id is 0.
+fn spelled(records: &Records, first: u16, last: u16) -> String {
+    match (first, last) {
+        (0, _) => records.name(last).to_owned(),
+        (_, 0) => records.name(first).to_owned(),
+        _ => format!("{} {}", records.name(first), records.name(last)),
+    }
+}
+
 /// A double as "%2.1f" writes it: to one place, a half rounded up — the
 /// second place of its exact decimal expansion decides.
 fn tenths(value: f64) -> String {
@@ -1082,6 +1116,9 @@ impl Statistics {
             }
             Some(statistics::SQUAD_ALL_TIME_PAGE) if self.category == MANNSCHAFT => {
                 self.all_time_page(cx, view)
+            }
+            Some(statistics::SQUAD_ALL_TIME_MATCHES_PAGE) if self.category == MANNSCHAFT => {
+                self.all_time_matches_page(cx, view)
             }
             Some(statistics::FAIRNESS_PAGE) if self.category == LIGA => {
                 self.fairness_page(cx, view)
@@ -1492,12 +1529,7 @@ impl Statistics {
             .iter()
             .enumerate()
             .map(|(i, s)| {
-                let (first, last) = (records.name(s.first), records.name(s.last));
-                let name = match (s.first, s.last) {
-                    (0, _) => last.to_owned(),
-                    (_, 0) => first.to_owned(),
-                    _ => format!("{first} {last}"),
-                };
+                let name = spelled(records, s.first, s.last);
                 let total: i16 = s.goals.iter().sum();
                 let mean = if s.matches == 0 {
                     String::new()
@@ -1526,6 +1558,47 @@ impl Statistics {
             *table = TableState {
                 columns,
                 centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Einsätze ewig (`FUN_00468695`): the club's most fielded players
+    /// under its manager as stored, ranked by a counter,
+    /// "%d.\t%s\t%d\t%d\t%d\t%d\t%d\t%d" with the names spelled out;
+    /// the window handed the entries holding an id.
+    fn all_time_matches_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let header = game.text(ALL_TIME_MATCHES_HEADER).to_owned();
+        set_header(view, dialog, header, &ALL_TIME_MATCHES_HEADER_COLUMNS);
+        let (held, entries) = statistics::all_time_matches(records, team);
+        let rows: Vec<TableRow> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let name = spelled(records, e.first, e.last);
+                let [first_level, second_level, third_level] = e.levels;
+                let text = format!(
+                    "{}.\t{name}\t{}\t{first_level}\t{second_level}\t{third_level}\t{}\t{}",
+                    i + 1,
+                    e.matches,
+                    e.cup,
+                    e.internationals
+                );
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: ALL_TIME_MATCHES_ROW_COLUMNS.to_vec(),
+                centred: held as i32,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

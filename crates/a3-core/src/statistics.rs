@@ -306,8 +306,10 @@ pub fn goal_graph(sums: &[[i16; 4]], mode: usize) -> (Vec<(usize, i16)>, i32) {
 /// the Vorlagen under 3036 (`FUN_0046b4cf`) and the Gelbe Karten under
 /// 2405 (`FUN_00467de7`).
 pub const SQUAD_SCORERS_PAGE: i16 = 0;
-/// The Torjäger ewig under 2414 (`FUN_0046a366`).
+/// The Torjäger ewig under 2414 (`FUN_0046a366`), the Einsätze ewig
+/// under 2407 (`FUN_00468695`).
 pub const SQUAD_ALL_TIME_PAGE: i16 = 1;
+pub const SQUAD_ALL_TIME_MATCHES_PAGE: i16 = 5;
 pub const SQUAD_POINTS_PAGE: i16 = 2;
 /// The Einsätze under 2406 (`FUN_004681ce`).
 pub const SQUAD_MATCHES_PAGE: i16 = 4;
@@ -355,16 +357,23 @@ pub struct AllTimeScorer {
 }
 
 const ALL_TIME_SCORERS: usize = 0x15b0;
+const ALL_TIME_MATCHES: usize = 0x19fc;
 const ALL_TIME_ENTRY: usize = 0x16;
 const ALL_TIME_ENTRIES: usize = 50;
+
+/// One of the club's lists under its manager in the extra block, its
+/// entries of 0x16 as stored.
+fn all_time_list(records: &Records, team: &Team, at: usize) -> Vec<[u8; ALL_TIME_ENTRY]> {
+    let Some(slot) = usize::from(team.human()).checked_sub(1) else { return Vec::new() };
+    let Some(extra) = records.extras.get(slot) else { return Vec::new() };
+    (0..ALL_TIME_ENTRIES).map(|k| extra.get(at + k * ALL_TIME_ENTRY)).collect()
+}
 
 /// The own club's all-time scorers in their stored order, those with a
 /// player's id.
 pub fn all_time_scorers(records: &Records, team: &Team) -> Vec<AllTimeScorer> {
-    let Some(slot) = usize::from(team.human()).checked_sub(1) else { return Vec::new() };
-    let Some(extra) = records.extras.get(slot) else { return Vec::new() };
-    (0..ALL_TIME_ENTRIES)
-        .map(|k| extra.get::<[u8; ALL_TIME_ENTRY]>(ALL_TIME_SCORERS + k * ALL_TIME_ENTRY))
+    all_time_list(records, team, ALL_TIME_SCORERS)
+        .into_iter()
         .filter(|e| e[0] != 0 || e[1] != 0)
         .map(|e| {
             let word = |at: usize| u16::from_le_bytes([e[at], e[at + 1]]);
@@ -377,6 +386,42 @@ pub fn all_time_scorers(records: &Records, team: &Team) -> Vec<AllTimeScorer> {
             }
         })
         .collect()
+}
+
+/// One of the club's most fielded players under its manager
+/// (`FUN_00633291`, fifty entries of 0x16 at extra +0x19fc, kept by the
+/// matches in all): his names' pool ids, his matches in all, in the
+/// league's three levels, in the cup and for his country.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllTimeMatches {
+    pub first: u16,
+    pub last: u16,
+    pub matches: i16,
+    pub levels: [i16; 3],
+    pub cup: i16,
+    pub internationals: i16,
+}
+
+/// The own club's all-time appearances: how many entries hold an id —
+/// the row count the page hands the window — and those whose id is
+/// above 0 as a signed number, which it draws.
+pub fn all_time_matches(records: &Records, team: &Team) -> (usize, Vec<AllTimeMatches>) {
+    let list = all_time_list(records, team, ALL_TIME_MATCHES);
+    let word = |e: &[u8; ALL_TIME_ENTRY], at: usize| i16::from_le_bytes([e[at], e[at + 1]]);
+    let held = list.iter().filter(|e| word(e, 0) != 0).count();
+    let rows = list
+        .iter()
+        .filter(|e| word(e, 0) > 0)
+        .map(|e| AllTimeMatches {
+            first: word(e, 2) as u16,
+            last: word(e, 4) as u16,
+            matches: word(e, 0xa),
+            levels: [word(e, 0xc), word(e, 0xe), word(e, 0x10)],
+            cup: word(e, 0x12),
+            internationals: word(e, 0x14),
+        })
+        .collect();
+    (held, rows)
 }
 
 /// A player's D-Form (`FUN_006ff257`): the mean of his weekly forms this
