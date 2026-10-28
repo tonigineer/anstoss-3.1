@@ -4955,5 +4955,32 @@ mod tests {
         assert_eq!(table.rows.len(), 20);
         assert_eq!(table.centred, 20);
         assert_eq!(table.rows[0].text, "1.\tHarry Kane\tFC Bayern München\t2\t0");
+        // The keeper page (`FUN_0044b2fc`) lists only keepers with one of
+        // their two figures; the own club's keeper stands blue.
+        let ek = format!("{liga}\nnow row 1284 8");
+        let Some(runner) = on_save(&game, "A", &ek) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tpariert\\tkassiert"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.centred, -1);
+        assert_eq!(
+            table.rows[0].text,
+            "1.\tFrederik Rönnow\t1.FC Union Berlin\t1\t0"
+        );
+        assert_eq!(table.rows[0].ink, [0, 0, 255]);
+        // The Eigen goal page (`FUN_0044a810`): this save has none yet, so
+        // the table stays empty under its one-figure header.
+        let et = format!("{liga}\nnow row 1284 7");
+        let Some(runner) = on_save(&game, "A", &et) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tVerein\\tEigentore"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows.is_empty());
     }
 }

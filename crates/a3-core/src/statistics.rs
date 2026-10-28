@@ -308,6 +308,11 @@ pub const SCORER_PAGE: i16 = 1;
 pub const VORLAGEN_PAGE: i16 = 2;
 pub const FREISTOSS_PAGE: i16 = 3;
 pub const ELFMETER_PAGE: i16 = 4;
+/// The Elfmeterkiller and the Eigentore, under 0xa9f and 0xa9c
+/// (`FUN_0044b2fc`, `FUN_0044a810`); the Fairneß and the
+/// Chancenverwertung between them draw from other data.
+pub const KILLER_PAGE: i16 = 5;
+pub const EIGENTORE_PAGE: i16 = 8;
 
 /// One player of the Liga lists: the name pool's ids of the name as the
 /// list holds it, his club's number, with the figures the page shows in
@@ -431,6 +436,46 @@ pub fn freistosse(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
 /// converted and the missed.
 pub fn elfmeter(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
     short_list(records, country, level, 2)
+}
+
+/// The Elfmeterkiller's list (`DAT_00b11c86`): twenty entries of 10 as
+/// the short lists', drawn once one of the two figures stands — the
+/// penalties he saved and those he let in.
+pub fn elfmeterkiller(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    let Some(b) = list_bytes(records, country, level, 0x65ce, 200, 10, 0x14) else {
+        return Vec::new();
+    };
+    (0..0x14)
+        .filter_map(|i| {
+            let e = &b[i * 10..i * 10 + 10];
+            (e[5] != 0 || e[6] != 0).then(|| LigaRow {
+                first: u16::from_le_bytes([e[0], e[1]]),
+                last: u16::from_le_bytes([e[2], e[3]]),
+                team: i16::from(e[4]),
+                values: [e[5], e[6], 0, 0, 0, 0],
+            })
+        })
+        .collect()
+}
+
+/// The eigen goal scorers (`FUN_0044a810` from `DAT_00b106aa`): twenty
+/// entries of 8 — the club's number, his own goals, and his names' pool
+/// ids behind both.
+pub fn eigentore(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
+    let Some(b) = list_bytes(records, country, level, 0x4ff2, 0xa0, 8, 0x14) else {
+        return Vec::new();
+    };
+    (0..0x14)
+        .filter_map(|i| {
+            let e = &b[i * 8..i * 8 + 8];
+            (e[1] != 0).then(|| LigaRow {
+                first: u16::from_le_bytes([e[4], e[5]]),
+                last: u16::from_le_bytes([e[6], e[7]]),
+                team: i16::from(e[0]),
+                values: [e[1], 0, 0, 0, 0, 0],
+            })
+        })
+        .collect()
 }
 
 /// The league's scorers and assisters this season (`FUN_0044a3fa`): the

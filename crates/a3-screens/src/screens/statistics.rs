@@ -161,6 +161,8 @@ const SCORER_HEADER: u16 = 0xa9b;
 const VORLAGEN_HEADER: u16 = 0xa9a;
 const FREISTOSS_HEADER: u16 = 0xa9d;
 const ELFMETER_HEADER: u16 = 0xa9e;
+const KILLER_HEADER: u16 = 0xa9f;
+const EIGENTORE_HEADER: u16 = 0xa9c;
 const TOR_HEADER_COLUMNS: [(u16, u16); 9] = [
     (R, 0x12),
     (0x18, 0),
@@ -221,6 +223,22 @@ const TAKER_COLUMNS: [(u16, u16); 6] = [
     (C | 0x122, 0x28),
     (C | 0x14a, 0x28),
     (C | 0x172, 0x28),
+];
+/// The Elfmeterkiller and the Eigen goal scorers again from single blocks
+/// for header and rows (`FUN_0044b2fc` at 0x879968, `FUN_0044a810` at
+/// 0x879868): the keeper's two figures, the scorer's one.
+const KILLER_COLUMNS: [(u16, u16); 5] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0x96, 0),
+    (C | 0x10e, 0x32),
+    (C | 0x14a, 0x32),
+];
+const EIGENTORE_COLUMNS: [(u16, u16); 4] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0xa0, 0),
+    (C | 0x122, 0x3c),
 ];
 const TOR_OWN_INK: [u8; 3] = [0, 0, 255];
 /// The cup rows' columns (`FUN_006df48b` with 0x879428 and 0x879450): the
@@ -634,7 +652,9 @@ impl Statistics {
             Some(statistics::SUPERCUP_PAGE) if self.category == TABLES => {
                 self.supercup_page(cx, view)
             }
-            Some(code @ statistics::TOR_PAGE..=statistics::ELFMETER_PAGE)
+            Some(code @ (statistics::TOR_PAGE..=statistics::ELFMETER_PAGE
+                | statistics::KILLER_PAGE
+                | statistics::EIGENTORE_PAGE))
                 if self.category == LIGA =>
             {
                 self.liga_page(cx, view, code)
@@ -813,28 +833,29 @@ impl Statistics {
     }
 
     /// The Liga category's player pages (`FUN_00449bd6`, `FUN_0044a3fa`,
-    /// `FUN_0044a02e`, `FUN_0044ab7a` and `FUN_0044af3b`): the league
-    /// the strip stands on draws the list the game keeps for it as the
-    /// season goes on and saves with the game (`DAT_00b0b6b8`) — a
-    /// hundred top scorers by their goals, twenty scorers by their
-    /// points, and twenty each of the assisters and of the free-kick
-    /// and penalty takers; the page never sorts. Each row reads
+    /// `FUN_0044a02e`, `FUN_0044ab7a`, `FUN_0044af3b`, `FUN_0044b2fc` and
+    /// `FUN_0044a810`): the league the strip stands on draws the list the
+    /// game keeps for it as the season goes on and saves with the game
+    /// (`DAT_00b0b6b8`) — a hundred top scorers by their goals, twenty
+    /// scorers by their points, and twenty each of the assisters, the
+    /// free-kick and penalty takers, the penalty keepers and the own
+    /// goal scorers; the page never sorts. Each row reads
     /// "%d.\t%s\t%s…" (0x879ed8, 0x879ef4,
-    /// 0x879f04, 0x879f30 and 0x879f44) with the club's name and the
-    /// figures from the gate byte on; the goal and scorer pages name
-    /// the player "%s, %c" (0x879ed0), his last name, a comma and his
-    /// first name's initial, the three others spell both names out
-    /// ("FUN_00637cbb"'s "%s %s", 0x89d96c). The own club's row stands
-    /// blue on all but the scorer page, where it is red.
+    /// 0x879f04, 0x879f30, 0x879f44, 0x879f58 and 0x879f20) with the
+    /// club's name and the figures from the gate byte on; the goal and
+    /// scorer pages name the player "%s, %c" (0x879ed0), his last name,
+    /// a comma and his first name's initial, the five others spell both
+    /// names out ("FUN_00637cbb"'s "%s %s", 0x89d96c). The own club's row
+    /// stands blue on all but the scorer page, where it is red.
     fn liga_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
         let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
         // header text, header's and rows' columns, the saved list, the
         // figures a row prints, whether the names are spelled out, and
-        // whether the page hands its row count to the window (the two
-        // taker pages hand 0xffffffff instead, so their rows start at
-        // the top).
+        // whether the page hands its row count to the window (the taker,
+        // keeper and own goal pages hand 0xffffffff instead, so their
+        // rows start at the top).
         let (header, header_columns, columns, list, shown, spelled, centred) = match code {
             statistics::TOR_PAGE => (
                 TOR_HEADER,
@@ -878,6 +899,24 @@ impl Statistics {
                 &TAKER_COLUMNS[..],
                 statistics::elfmeter(records, country, level),
                 3,
+                true,
+                false,
+            ),
+            statistics::KILLER_PAGE => (
+                KILLER_HEADER,
+                &KILLER_COLUMNS[..],
+                &KILLER_COLUMNS[..],
+                statistics::elfmeterkiller(records, country, level),
+                2,
+                true,
+                false,
+            ),
+            statistics::EIGENTORE_PAGE => (
+                EIGENTORE_HEADER,
+                &EIGENTORE_COLUMNS[..],
+                &EIGENTORE_COLUMNS[..],
+                statistics::eigentore(records, country, level),
+                1,
                 true,
                 false,
             ),
