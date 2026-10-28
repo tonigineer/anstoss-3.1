@@ -541,6 +541,8 @@ pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
 pub const OVERVIEW_PAGE: i16 = 0xb;
 pub const AGE_PAGE: i16 = 0xc;
 pub const FOREIGN_PAGE: i16 = 0xe;
+/// Erhaltene Elfmeter under 0x1287 (`FUN_0044df6d`).
+pub const PENALTIES_PAGE: i16 = 0x13;
 
 /// A club's figures as `FUN_00642cd4` gathers them for the club pages,
 /// an entry of 0x1c bytes each: its number, its strength in tenths (+2),
@@ -692,6 +694,46 @@ pub fn by_foreigners(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
         }
     }
     rows
+}
+
+/// A club of the club lists the game rebuilds for each league as the
+/// season goes on (`FUN_00724739`): its country and number, and its
+/// figures.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClubCount {
+    pub country: u16,
+    pub team: i16,
+    pub values: [i16; 2],
+}
+
+/// The penalties a club was awarded and scored (`DAT_00aeab60`, a list
+/// object of 0xf4 a league whose 24 entries of 8 the save keeps): the
+/// club's country and number, then its club's +0xdea and +0xdeb, the
+/// most awarded first.
+const PENALTY_CLUBS: &str = "0xaeab40";
+
+/// A league's rebuilt club list as the page copies it out (`FUN_00721008`
+/// and its siblings, by the league's list index `FUN_00677b07`): its
+/// entries of `entry` bytes, as long as one names a country, 24 at most.
+fn club_list(records: &Records, country: u16, level: u8, list: &str, entry: usize) -> Vec<ClubCount> {
+    let Some(index) = league_of(records, country, level) else { return Vec::new() };
+    let Some(b) = records.block(&format!("{list}[{index}]")) else { return Vec::new() };
+    let word = |at: usize| b.get(at..at + 2).map_or(0, |w| i16::from_le_bytes([w[0], w[1]]));
+    (0..24)
+        .map(|i| i * entry)
+        .take_while(|&at| word(at) != 0)
+        .map(|at| ClubCount {
+            country: word(at) as u16,
+            team: word(at + 2),
+            values: [word(at + 4), if entry >= 8 { word(at + 6) } else { 0 }],
+        })
+        .collect()
+}
+
+/// The Erhaltene Elfmeter (`FUN_0044df6d`): each club's penalties awarded
+/// and scored.
+pub fn penalties_awarded(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    club_list(records, country, level, PENALTY_CLUBS, 8)
 }
 
 /// A club of the Chancenverwertung: its number, its quote in whole

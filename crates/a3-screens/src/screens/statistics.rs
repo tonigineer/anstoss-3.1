@@ -287,6 +287,13 @@ const FOREIGN_HEADER_COLUMNS: [(u16, u16); 5] =
     [(R, 0x14), (0x19, 0), (R | 0xc8, 0x37), (R | 0xff, 0x3c), (0x14, 0x8000)];
 const FOREIGN_ROW_COLUMNS: [(u16, u16); 5] =
     [(R, 0x14), (0x19, 0), (R | 0xc8, 0x32), (R | 0xfa, 0x32), (0x14, 0x8000)];
+/// The Erhaltene Elfmeter's header and rows (`FUN_0044df6d` with
+/// 0x879c90, and 0x879cb0): rank, club, penalties awarded and scored.
+const PENALTIES_HEADER: u16 = 0x1287;
+const PENALTIES_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(R, 0x19), (0x1e, 0), (C | 0xc8, 0x32), (C | 0xfa, 0x3c)];
+const PENALTIES_ROW_COLUMNS: [(u16, u16); 4] =
+    [(R, 0x19), (0x1e, 0), (R | 0xc8, 0x1e), (R | 0xff, 0x1e)];
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -740,6 +747,9 @@ impl Statistics {
             Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
                 self.chance_page(cx, view)
             }
+            Some(statistics::PENALTIES_PAGE) if self.category == LIGA => {
+                self.club_list_page(cx, view)
+            }
             Some(
                 code @ (statistics::OVERVIEW_PAGE
                 | statistics::AGE_PAGE
@@ -1178,6 +1188,44 @@ impl Statistics {
                     _ => format!("{}.\t{club}\t{}\t{}", i + 1, row.foreigners, row.nations),
                 };
                 let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: columns.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The pages of the club lists the game rebuilds for each league
+    /// (`FUN_00724739`), drawn as saved, from the top of the window, the
+    /// own club red: the Erhaltene Elfmeter (`FUN_0044df6d`),
+    /// "%d.\t%s\t%d\t%d".
+    fn club_list_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let (header, header_columns, columns) =
+            (PENALTIES_HEADER, &PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS);
+        let list = statistics::penalties_awarded(records, country, level);
+        set_header(view, dialog, game.text(header).to_owned(), header_columns);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let rows = list
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let club = game.club_name(Some(records), row.country as u8, row.team);
+                let [first, second] = row.values;
+                let text = format!("{}.\t{club}\t{first}\t{second}", i + 1);
+                let ink = if own == Some((row.country, row.team)) { OWN_INK } else { INK };
                 TableRow { text, ink, mark: None, columns: None }
             })
             .collect();

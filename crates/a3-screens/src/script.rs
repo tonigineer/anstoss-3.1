@@ -5080,6 +5080,33 @@ mod tests {
         assert_eq!(table.rows[17].text, "18.\t1.FC Heidenheim\t4\t3");
     }
 
+    /// The Erhaltene Elfmeter lists the clubs awarded a penalty as the
+    /// game keeps them, with those they scored.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_lists_the_leagues_penalties() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 15";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Pl.\\tVerein\\tElfmeter\\tVerwandelt"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "1.\tBorussia M'gladbach\t1\t1",
+                "2.\tVfL Wolfsburg\t1\t0",
+                "3.\t1.FC Union Berlin\t1\t1"
+            ]
+        );
+        assert_eq!(table.rows[2].ink, [255, 0, 0]);
+    }
+
     /// The Chancenverwertung reckons each club's quote of goals from its
     /// chances and ranks the league by it.
     #[test]
