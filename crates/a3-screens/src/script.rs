@@ -5006,6 +5006,28 @@ mod tests {
         assert_eq!(table.rows[2].ink, [0, 0, 255]);
     }
 
+    /// The Schirilieblinge, open with the department raised, ranks the
+    /// clubs by how often the referees favoured them, below 0 as well.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_referees_favourites() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 10";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tVerein\\twie oft bevorzugt"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.rows[0].text, "1.\tFC Bayern München\t2");
+        assert_eq!(table.rows[10].text, "11.\t1.FC Union Berlin\t-1");
+        assert_eq!(table.rows[10].ink, [255, 0, 0]);
+        assert_eq!(table.rows[17].text, "18.\tEintracht Frankfurt\t-3");
+    }
+
     /// The Fairneß ranks the league's clubs by their cards' points and
     /// closes with the season's record for one match.
     #[test]

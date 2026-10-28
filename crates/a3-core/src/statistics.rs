@@ -318,6 +318,9 @@ pub const KILLER_PAGE: i16 = 5;
 /// The Treter under 0xaa0 (`FUN_0044b6e0`), shown from the second
 /// department on.
 pub const TRETER_PAGE: i16 = 9;
+/// The Schirilieblinge under 0xb6f (`FUN_0044c57e`), from the second
+/// department on.
+pub const REFEREE_PAGE: i16 = 0xa;
 pub const FAIRNESS_PAGE: i16 = 6;
 pub const CHANCEN_PAGE: i16 = 7;
 pub const EIGENTORE_PAGE: i16 = 8;
@@ -802,6 +805,34 @@ pub fn player_substitutions(records: &Records, country: u16, level: u8, out: boo
             count: word(at + 6) as i16,
         })
         .collect()
+}
+
+/// How often the referees favoured each club (`DAT_00b1e290` in the saved
+/// lists' block, 0x60 a league): 24 pairs of the club's number and its
+/// count, seeded at the season's start in table order; `FUN_007466b2`
+/// adds to a club's count after each match, and it can fall below 0.
+const REFEREE_LIST: usize = 0x12bd8;
+
+/// The Schirilieblinge (`FUN_0044c57e`): as many of the pairs as the
+/// league has clubs, by the page's exchange sort — the most favoured
+/// first, every place swapping with the first of the rest that beats it.
+pub fn referees_favourites(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    let teams = League::of(records, country, level).map_or(0, |l| l.teams()).min(24);
+    let Some(b) = list_bytes(records, country, level, REFEREE_LIST, 0x60, 4, 24) else {
+        return Vec::new();
+    };
+    let word = |at: usize| i16::from_le_bytes([b[at], b[at + 1]]);
+    let mut rows: Vec<ClubCount> = (0..teams)
+        .map(|i| ClubCount { country, team: word(i * 4), values: [word(i * 4 + 2), 0] })
+        .collect();
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            if rows[i].values[0] < rows[j].values[0] {
+                rows.swap(i, j);
+            }
+        }
+    }
+    rows
 }
 
 /// The Plätze über Saisonziel (`FUN_0044e23b`): each club's places above
