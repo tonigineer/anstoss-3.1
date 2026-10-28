@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Draws the overview page's preview GIFs: one per area of index.html, plus a
-tour of the menu bar.
+"""Draws the overview page's preview GIFs: one per area of the private
+overview page (`.plan/index.html`), plus a tour of the menu bar.
 
 Every frame is a run of the replica without a window (`--script … --shot …`):
 a savegame or a new game, the clicks to one screen, and the screen it ends
 on, drawn in the classic look. A frame that does not end on the screen it is
 meant for is left out and named, so a GIF never shows a wrong screen.
 
-The GIFs are made of the game's own graphics, so they go to `previews/`,
-which git ignores — like the game, they are not part of the repository.
+The GIFs are made of the game's own graphics, so they go to
+`.plan/previews/`, beside the page, which git ignores — like the game, they
+are not part of the repository.
 
     cargo build --release -p a3-app
     python3 -I tools/previews.py            # all GIFs
@@ -28,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 REPLICA = ROOT / "target/release/anstoss-3-1"
 ORACLE = Path.home() / ".cache/anstoss-3.1/oracle"
-OUT = ROOT / "previews"
+OUT = ROOT / ".plan/previews"
 LOAD = (ROOT / "crates/a3-screens/scripts/load.txt").read_text()
 # The new-game script without its last line, so a frame can stop on any
 # dialog on the way: its `on` lines answer everything before.
