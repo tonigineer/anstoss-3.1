@@ -206,6 +206,10 @@ record! {
     /// Matches of the competitions of the kinds 12 to 15 this season: his
     /// internationals.
     0x266 => kind_12_matches, set_kind_12_matches: u8;
+    /// A count the season's strength upgrade weighs with the cup goals,
+    /// against the first of each strength's two thresholds at 0x876d86
+    /// (meaning not traced further).
+    0x274 => upgrade_count, set_upgrade_count: u8;
     /// Matchdays he sat out banned this season.
     0x267 => banned_matchdays, set_banned_matchdays: u8;
     /// Bit 7: he ends his career; bit 5: his strength is not known yet
@@ -271,6 +275,9 @@ record! {
     0x246 => own_goals, set_own_goals: u8;
     0x247 => assists, set_assists: u8;
     0x248 => joker_goals, set_joker_goals: u8;
+    /// His goals this season by kind: from a penalty, a free kick, from
+    /// distance, with the head, and a fifth the lists never name.
+    0x241 => goal_kinds, set_goal_kinds: [u8; 5];
     /// His goals and assists in the last match.
     0x249 => last_goals, set_last_goals: u8;
     0x24a => last_assists, set_last_assists: u8;

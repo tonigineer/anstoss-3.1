@@ -4962,6 +4962,32 @@ mod tests {
         assert_eq!(table.rows[12].text, "13.\tLeopold Querfeld\t0\t0\t0\t0\t1\t0");
     }
 
+    /// The Mannschaft category's Spielertrends groups the squad by its
+    /// chances of a downgrade or an upgrade, the goals still needed beside.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_groups_the_squads_trends() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 7";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Spielertrends\\tAlter\\tPos\\tStärke\\tForm\\tD-Form\\tTore bis Aufwertung"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        // Three groups' headings and the 26 players.
+        assert_eq!(table.rows.len(), 29);
+        assert_eq!(table.rows[0].text, "Möglicher Abwertungskandidat");
+        assert_eq!(table.rows[0].ink, [0xaa, 0, 0]);
+        assert_eq!(table.rows[1].text, "Christopher Trimmel\t38\tRV\t7\t14\t11.1\t12");
+        // A keeper needs no goals.
+        assert_eq!(table.rows[3].text, "Frederik Rönnow\t33\tTO\t9\t15\t14.7\t-");
+        assert_eq!(table.rows[21].text, "Möglicher Aufwertungskandidat");
+        assert_eq!(table.rows[22].text, "David Preu\t20\tLM\t5\t15\t14.3\t8");
+    }
+
     /// The Mannschaft category's Wer kam? Wer ging? lists the club's
     /// transfers under its manager and their total.
     #[test]

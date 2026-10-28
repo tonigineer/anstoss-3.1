@@ -314,6 +314,32 @@ const NO_TRANSFER: u16 = 3690;
 const TRANSFER_INCOME: [u8; 2] = [2, 3];
 /// The most rows shown, the newest.
 const TRANSFERS_SHOWN: usize = 90;
+/// The Spielertrends' header and rows (`FUN_0046dbe2` with 0x87e638, and
+/// 0x87e600): name, age, position, strength, form, D-Form and the goals
+/// still needed for an upgrade; each group under its heading, texts 2147
+/// to 2151 in COLORREF 0xaa.
+const TRENDS_HEADER: u16 = 2421;
+const TRENDS_HEADER_COLUMNS: [(u16, u16); 7] = [
+    (0, 0xb2),
+    (C | 0x9b, 0x28),
+    (C | 0xc3, 0x1e),
+    (C | 0xe2, 0x1e),
+    (C | 0x100, 0x20),
+    (C | 0x122, 0x28),
+    (C | 0x14a, 0x64),
+];
+const TRENDS_ROW_COLUMNS: [(u16, u16); 7] = [
+    (0, 0xb2),
+    (C | 0x9b, 0x28),
+    (C | 0xc3, 0x1e),
+    (R | 0xf0, 0xa),
+    (R | 0xff, 0x18),
+    (R | 0x122, 0x20),
+    (R | 0x17c, 0x14),
+];
+const TREND_HEADINGS: [u16; 5] = [2147, 2148, 2149, 2150, 2151];
+const HEADING_INK: [u8; 3] = [0xaa, 0, 0];
+const KEEPER: u8 = 1;
 /// The Spielereigenschaften's header and rows (`FUN_00471109` with
 /// 0x87e6d0, and 0x87e6f0): name, position, strength and traits.
 const TRAITS_HEADER: u16 = 4739;
@@ -1191,6 +1217,9 @@ impl Statistics {
             Some(statistics::SQUAD_TRAITS_PAGE) if self.category == MANNSCHAFT => {
                 self.traits_page(cx, view)
             }
+            Some(statistics::SQUAD_TRENDS_PAGE) if self.category == MANNSCHAFT => {
+                self.trends_page(cx, view)
+            }
             Some(statistics::SQUAD_TRANSFERS_PAGE) if self.category == MANNSCHAFT => {
                 self.transfers_page(cx, view)
             }
@@ -1588,6 +1617,74 @@ impl Statistics {
             *table = TableState {
                 columns: page.columns.to_vec(),
                 centred,
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Spielertrends (`FUN_0046dbe2`): the squad in five groups, almost
+    /// surely down first, each that has players under its heading and in
+    /// the squad's order, "%s\t%d\t%s\t%s\t%d\t%2.1f\t%s" — the age on
+    /// the day, the position's abbreviation, the strength or "?", the form
+    /// today, the D-Form as a tenth, and the goals for an upgrade, "-" for
+    /// a keeper or from strength 12; the window handed headings and rows.
+    fn trends_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(today) = cx.state.season.as_ref().map(|s| s.date()) else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(TRENDS_HEADER).to_owned(), &TRENDS_HEADER_COLUMNS);
+        let length = statistics::league_length(records, team);
+        let table = &game.rules.statistics.upgrade;
+        let squad: Vec<(u16, &Player, usize)> = team
+            .players()
+            .into_iter()
+            .filter_map(|id| {
+                let p = records.player(id)?;
+                let age = statistics::age_on(p, today);
+                Some((id, p, statistics::trend_group(p, age, statistics::d_form(p))))
+            })
+            .collect();
+        let mut rows = Vec::new();
+        for (group, &heading) in TREND_HEADINGS.iter().enumerate() {
+            if !squad.iter().any(|&(_, _, g)| g == group) {
+                continue;
+            }
+            let text = game.text(heading).to_owned();
+            rows.push(TableRow { text, ink: HEADING_INK, mark: None, columns: None });
+            for &(id, p, _) in squad.iter().filter(|&&(_, _, g)| g == group) {
+                let name = records.known_as(id).unwrap_or_default();
+                let kind = p.positions()[0];
+                let position = game.rules.pitch.abbreviations.get(usize::from(kind));
+                let position = game.text(position.copied().unwrap_or(0) as u16);
+                let strength = if p.picks() & STRENGTH_HIDDEN != 0 {
+                    "?".to_owned()
+                } else {
+                    p.strength().to_string()
+                };
+                let d_form = statistics::d_form(p);
+                let goals = match statistics::goals_to_upgrade(table, p, length) {
+                    Some(n) if kind != KEEPER => n.to_string(),
+                    _ => "-".to_owned(),
+                };
+                let text = format!(
+                    "{name}\t{}\t{position}\t{strength}\t{}\t{}\t{goals}",
+                    statistics::age_on(p, today),
+                    statistics::form_today(p),
+                    tenths(f64::from(d_form) / 10.0)
+                );
+                rows.push(TableRow { text, ink: INK, mark: None, columns: None });
+            }
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: TRENDS_ROW_COLUMNS.to_vec(),
+                centred: rows.len() as i32,
                 rows,
                 width: ROW_WIDTH,
                 scroll: self.scrolled,

@@ -53,10 +53,16 @@ pub const CUP_NAME: u32 = 0x10000;
 /// The codes that name a past season: the season so many back + 100.
 pub const PAST_SEASONS: std::ops::RangeInclusive<u16> = 0x65..=0x6e;
 
-/// The archive's pages, category by category.
+/// The archive's pages, category by category, and the two thresholds of
+/// a strength's upgrade by the length of the league (`DAT_00876d86`).
 pub struct Pages {
     pub categories: Vec<Vec<Page>>,
+    pub upgrade: Vec<u8>,
 }
+
+const UPGRADE_AT: u32 = 0x876d86;
+const UPGRADE_BUCKETS: usize = 7;
+const UPGRADE_BUCKET: usize = 0x1a;
 
 impl Pages {
     pub fn load(exe: &Exe) -> io::Result<Self> {
@@ -77,7 +83,8 @@ impl Pages {
                     .collect()
             })
             .collect();
-        Ok(Self { categories })
+        let upgrade = exe.bytes(UPGRADE_AT, UPGRADE_BUCKETS * UPGRADE_BUCKET)?.to_vec();
+        Ok(Self { categories, upgrade })
     }
 }
 
@@ -324,6 +331,8 @@ pub const SQUAD_FIXTURES_PAGE: i16 = 0x19;
 pub const SQUAD_GRADES_PAGE: i16 = 0xf;
 /// The Wer kam? Wer ging? under 2628 (`FUN_0046ad89`).
 pub const SQUAD_TRANSFERS_PAGE: i16 = 8;
+/// The Spielertrends under 2421 (`FUN_0046dbe2`).
+pub const SQUAD_TRENDS_PAGE: i16 = 7;
 
 /// The own squad by the names its players go by (`FUN_00471109`): the
 /// same exchange sort, a place swapping with the first of the rest whose
@@ -481,6 +490,122 @@ pub fn transfers(records: &Records, team: &Team) -> Vec<Transfer> {
         .collect()
 }
 
+/// How many matchdays the club's league has (`FUN_00692997`): the
+/// league's own (G+2) where its country is kept in full and the level
+/// one of its leagues, 34 past them, 18 outside the six top levels or a
+/// country not kept.
+pub fn league_length(records: &Records, team: &Team) -> i16 {
+    const ELSEWHERE: i16 = 0x12;
+    const PAST_THE_LEAGUES: i16 = 0x22;
+    let (country, level) = (usize::from(team.country()), team.level());
+    if level >= 6 || !records.countries.has_teams(country) {
+        return ELSEWHERE;
+    }
+    if i16::from(level) >= records.countries.leagues(country) {
+        return PAST_THE_LEAGUES;
+    }
+    League::of(records, country as u16, level).map_or(0, |l| l.matchdays() as i16)
+}
+
+/// The goals a player still needs for an upgrade of his strength
+/// (`FUN_0040f78f`), none from 12 on: the two thresholds of his strength
+/// in the bucket of the league's length, (matchdays − 22) / 4 between 0
+/// and 6 — the first against R+0x274, the second against his goals
+/// from distance, with the head and of the fifth kind — and the smaller
+/// of what is left, 0 once one is passed.
+pub fn goals_to_upgrade(table: &[u8], player: &Player, length: i16) -> Option<i16> {
+    let strength = usize::from(player.strength());
+    if strength >= 12 {
+        return None;
+    }
+    let bucket = usize::try_from(((length - 22) / 4).clamp(0, 6)).unwrap_or(0);
+    let at = strength * 2 + bucket * UPGRADE_BUCKET;
+    let (first, second) = (
+        i16::from(table.get(at).copied().unwrap_or(0)),
+        i16::from(table.get(at + 1).copied().unwrap_or(0)),
+    );
+    let counted = i16::from(player.upgrade_count());
+    let [_, _, distance, head, fifth] = player.goal_kinds().map(i16::from);
+    let goals = distance + head + fifth;
+    Some(if first < counted || second < goals { 0 } else { (first - counted).min(second - goals) })
+}
+
+/// Which of the Spielertrends' five groups a player falls in
+/// (`FUN_0046dbe2`), 0 almost surely down to 4 almost surely up: his
+/// chances up and down by his age, then by his talent and strength, none
+/// down at strength 1 or below, then weighed by his D-Form's whole
+/// number; the greater of the two decides, above 80 or 35.
+pub fn trend_group(player: &Player, age: i32, d_form: i32) -> usize {
+    let strength = player.strength();
+    let keeper_or_libero = matches!(player.positions()[0], 1 | 2);
+    let (mut up, mut down): (f64, f64) = match age {
+        ..22 => (30.0, 0.0),
+        22..26 => (20.0, 0.0),
+        26..30 => (10.0, 0.0),
+        30..34 => (5.0, if keeper_or_libero { 10.0 } else { 20.0 }),
+        34..40 => (0.0, 30.0),
+        _ => (0.0, 50.0),
+    };
+    match player.talent() {
+        0 => {
+            if age < 25 {
+                up += up / 2.0;
+            } else if age < 29 {
+                up += up / 4.0;
+            }
+        }
+        1 => {
+            if strength >= 12 {
+                up = 0.0;
+            } else if age < 25 {
+                up += up / 4.0;
+            }
+        }
+        3 => {
+            if strength > 8 {
+                up = 0.0;
+            }
+            down += down / 4.0;
+        }
+        4 => {
+            if strength > 7 {
+                up = 0.0;
+            }
+            down += down / 2.0;
+        }
+        _ => {
+            if strength > 9 {
+                up = 0.0;
+            }
+        }
+    }
+    if strength < 2 {
+        down = 0.0;
+    }
+    match d_form / 10 {
+        17.. => up *= 3.0,
+        15..=16 => up += up,
+        13..=14 => up *= 1.5,
+        ..6 => down += down,
+        _ => down *= 1.5,
+    }
+    if up <= down {
+        if down > 80.0 {
+            0
+        } else if down > 35.0 {
+            1
+        } else {
+            2
+        }
+    } else if up > 80.0 {
+        4
+    } else if up > 35.0 {
+        3
+    } else {
+        2
+    }
+}
+
 /// A squad player's grades in this season's league matches
 /// (`FUN_0046e649`): for each of the club's fixtures (`FUN_0062af24`) his
 /// match byte R+0x319 (`FUN_006ff47f`) — played or came on or went off in
@@ -544,10 +669,20 @@ pub fn d_form(player: &Player) -> i32 {
     }
 }
 
-/// The Einsätze's Tendenz beside it: "+" while his form today
-/// (`FUN_006ff037`) stands above it, "-" below, a space level.
+/// A player's age on a day as the game counts it (`FUN_006ff01b`).
+pub fn age_on(player: &Player, today: NaiveDate) -> i32 {
+    crate::autolineup::age(player.birthday(), today)
+}
+
+/// A player's form today as the lists show it (`FUN_006ff037`).
+pub fn form_today(player: &Player) -> i32 {
+    crate::lineup::form(crate::load::fitness(player))
+}
+
+/// The Einsätze's Tendenz beside it: "+" while his form today stands
+/// above it, "-" below, a space level.
 pub fn form_trend(player: &Player) -> &'static str {
-    let now = crate::lineup::form(crate::load::fitness(player)) * 10;
+    let now = form_today(player) * 10;
     match now.cmp(&d_form(player)) {
         std::cmp::Ordering::Greater => "+",
         std::cmp::Ordering::Less => "-",
