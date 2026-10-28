@@ -322,6 +322,8 @@ pub const SQUAD_HOME_SCORERS_PAGE: i16 = 0x12;
 /// The Einsätze hintereinander under 2408 (`FUN_0046895a`), from the
 /// second department on.
 pub const SQUAD_IN_A_ROW_PAGE: i16 = 0x15;
+/// The Chancen under 2410 (`FUN_00469067`), from the second department on.
+pub const SQUAD_CHANCES_PAGE: i16 = 0x14;
 /// The Torjäger ewig under 2414 (`FUN_0046a366`), the Einsätze ewig
 /// under 2407 (`FUN_00468695`).
 pub const SQUAD_ALL_TIME_PAGE: i16 = 1;
@@ -557,6 +559,49 @@ pub fn league_size(records: &Records, country: u16, level: u8) -> i32 {
         return ELSEWHERE;
     }
     League::of(records, country, level).map_or(ELSEWHERE, |l| l.teams() as i32)
+}
+
+/// A league match of the club this season with its chances (`FUN_00469067`):
+/// the matchday, whether at home, the other club's number, the chances
+/// of both sides that day (the club object's +0xd8e and +0xdbc, which
+/// `FUN_0063b75a` fills from the extra block's +0x8b8 and +0x8e6) and the
+/// goals, home side first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChanceMatch {
+    pub matchday: usize,
+    pub home: bool,
+    pub opponent: i16,
+    pub chances: [u8; 2],
+    pub goals: [u8; 2],
+}
+
+/// The club's played league matches, matchday by matchday from the
+/// schedule's rows, with both sides' chances: own first, the other's
+/// second.
+pub fn chance_matches(records: &Records, team: &Team) -> Vec<ChanceMatch> {
+    const OWN_CHANCES: usize = 0x8b8;
+    const THEIR_CHANCES: usize = 0x8e6;
+    let Some(league) = League::of(records, team.country().into(), team.level()) else {
+        return Vec::new();
+    };
+    let extra = usize::from(team.human()).checked_sub(1).and_then(|s| records.extras.get(s));
+    let chances_on = |at: usize, md: usize| extra.map_or(0, |e| e.get::<u8>(at + md));
+    let place = usize::from(team.league_place());
+    (0..league.matchdays())
+        .filter_map(|md| {
+            let (home, away, goals) = league.result(md + 1, place)?;
+            let (h, a) = goals?;
+            let at_home = home == place;
+            let other = if at_home { away } else { home };
+            Some(ChanceMatch {
+                matchday: md + 1,
+                home: at_home,
+                opponent: league.team(other),
+                chances: [chances_on(OWN_CHANCES, md), chances_on(THEIR_CHANCES, md)],
+                goals: [h, a],
+            })
+        })
+        .collect()
 }
 
 /// The weeks a human club keeps of itself in its extra block, at most

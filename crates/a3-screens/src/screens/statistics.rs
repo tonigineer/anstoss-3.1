@@ -314,6 +314,32 @@ const NO_TRANSFER: u16 = 3690;
 const TRANSFER_INCOME: [u8; 2] = [2, 3];
 /// The most rows shown, the newest.
 const TRANSFERS_SHOWN: usize = 90;
+/// The Chancen's header (`FUN_00469067` with 0x87e060), rows (0x87e020)
+/// and the two totals' own columns (0x87e0a0); the totals' texts, which
+/// carry their tabs as "\t".
+const CHANCES_HEADER: u16 = 2410;
+const CHANCES_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(R, 0x14), (0x19, 0), (0xaa, 0), (C | 0x140, 0x37), (C | 0x17c, 0x37)];
+const CHANCES_ROW_COLUMNS: [(u16, u16); 8] = [
+    (R, 0x14),
+    (0x19, 0),
+    (0xa5, 8),
+    (0xaa, 0),
+    (R | 0x140, 0x1b),
+    (0x15e, 0x1e),
+    (R | 0x17c, 0x1b),
+    (0x19a, 0x1e),
+];
+const CHANCES_TOTAL_COLUMNS: [(u16, u16); 4] =
+    [(0, 0x78), (0x78, 0x28), (0xaf, 0x78), (0x127, 0x28)];
+const OWN_CHANCES: u16 = 2091;
+const OWN_RATE: u16 = 2087;
+const OWN_NO_RATE: u16 = 2088;
+const THEIR_CHANCES: u16 = 2092;
+const THEIR_RATE: u16 = 2089;
+const THEIR_NO_RATE: u16 = 2090;
+/// The own home matches' rows (COLORREF 0xfa).
+const HOME_MATCH_INK: [u8; 3] = [0xfa, 0, 0];
 /// The Trefferverteilung's header, one column (`FUN_004704ea` with
 /// 0x8ec1c8), and its canvas's texts: "Min.", "Mannschaft", "Gegner",
 /// the goals and goals against by half, "Heimtore", "Auswärtstore".
@@ -1487,6 +1513,9 @@ impl Statistics {
             {
                 self.weekly_graph_page(cx, view, code == statistics::SQUAD_FORM_PAGE)
             }
+            Some(statistics::SQUAD_CHANCES_PAGE) if self.category == MANNSCHAFT => {
+                self.chances_page(cx, view)
+            }
             Some(statistics::SQUAD_PLACES_PAGE) if self.category == MANNSCHAFT => {
                 self.places_page(cx, view)
             }
@@ -1944,6 +1973,81 @@ impl Statistics {
                 scroll: 0,
                 cross: None,
                 graph: Some(Graph { bars: Vec::new(), steps: 0, shapes }),
+            };
+        }
+        true
+    }
+
+    /// The Chancen (`FUN_00469067`): each league match played, by the
+    /// schedule's matchdays, "%d.\t%s\t-\t%s\t%d\t: %d\t%d\t: %d" — the
+    /// matchday, the sides, their chances and goals, home first, the own
+    /// home matches red (`FUN_006de3dd` with 0xfa); then an empty row and
+    /// the two sides' totals in four columns of their own: the chances,
+    /// and the goals scored of every hundred as "%3.1f" with a "%" — the
+    /// opponents' line, without a chance, is "Gegnerischer Schnitt:\t0%"
+    /// alone, as the original copies that text over the chances. The
+    /// window is handed the rows; none without a match played.
+    fn chances_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(CHANCES_HEADER).to_owned(), &CHANCES_HEADER_COLUMNS);
+        let text = |id: u16| game.text(id).replace("\\t", "\t");
+        let country = team.country();
+        let own = game.club_name(Some(records), country, i16::from(team.number()));
+        let matches = statistics::chance_matches(records, team);
+        let mut rows: Vec<TableRow> = Vec::new();
+        let (mut chances, mut goals) = ([0i32; 2], [0i32; 2]);
+        for m in &matches {
+            let other = game.club_name(Some(records), country, m.opponent);
+            let [own_chances, their_chances] = m.chances;
+            let (sides, side_chances, ink) = if m.home {
+                ((&own, &other), (own_chances, their_chances), HOME_MATCH_INK)
+            } else {
+                ((&other, &own), (their_chances, own_chances), INK)
+            };
+            let [h, a] = m.goals;
+            let text = format!(
+                "{}.\t{}\t-\t{}\t{}\t: {}\t{h}\t: {a}",
+                m.matchday, sides.0, sides.1, side_chances.0, side_chances.1
+            );
+            rows.push(TableRow { text, ink, mark: None, columns: None });
+            let (own_goals, their_goals) = if m.home { (h, a) } else { (a, h) };
+            chances[0] += i32::from(own_chances);
+            chances[1] += i32::from(their_chances);
+            goals[0] += i32::from(own_goals);
+            goals[1] += i32::from(their_goals);
+        }
+        rows.push(TableRow { text: String::new(), ink: INK, mark: None, columns: None });
+        let rate = |side: usize| tenths(f64::from(goals[side]) * 100.0 / f64::from(chances[side]));
+        let printf =
+            |id: u16, arg: &dyn std::fmt::Display| super::finances::printf(&text(id), &[arg]);
+        let own_line = if chances[0] == 0 {
+            format!("{}{}%", printf(OWN_CHANCES, &0), text(OWN_NO_RATE))
+        } else {
+            let rate = text(OWN_RATE).replace("%3.1f", &rate(0));
+            format!("{}{rate}%", printf(OWN_CHANCES, &chances[0]))
+        };
+        let their_line = if chances[1] == 0 {
+            format!("{}%", text(THEIR_NO_RATE))
+        } else {
+            let rate = text(THEIR_RATE).replace("%3.1f", &rate(1));
+            format!("{}{rate}%", printf(THEIR_CHANCES, &chances[1]))
+        };
+        for line in [own_line, their_line] {
+            let columns = Some(CHANCES_TOTAL_COLUMNS.to_vec());
+            rows.push(TableRow { text: line, ink: INK, mark: None, columns });
+        }
+        let played = matches.len() as i32;
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: CHANCES_ROW_COLUMNS.to_vec(),
+                centred: if played == 0 { 0 } else { played + 3 },
+                rows,
+                width: ROW_WIDTH,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
             };
         }
         true

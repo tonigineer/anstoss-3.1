@@ -4890,6 +4890,38 @@ mod tests {
         assert_eq!(table.rows[4].text, "5.\tDiogo Leite\t0\t0\t0\t0\t0\t0\t0\t0.0");
     }
 
+    /// With the department raised the Mannschaft category's Chancen lists
+    /// each match's chances and goals and the two sides' rates.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_weighs_the_clubs_chances() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 15";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tName\\tGegner\\tChancen\\tTore"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let texts: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "1.\tHamburger SV\t-\t1.FC Union Berlin\t2\t: 3\t0\t: 3",
+                "2.\t1.FC Union Berlin\t-\tBorussia Dortmund\t1\t: 3\t1\t: 2",
+                "3.\tVfL Wolfsburg\t-\t1.FC Union Berlin\t5\t: 1\t2\t: 0",
+                "",
+                "Eigene Chancen:\t5\tEigener Schnitt:\t80.0%",
+                "Gegnerische Chancen:\t10\tGegnerischer Schnitt:\t40.0%"
+            ]
+        );
+        // The own home match red.
+        assert_eq!(table.rows[1].ink, [0xfa, 0, 0]);
+        assert_eq!(table.centred, 6);
+    }
+
     /// With the department raised the Mannschaft category's Heimtorjäger
     /// ranks the squad by its goals at home, and its Einsätze
     /// hintereinander by its league matches in a row.
