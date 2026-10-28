@@ -5078,6 +5078,27 @@ mod tests {
         assert_eq!(table.rows[17].text, "18.\tFC St. Pauli\t83.2");
     }
 
+    /// The Eingesetzte Spieler, open with the department raised, counts
+    /// the players each club fielded and those of them still in its squad.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_counts_the_leagues_fielded_players() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 14";
+        let Some(runner) = on_save(&game, "A2", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tVerein\\tTotal\\takt. Kader\\taus akt. Kader\\tAnteil"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.rows[0].text, "1.\tEintracht Frankfurt\t23\t26\t22\t84.6");
+        assert_eq!(table.rows[17].text, "18.\t1.FC Union Berlin\t13\t26\t13\t50.0");
+        assert_eq!(table.rows[17].ink, [255, 0, 0]);
+    }
+
     /// The Durchschnittsalter ranks the league's squads by their mean
     /// age on the day, the youngest first.
     #[test]

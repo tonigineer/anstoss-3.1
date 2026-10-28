@@ -547,6 +547,9 @@ pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
 pub const OVERVIEW_PAGE: i16 = 0xb;
 pub const AGE_PAGE: i16 = 0xc;
 pub const FOREIGN_PAGE: i16 = 0xe;
+/// Eingesetzte Spieler under 0xe7b (`FUN_0044d508`), from the second
+/// department on.
+pub const USED_PAGE: i16 = 0xf;
 /// Plätze über Saisonziel under 0x1288 (`FUN_0044e23b`); Erhaltene
 /// Elfmeter under 0x1287 (`FUN_0044df6d`); Häufigste
 /// Einwechsl. and Auswechsl. under 0x1285 and 0x1286 (`FUN_0044d9d1`,
@@ -564,10 +567,10 @@ pub const SUB_GOALS_PAGE: i16 = 0x1a;
 
 /// A club's figures as `FUN_00642cd4` gathers them for the club pages,
 /// an entry of 0x1c bytes each: its number, its strength in tenths (+2),
-/// its squad, their mean age
-/// (a float at +8), how many are under 22 and over 30 (+0xe, +0x10), the
-/// foreigners among them (+0x14) and the other nations they come from
-/// (+0x16).
+/// its squad, their mean age (a float at +8), how many are under 22 and
+/// over 30 (+0xe, +0x10), the foreigners among them (+0x14), the other
+/// nations they come from (+0x16), the players it fielded this season
+/// (+0x18) and how many of them are still in its squad (+0x1a).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ClubFigures {
     pub team: i16,
@@ -578,6 +581,8 @@ pub struct ClubFigures {
     pub over_30: i16,
     pub foreigners: i16,
     pub nations: i16,
+    pub fielded: i16,
+    pub fielded_in_squad: i16,
 }
 
 /// The nations `FUN_00676e4c` takes as one: England, Wales, Scotland and
@@ -585,6 +590,13 @@ pub struct ClubFigures {
 const BRITISH: [u8; 4] = [0x10, 0x2d, 0x39, 0x49];
 /// The nations the count of nations runs over (its array of 0x75).
 const NATIONS: usize = 0x75;
+/// The players each club fielded this season (`DAT_00a7598a`, read by
+/// `FUN_006403d2`): fifty ids a club by its index among all, a 0 ending
+/// them early. The save keeps the object from its +0x20 on, a stamp
+/// (`DAT_00a75988`) and then the lists.
+const FIELDED: &str = "0xa75968";
+const FIELDED_AT: usize = 2;
+const FIELDED_MOST: usize = 50;
 
 /// The league's clubs in the order of its table (`FUN_00642cd4`): for
 /// each its squad as the club lists it, every player's age on `today`
@@ -627,6 +639,11 @@ pub fn club_figures(records: &Records, country: u16, level: u8, today: NaiveDate
             figures.nations = (0..NATIONS)
                 .filter(|&n| seen[n] && n != usize::from(country))
                 .count() as i16;
+            // `FUN_006404ff`: the fielded players up to the first 0, and
+            // how many of them the squad holds.
+            let fielded = fielded(records, country, team);
+            figures.fielded = fielded.len() as i16;
+            figures.fielded_in_squad = fielded.iter().filter(|id| ids.contains(id)).count() as i16;
             figures
         })
         .collect()
@@ -679,6 +696,40 @@ pub fn by_strength(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
     for i in 0..rows.len() {
         for j in i + 1..rows.len() {
             if rows[i].strength < rows[j].strength {
+                rows.swap(i, j);
+            }
+        }
+    }
+    rows
+}
+
+/// The ids of the players a club fielded this season (`FUN_006403d2`),
+/// none for a number past the country's clubs.
+fn fielded(records: &Records, country: u16, team: i16) -> Vec<u16> {
+    let c = usize::from(country);
+    if team < 0 || team >= records.countries.team_count(c) {
+        return Vec::new();
+    }
+    let index = i32::from(records.countries.first_team(c)) + i32::from(team);
+    let Some(b) = usize::try_from(index).ok().and_then(|i| {
+        let at = FIELDED_AT + i * 2 * FIELDED_MOST;
+        records.block(FIELDED)?.get(at..at + 2 * FIELDED_MOST)
+    }) else {
+        return Vec::new();
+    };
+    b.chunks_exact(2).map(|w| u16::from_le_bytes([w[0], w[1]])).take_while(|&id| id != 0).collect()
+}
+
+/// The Eingesetzte Spieler's order (`FUN_0044d508`): the most players
+/// fielded first, of equal ones the fewer still in the squad, by the
+/// same exchange sort.
+pub fn by_fielded(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            let (a, b) = (&rows[i], &rows[j]);
+            if a.fielded < b.fielded
+                || a.fielded == b.fielded && b.fielded_in_squad < a.fielded_in_squad
+            {
                 rows.swap(i, j);
             }
         }

@@ -347,6 +347,26 @@ const NO_SUB_GOALS: u16 = 0x1290;
 const REFEREE_HEADER: u16 = 0xb6f;
 const REFEREE_HEADER_COLUMNS: [(u16, u16); 3] = [(R, 0x14), (0x19, 0), (C | 0xdc, 0x64)];
 const REFEREE_ROW_COLUMNS: [(u16, u16); 3] = [(R, 0x14), (0x19, 0), (R | 0x104, 0x14)];
+/// The Eingesetzte Spieler's header and rows (`FUN_0044d508` with
+/// 0x879be8, and 0x879c18): rank, club, the players fielded, the squad,
+/// those fielded still in it and their share of it.
+const USED_HEADER: u16 = 0xe7b;
+const USED_HEADER_COLUMNS: [(u16, u16); 6] = [
+    (R, 0x14),
+    (0x19, 0),
+    (C | 0x87, 0x32),
+    (C | 0xb9, 0x5a),
+    (C | 0x113, 0x50),
+    (C | 0x163, 0x50),
+];
+const USED_ROW_COLUMNS: [(u16, u16); 6] = [
+    (R, 0x14),
+    (0x19, 0),
+    (C | 0x87, 0x32),
+    (C | 0xb9, 0x5a),
+    (R | 0x118, 0x28),
+    (R | 0x177, 0x20),
+];
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -817,7 +837,8 @@ impl Statistics {
             Some(
                 code @ (statistics::OVERVIEW_PAGE
                 | statistics::AGE_PAGE
-                | statistics::FOREIGN_PAGE),
+                | statistics::FOREIGN_PAGE
+                | statistics::USED_PAGE),
             )
                 if self.category == LIGA =>
             {
@@ -1218,7 +1239,9 @@ impl Statistics {
     /// strongest first, "%d.\t%s\t%3.1f" of the tenths; the
     /// Durchschnittsalter (`FUN_0044cd71`), the youngest squad first,
     /// "%d.\t%s\t%3.1f\t%d\t%d"; the Ausländer (`FUN_0044d117`), the
-    /// most foreigners first, "%d.\t%s\t%d\t%d".
+    /// most foreigners first, "%d.\t%s\t%d\t%d"; the Eingesetzte Spieler
+    /// (`FUN_0044d508`), the most players fielded first,
+    /// "%d.\t%s\t%d\t%d\t%d\t%3.1f" with the share a float.
     fn squad_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
         let (game, dialog) = (cx.game, cx.dialog);
         let Some(records) = cx.state.records.as_ref() else { return false };
@@ -1229,6 +1252,7 @@ impl Statistics {
                 (OVERVIEW_HEADER, &OVERVIEW_HEADER_COLUMNS, &OVERVIEW_ROW_COLUMNS)
             }
             statistics::AGE_PAGE => (AGE_HEADER, &AGE_COLUMNS, &AGE_COLUMNS),
+            statistics::USED_PAGE => (USED_HEADER, &USED_HEADER_COLUMNS, &USED_ROW_COLUMNS),
             _ => (FOREIGN_HEADER, &FOREIGN_HEADER_COLUMNS, &FOREIGN_ROW_COLUMNS),
         };
         set_header(view, dialog, game.text(header).to_owned(), header_columns);
@@ -1237,6 +1261,7 @@ impl Statistics {
         let sorted = match code {
             statistics::OVERVIEW_PAGE => statistics::by_strength(figures),
             statistics::AGE_PAGE => statistics::by_age(figures),
+            statistics::USED_PAGE => statistics::by_fielded(figures),
             _ => statistics::by_foreigners(figures),
         };
         let rows = sorted
@@ -1258,6 +1283,23 @@ impl Statistics {
                         row.under_22,
                         row.over_30
                     ),
+                    statistics::USED_PAGE => {
+                        // x87's quotient stored as a float.
+                        let share = if row.players > 0 {
+                            (f64::from(row.fielded_in_squad) * 100.0 / f64::from(row.players))
+                                as f32
+                        } else {
+                            0.0
+                        };
+                        format!(
+                            "{}.\t{club}\t{}\t{}\t{}\t{}",
+                            i + 1,
+                            row.fielded,
+                            row.players,
+                            row.fielded_in_squad,
+                            one_place(share)
+                        )
+                    }
                     _ => format!("{}.\t{club}\t{}\t{}", i + 1, row.foreigners, row.nations),
                 };
                 let ink = if own == Some((country, row.team)) { OWN_INK } else { INK };
