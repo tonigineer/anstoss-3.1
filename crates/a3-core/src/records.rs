@@ -369,6 +369,8 @@ record! {
     0x25c => minutes, set_minutes: u8;
     /// The form the line-up showed last, for its trend.
     0x34d => last_form, set_last_form: u8;
+    /// His league matches in a row (`FUN_00705bc6`).
+    0x34e => matches_in_a_row, set_matches_in_a_row: u8;
     /// Bit k: he was punished for an offence of level k this week.
     0x34f => fined, set_fined: u8;
     0x353 => mood, set_mood: i8;

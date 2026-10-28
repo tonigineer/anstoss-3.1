@@ -4890,6 +4890,34 @@ mod tests {
         assert_eq!(table.rows[4].text, "5.\tDiogo Leite\t0\t0\t0\t0\t0\t0\t0\t0.0");
     }
 
+    /// With the department raised the Mannschaft category's Heimtorjäger
+    /// ranks the squad by its goals at home, and its Einsätze
+    /// hintereinander by its league matches in a row.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_ranks_the_squads_home_scorers_and_runs() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let page = |row: u32| {
+            format!("now click bar 14\nuntil dialog 18\nnow row 1283 1\nnow row 1284 {row}")
+        };
+        let Some(runner) = on_save(&game, "A2", &page(14)) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr\\tName\\tHeim\\tAusw\\tGesamt"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tMikey Moore\t1\t0\t(1)");
+        assert_eq!(table.rows[1].text, "2.\tJosip Juranovic\t0\t1\t(1)");
+        let Some(runner) = on_save(&game, "A2", &page(16)) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Nr\\tName\\tEinsätze");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tFrederik Rönnow\t3");
+        assert_eq!(table.rows[10].text, "11.\tStanley Nsoki\t1");
+    }
+
     /// The Mannschaft category's Torjägerliste ranks the own squad by its
     /// league goals, with the cup's and the European cups' beside.
     #[test]

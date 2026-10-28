@@ -316,6 +316,12 @@ pub const SQUAD_SCORERS_PAGE: i16 = 0;
 /// The Torjägerliste plus under 2412 (`FUN_00469f05(1)`), from the
 /// second department on.
 pub const SQUAD_SCORERS_PLUS_PAGE: i16 = 0x1c;
+/// The Heimtorjäger under 2411 (`FUN_00469b36`), from the second
+/// department on.
+pub const SQUAD_HOME_SCORERS_PAGE: i16 = 0x12;
+/// The Einsätze hintereinander under 2408 (`FUN_0046895a`), from the
+/// second department on.
+pub const SQUAD_IN_A_ROW_PAGE: i16 = 0x15;
 /// The Torjäger ewig under 2414 (`FUN_0046a366`), the Einsätze ewig
 /// under 2407 (`FUN_00468695`).
 pub const SQUAD_ALL_TIME_PAGE: i16 = 1;

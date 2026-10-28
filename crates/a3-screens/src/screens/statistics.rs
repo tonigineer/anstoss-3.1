@@ -427,6 +427,11 @@ const STRENGTH_HIDDEN: u8 = 0x40;
 /// - the Torjägerliste plus (`FUN_00469f05(1)`, 0x87e188 and 0x87e110):
 ///   the same order, with the last match's goals, the goals by kind and
 ///   the chances, and the share converted, a float "%2.1f";
+/// - the Heimtorjäger (`FUN_00469b36`, 0x87e0e8 and 0x87e0c0): all by
+///   their goals at home, then all their goals, with those away and all
+///   in brackets;
+/// - the Einsätze hintereinander (`FUN_0046895a`, 0x87dfd8 and 0x87dfc0):
+///   all by their league matches in a row;
 /// - the Scorer (`FUN_0046b87a`, 0x87e460 and 0x87e420): those with goals
 ///   or assists by their sum, each figure with the last match's in
 ///   brackets;
@@ -503,6 +508,33 @@ fn squad_page(code: i16) -> Option<SquadPage> {
                     tenths(f64::from(share))
                 )
             },
+        },
+        statistics::SQUAD_HOME_SCORERS_PAGE => SquadPage {
+            header: 2411,
+            header_columns: &[
+                (R, 0x14),
+                (0x19, 0),
+                (C | 0xd4, 0x28),
+                (C | 0x106, 0x28),
+                (C | 0x136, 0x28),
+            ],
+            columns: &[(R, 0x14), (0x19, 0), (R | 0xc8, 0x28), (R | 0xfa, 0x28), (R | 0x12c, 0x28)],
+            centred: true,
+            keep: |_| true,
+            key: |p| i32::from(p.home_goals()) << 8 | i32::from(p.goals()[0]),
+            figures: |p| {
+                let (home, all) = (p.home_goals(), p.goals()[0]);
+                format!("{home}\t{}\t({all})", i32::from(all) - i32::from(home))
+            },
+        },
+        statistics::SQUAD_IN_A_ROW_PAGE => SquadPage {
+            header: 2408,
+            header_columns: &[(R, 0x14), (0x19, 0), (C | 0xc8, 0x3c)],
+            columns: &[(R, 0x14), (0x19, 0), (R | 0xc8, 0x23)],
+            centred: true,
+            keep: |_| true,
+            key: |p| i32::from(p.matches_in_a_row()),
+            figures: |p| p.matches_in_a_row().to_string(),
         },
         statistics::SQUAD_POINTS_PAGE => SquadPage {
             header: 3037,
