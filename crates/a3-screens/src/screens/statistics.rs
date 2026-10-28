@@ -241,6 +241,32 @@ const EIGENTORE_COLUMNS: [(u16, u16); 4] = [
     (C | 0x122, 0x3c),
 ];
 const TOR_OWN_INK: [u8; 3] = [0, 0, 255];
+/// The Fairneß's header and rows (`FUN_0044bb6d` with 0x879a70, and
+/// 0x879a28): rank, club, points, the three kinds of cards and the
+/// points a matchday; the season's record for one match after a blank
+/// row in two columns of its own (0x879a60), its text 0x825 "Saisonrekord
+/// in einem Spiel:\t%s (%d)".
+const FAIRNESS_HEADER: u16 = 0xaa1;
+const FAIRNESS_HEADER_COLUMNS: [(u16, u16); 7] = [
+    (R, 0x14),
+    (0x19, 0),
+    (C | 0xb9, 0x1e),
+    (C | 0xf0, 0x1e),
+    (C | 0x10e, 0x1e),
+    (C | 0x12c, 0x23),
+    (C | 0x15e, 0x3c),
+];
+const FAIRNESS_ROW_COLUMNS: [(u16, u16); 7] = [
+    (R, 0x14),
+    (0x19, 0),
+    (R | 0xb4, 0x1e),
+    (R | 0xe6, 0x1e),
+    (R | 0x102, 0x1e),
+    (R | 0x122, 0x23),
+    (R | 0x168, 0x1e),
+];
+const FAIRNESS_RECORD: u16 = 0x825;
+const RECORD_COLUMNS: [(u16, u16); 2] = [(0, 0x8c), (0xc8, 0)];
 /// The Chancenverwertung's header and rows (`FUN_0044c08e` with
 /// 0x879ad0, and 0x879aa8): rank, club, quote, chances and goals, its own
 /// club red.
@@ -465,6 +491,19 @@ fn set_header(view: &mut View, dialog: &Dialog, text: String, columns: &[(u16, u
         .collect();
 }
 
+/// The Fairneß's points a matchday as "%2.2f" writes the x87 quotient:
+/// to two places, a half rounded up as the C library of its day does —
+/// with a club's whole points over a few dozen matchdays a half can only
+/// come exactly, in eighths. Before the first matchday it divides by 0.
+fn per_matchday(points: i16, played: i16) -> String {
+    if played <= 0 {
+        return if points == 0 { "-1.#J" } else { "1.#J" }.to_owned();
+    }
+    let (points, played) = (i32::from(points), i32::from(played));
+    let hundredths = (200 * points + played) / (2 * played);
+    format!("{}.{:02}", hundredths / 100, hundredths % 100)
+}
+
 /// The leagues the strip steps through (`FUN_0045a439`): the main
 /// country's, then the first of each other country played.
 fn leagues(records: &Records) -> Vec<(u16, u8)> {
@@ -666,6 +705,9 @@ impl Statistics {
                 if self.category == LIGA =>
             {
                 self.liga_page(cx, view, code)
+            }
+            Some(statistics::FAIRNESS_PAGE) if self.category == LIGA => {
+                self.fairness_page(cx, view)
             }
             Some(statistics::CHANCEN_PAGE) if self.category == LIGA => {
                 self.chance_page(cx, view)
@@ -980,6 +1022,69 @@ impl Statistics {
                 rows,
                 width: ROW_WIDTH,
                 centred,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// The Fairneß Mannschaft (`FUN_0044bb6d`): the league's clubs as
+    /// the game keeps them ordered, "%d.\t%s\t%d\t%d\t%d\t%d\t%2.2f", from
+    /// the top of the window, the own club red; then, once a club holds
+    /// the season's record for one match, a blank row and the record.
+    fn fairness_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        set_header(view, dialog, game.text(FAIRNESS_HEADER).to_owned(), &FAIRNESS_HEADER_COLUMNS);
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let ink = |team: i16| if own == Some((country, team)) { OWN_INK } else { INK };
+        let fair = statistics::fairness(records, country, level);
+        let mut rows: Vec<TableRow> = fair
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let club = game.club_name(Some(records), country as u8, row.team);
+                let [red, yellow_red, yellow] = row.cards;
+                let average = per_matchday(row.points, fair.played);
+                let text = format!(
+                    "{}.\t{club}\t{}\t{red}\t{yellow_red}\t{yellow}\t{average}",
+                    i + 1,
+                    row.points
+                );
+                TableRow { text, ink: ink(row.team), mark: None, columns: None }
+            })
+            .collect();
+        if let Some((team, points)) = fair.record {
+            // `FUN_006df44c` gives the blank its one column, `FUN_006df73a`
+            // the record its two.
+            rows.push(TableRow {
+                text: String::new(),
+                ink: INK,
+                mark: None,
+                columns: Some(GROUP_COLUMNS.to_vec()),
+            });
+            let club = game.club_name(Some(records), country as u8, team);
+            let text = super::finances::printf(
+                &game.text(FAIRNESS_RECORD).replace("\\t", "\t"),
+                &[&club, &points],
+            );
+            rows.push(TableRow {
+                text,
+                ink: ink(team),
+                mark: None,
+                columns: Some(RECORD_COLUMNS.to_vec()),
+            });
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FAIRNESS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,

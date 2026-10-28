@@ -310,9 +310,10 @@ pub const FREISTOSS_PAGE: i16 = 3;
 pub const ELFMETER_PAGE: i16 = 4;
 /// The Elfmeterkiller and the Eigentore, under 0xa9f and 0xa9c
 /// (`FUN_0044b2fc`, `FUN_0044a810`); the Fairneß and the
-/// Chancenverwertung between them draw from other data, the latter
-/// under 0xaa2 (`FUN_0044c08e`).
+/// Chancenverwertung between them list clubs instead, under 0xaa1 and
+/// 0xaa2 (`FUN_0044bb6d`, `FUN_0044c08e`).
 pub const KILLER_PAGE: i16 = 5;
+pub const FAIRNESS_PAGE: i16 = 6;
 pub const CHANCEN_PAGE: i16 = 7;
 pub const EIGENTORE_PAGE: i16 = 8;
 
@@ -478,6 +479,58 @@ pub fn eigentore(records: &Records, country: u16, level: u8) -> Vec<LigaRow> {
             })
         })
         .collect()
+}
+
+/// A club of the Fairneß table: its number, its points and the red,
+/// yellow-red and yellow cards they count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FairRow {
+    pub team: i16,
+    pub points: i16,
+    pub cards: [u8; 3],
+}
+
+/// The Fairneß page's data: the clubs, the matchdays played to average
+/// over, and the season's record for one match, a club and its points.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Fairness {
+    pub rows: Vec<FairRow>,
+    pub played: i16,
+    pub record: Option<(i16, i16)>,
+}
+
+/// The league's fair-play table in the same block (`DAT_00b12454`): a
+/// hundred bytes a league, a club's number and its red, yellow-red and
+/// yellow cards of the season in four bytes each, then the record's
+/// club and points (+0x60, +0x62).
+const FAIR_LIST: usize = 0x6d9c;
+const FAIR_LEAGUE: usize = 100;
+const FAIR_RECORD: usize = 0x60;
+
+/// The Fairneß Mannschaft (`FUN_0044bb6d`): the first as many of the
+/// list's clubs as the league has, in the order the game keeps them —
+/// `FUN_00743b29` moves a club up past those with fewer points after
+/// each match — each worth five points a red card, three a yellow-red
+/// and one a yellow; the matchdays played come from the league
+/// (`FUN_00692045`'s copy, its +0x1a); the record stands once its
+/// points do.
+pub fn fairness(records: &Records, country: u16, level: u8) -> Fairness {
+    let Some(league) = League::of(records, country, level) else { return Fairness::default() };
+    let Some(b) = list_bytes(records, country, level, FAIR_LIST, FAIR_LEAGUE, 1, FAIR_LEAGUE)
+    else {
+        return Fairness::default();
+    };
+    let rows = (0..league.teams().min(FAIR_RECORD / 4))
+        .map(|i| {
+            let e = &b[i * 4..i * 4 + 4];
+            let points = u16::from(e[1]) * 5 + u16::from(e[2]) * 3 + u16::from(e[3]);
+            FairRow { team: i16::from(e[0]), points: points as i16, cards: [e[1], e[2], e[3]] }
+        })
+        .collect();
+    let at = |k: usize| i16::from_le_bytes([b[k], b[k + 1]]);
+    let points = at(FAIR_RECORD + 2);
+    let record = (points != 0).then(|| (at(FAIR_RECORD), points));
+    Fairness { rows, played: league.played() as i16, record }
 }
 
 /// A club of the Chancenverwertung: its number, its quote in whole

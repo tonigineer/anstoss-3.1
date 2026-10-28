@@ -4984,6 +4984,34 @@ mod tests {
         assert!(table.rows.is_empty());
     }
 
+    /// The Fairneß ranks the league's clubs by their cards' points and
+    /// closes with the season's record for one match.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_weighs_the_leagues_cards() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 2\nnow row 1284 4";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(
+            view.text(control(dialog, 1292).unwrap()),
+            "Nr.\\tName\\tPkt\\tRot\\tGeR\\tGelb\\tPkt-Schnitt"
+        );
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        // Eighteen clubs, a blank and the record.
+        assert_eq!(table.rows.len(), 20);
+        assert_eq!(table.centred, -1);
+        // Five points a red card, three a yellow-red, one a yellow, over
+        // the three matchdays played.
+        assert_eq!(table.rows[0].text, "1.\t1.FC Köln\t17\t2\t0\t7\t5.67");
+        assert_eq!(table.rows[4].text, "5.\t1.FC Union Berlin\t10\t1\t0\t5\t3.33");
+        assert_eq!(table.rows[4].ink, [255, 0, 0]);
+        assert_eq!(table.rows[18].text, "");
+        assert_eq!(table.rows[19].text, "Saisonrekord in einem Spiel:\t1.FC Köln (8)");
+        assert_eq!(table.rows[19].columns, Some(vec![(0, 0x8c), (0xc8, 0)]));
+    }
+
     /// The Chancenverwertung reckons each club's quote of goals from its
     /// chances and ranks the league by it.
     #[test]
