@@ -2347,6 +2347,14 @@ pub const SUBS_IN_PAGE: i16 = 0x1e;
 pub const SUBS_OUT_PAGE: i16 = 0x1f;
 /// Tore nach Einwechsl. under 0x1291 (`FUN_0044fa30`).
 pub const SUB_GOALS_PAGE: i16 = 0x1a;
+/// The third department's pages under 0x128a, 0x128c and 0x128f
+/// (`FUN_0044eb33`, `FUN_0044ef11`, `FUN_0044f358`, `FUN_0044f79f`),
+/// only from its third level on: Tagesform, Wann trafen die Clubs and
+/// die Gegner, Wie oft zu null.
+pub const FORM_PAGE: i16 = 0x16;
+pub const CLUB_MINUTES_PAGE: i16 = 0x17;
+pub const FOE_MINUTES_PAGE: i16 = 0x18;
+pub const CLEAN_SHEETS_PAGE: i16 = 0x19;
 
 /// A club's figures as `FUN_00642cd4` gathers them for the club pages,
 /// an entry of 0x1c bytes each: its number, its strength in tenths (+2),
@@ -2722,6 +2730,74 @@ pub fn substitutions_in(records: &Records, country: u16, level: u8) -> Vec<ClubC
 /// off.
 pub fn substitutions_out(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
     club_list(records, country, level, SUBS_OUT_CLUBS, 8)
+}
+
+/// The clubs' mean daily form (`DAT_00aec9d8` in the saved `0xaec9b8`
+/// block, of the penalties' shape): the form `FUN_00721191` reckons as
+/// the sum of the form nibbles (`+0xb8 & 0xf`) of the players who took
+/// part, ten times, per player — none where nobody did — and the hits
+/// over the eleven places, the best first.
+const FORM_CLUBS: &str = "0xaec9b8";
+
+/// The Tagesform (`FUN_0044eb33`): each club's form, the best first.
+pub fn daily_form(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    club_list(records, country, level, FORM_CLUBS, 8)
+}
+
+/// How often each club kept the opponent goalless and how many games it
+/// has played (`DAT_00af07b8` in the saved `0xaf0798` block, of the
+/// penalties' shape): the clean sheets of its team's +0x338 and the
+/// games club+0xd24 and +0xd25 together, the most first.
+const CLEAN_CLUBS: &str = "0xaf0798";
+
+/// The Wie oft zu null (`FUN_0044f79f`): each club's games and clean
+/// sheets, the most first.
+pub fn clean_sheets(records: &Records, country: u16, level: u8) -> Vec<ClubCount> {
+    club_list(records, country, level, CLEAN_CLUBS, 8)
+}
+
+/// A club of the Wann trafen pages (`DAT_00aed360` in the saved
+/// `0xaed340` block, 24 entries of 16): its country and number, its
+/// goals for and against in the six quarter-hour slices.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClubSlices {
+    pub country: u16,
+    pub team: i16,
+    pub scored: [i16; 6],
+    pub conceded: [i16; 6],
+}
+
+const SLICE_CLUBS: &str = "0xaed340";
+
+/// The Wann trafen die Clubs and die Gegner (`FUN_0044ef11`,
+/// `FUN_0044f358`): the league's slice table up to the first entry
+/// without a country, by the page's exchange sort — the club with the
+/// most goals scored first, resp. the most conceded.
+pub fn goal_slices(records: &Records, country: u16, level: u8, foe: bool) -> Vec<ClubSlices> {
+    let Some(index) = league_of(records, country, level) else { return Vec::new() };
+    let Some(b) = records.block(&format!("{SLICE_CLUBS}[{index}]")) else { return Vec::new() };
+    let word = |at: usize| u16::from_le_bytes([b[at], b[at + 1]]);
+    let mut rows: Vec<ClubSlices> = (0..24)
+        .map(|i| i * 16)
+        .take_while(|&at| word(at) != 0)
+        .map(|at| ClubSlices {
+            country: word(at),
+            team: word(at + 2) as i16,
+            scored: (4..10).map(|k| i16::from(b[at + k])).collect::<Vec<_>>().try_into().unwrap(),
+            conceded: (0xa..0x10).map(|k| i16::from(b[at + k])).collect::<Vec<_>>().try_into().unwrap(),
+        })
+        .collect();
+    let sum = |e: &ClubSlices| {
+        if foe { e.conceded.iter().sum::<i16>() } else { e.scored.iter().sum::<i16>() }
+    };
+    for i in 0..rows.len() {
+        for j in i + 1..rows.len() {
+            if sum(&rows[i]) < sum(&rows[j]) {
+                rows.swap(i, j);
+            }
+        }
+    }
+    rows
 }
 
 /// A club of the Chancenverwertung: its number, its quote in whole

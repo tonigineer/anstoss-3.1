@@ -1309,6 +1309,44 @@ const NO_SUB_GOALS: u16 = 0x1290;
 const REFEREE_HEADER: u16 = 0xb6f;
 const REFEREE_HEADER_COLUMNS: [(u16, u16); 3] = [(R, 0x14), (0x19, 0), (C | 0xdc, 0x64)];
 const REFEREE_ROW_COLUMNS: [(u16, u16); 3] = [(R, 0x14), (0x19, 0), (R | 0x104, 0x14)];
+/// The Tagesform's header and rows (`FUN_0044eb33` with 0x879d40, and
+/// 0x879d58): rank, club and the mean form, centred in its header.
+const LIGA_FORM_HEADER: u16 = 0x128a;
+const LIGA_FORM_HEADER_COLUMNS: [(u16, u16); 3] = [(R, 0x19), (0x1e, 0), (C | 0xc8, 0x28)];
+const LIGA_FORM_ROW_COLUMNS: [(u16, u16); 3] = [(R, 0x19), (0x1e, 0), (R | 0xc8, 0x1e)];
+/// The header the two Wann trafen pages share (`FUN_0044ef11`,
+/// `FUN_0044f358` with 0x879d70, and 0x879db8): rank, club, the goals of
+/// the half in question and their count over the six quarter-hour slices.
+const MINUTES_HEADER: u16 = 0x128c;
+const MINUTES_HEADER_COLUMNS: [(u16, u16); 9] = [
+    (R, 0x19),
+    (0x1e, 0),
+    (C | 0xbe, 0x23),
+    (C | 0xe1, 0x23),
+    (C | 0x104, 0x23),
+    (C | 0x127, 0x23),
+    (C | 0x14a, 0x23),
+    (C | 0x16d, 0x23),
+    (C | 0x190, 0x23),
+];
+const MINUTES_ROW_COLUMNS: [(u16, u16); 9] = [
+    (R, 0x19),
+    (0x1e, 0),
+    (R | 0xc3, 0x14),
+    (R | 0xe6, 0x14),
+    (R | 0x109, 0x14),
+    (R | 0x12c, 0x14),
+    (R | 0x14f, 0x14),
+    (R | 0x172, 0x14),
+    (R | 0x195, 0x14),
+];
+/// The Wie oft zu null's header and rows (`FUN_0044f79f` with 0x879e00,
+/// and 0x879e20): rank, club, the games played and the clean sheets.
+const CLEAN_HEADER: u16 = 0x128f;
+const CLEAN_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(R, 0x19), (0x1e, 0), (C | 0xc8, 0x32), (C | 0xfa, 0x32)];
+const CLEAN_ROW_COLUMNS: [(u16, u16); 4] =
+    [(R, 0x19), (0x1e, 0), (R | 0xc8, 0x1e), (R | 0xfa, 0x1e)];
 /// The Eingesetzte Spieler's header and rows (`FUN_0044d508` with
 /// 0x879be8, and 0x879c18): rank, club, the players fielded, the squad,
 /// those fielded still in it and their share of it.
@@ -2153,8 +2191,15 @@ impl Statistics {
                 | statistics::PENALTIES_PAGE
                 | statistics::SUBS_IN_PAGE
                 | statistics::SUBS_OUT_PAGE
-                | statistics::SUB_GOALS_PAGE),
+                | statistics::SUB_GOALS_PAGE
+                | statistics::FORM_PAGE
+                | statistics::CLEAN_SHEETS_PAGE),
             ) if self.category == LIGA => self.club_list_page(cx, view, code),
+            Some(code @ (statistics::CLUB_MINUTES_PAGE | statistics::FOE_MINUTES_PAGE))
+                if self.category == LIGA =>
+            {
+                self.goal_times_page(cx, view, code == statistics::FOE_MINUTES_PAGE)
+            }
             Some(
                 code @ (statistics::OVERVIEW_PAGE
                 | statistics::AGE_PAGE
@@ -4763,6 +4808,8 @@ impl Statistics {
             statistics::TARGET_PAGE => (&TARGET_HEADER_COLUMNS, &TARGET_ROW_COLUMNS),
             statistics::REFEREE_PAGE => (&REFEREE_HEADER_COLUMNS, &REFEREE_ROW_COLUMNS),
             statistics::SUB_GOALS_PAGE => (&SUB_GOALS_HEADER_COLUMNS, &SUB_GOALS_ROW_COLUMNS),
+            statistics::FORM_PAGE => (&LIGA_FORM_HEADER_COLUMNS, &LIGA_FORM_ROW_COLUMNS),
+            statistics::CLEAN_SHEETS_PAGE => (&CLEAN_HEADER_COLUMNS, &CLEAN_ROW_COLUMNS),
             _ => (&PENALTIES_HEADER_COLUMNS, &PENALTIES_ROW_COLUMNS),
         };
         let (header, list, end) = match code {
@@ -4781,6 +4828,12 @@ impl Statistics {
             statistics::SUB_GOALS_PAGE => {
                 (SUB_GOALS_HEADER, statistics::substitute_goals(records, country, level), "")
             }
+            statistics::FORM_PAGE => {
+                (LIGA_FORM_HEADER, statistics::daily_form(records, country, level), "")
+            }
+            statistics::CLEAN_SHEETS_PAGE => {
+                (CLEAN_HEADER, statistics::clean_sheets(records, country, level), "")
+            }
             _ => (PENALTIES_HEADER, statistics::penalties_awarded(records, country, level), ""),
         };
         set_header(view, dialog, game.text(header).to_owned(), header_columns);
@@ -4794,6 +4847,10 @@ impl Statistics {
                 let text = match code {
                     statistics::TARGET_PAGE => format!("{}.\t{club}\t{first}\t", i + 1),
                     statistics::REFEREE_PAGE => format!("{}.\t{club}\t{first}", i + 1),
+                    statistics::FORM_PAGE => format!("{}.\t{club}\t{first}", i + 1),
+                    statistics::CLEAN_SHEETS_PAGE => {
+                        format!("{}.\t{club}\t{second}\t{first}", i + 1)
+                    }
                     _ => format!("{}.\t{club}\t{first}\t{second}{end}", i + 1),
                 };
                 let ink = if own == Some((row.country, row.team)) { OWN_INK } else { INK };
@@ -4809,6 +4866,50 @@ impl Statistics {
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {
                 columns,
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// Wann trafen die Clubs and die Gegner (`FUN_0044ef11`,
+    /// `FUN_0044f358`): the league's slice table, "%d.\t%s\t%d\t%d\t%d\t%d\t
+    /// %d\t%d\t%d" with the rank, the club, the goals of the half whose
+    /// total ordered the list, and those over the six quarter-hour slices;
+    /// the own club red.
+    fn goal_times_page(&self, cx: &Cx, view: &mut View, foe: bool) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(MINUTES_HEADER).to_owned(),
+            &MINUTES_HEADER_COLUMNS,
+        );
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let rows: Vec<TableRow> = statistics::goal_slices(records, country, level, foe)
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let club = game.club_name(Some(records), row.country as u8, row.team);
+                let slices = if foe { row.conceded } else { row.scored };
+                let total = slices.iter().sum::<i16>();
+                let each =
+                    slices.map(|g| g.to_string()).join("\t");
+                let text = format!("{}.\t{club}\t{total}\t{each}", i + 1);
+                let ink = if own == Some((row.country, row.team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: MINUTES_ROW_COLUMNS.to_vec(),
                 rows,
                 width: ROW_WIDTH,
                 centred: -1,

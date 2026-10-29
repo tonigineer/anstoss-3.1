@@ -6382,4 +6382,59 @@ mod tests {
         assert_eq!(table.rows[1].text, "2\tBorussia Dortmund\t44%\t9\t4");
         assert_eq!(table.rows[17].text, "18\t1.FC Heidenheim\t0%\t4\t0");
     }
+
+    /// The four pages a third department opens in the Liga list all show
+    /// the league's list the game saved: the mean form, the goal slices
+    /// of either half, and the clean sheets, the own club red. They run
+    /// on Forl, A2 with its statistics department raised to the third
+    /// level - the saved lists are there in A2 either way.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archive_shows_the_leagues_form_and_goal_times() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let liga = "now click bar 14\nuntil dialog 18\nnow row 1283 2";
+        let Some(runner) = on_save(&game, "Forl", &format!("{liga}\nnow row 1284 19")) else {
+            return
+        };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Pl.\\tVerein\\tForm");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.rows[0].text, "1.\t1.FSV Mainz 05\t87");
+        assert_eq!(table.rows[15].text, "16.\t1.FC Union Berlin\t61");
+        assert_eq!(table.rows[15].ink, [255, 0, 0]);
+        assert_eq!(table.rows[17].text, "18.\tVfB Stuttgart\t48");
+        // The two Wann trafen pages rank by the goals of their own half
+        // and count them over the six quarter-hour slices.
+        let minutes = "Pl.\\tVerein\\tTore\\t1-15\\t16-30\\t31-45\\t46-60\\t61-75\\t75-90";
+        let Some(runner) = on_save(&game, "Forl", &format!("{liga}\nnow row 1284 20")) else {
+            return
+        };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), minutes);
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tFC Bayern München\t5\t1\t2\t0\t1\t1\t0");
+        assert_eq!(table.rows[6].text, "7.\t1.FC Union Berlin\t4\t0\t1\t1\t0\t1\t1");
+        assert_eq!(table.rows[6].ink, [255, 0, 0]);
+        let Some(runner) = on_save(&game, "Forl", &format!("{liga}\nnow row 1284 21")) else {
+            return
+        };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), minutes);
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\tSV Werder Bremen\t6\t2\t0\t0\t2\t2\t0");
+        assert_eq!(table.rows[4].text, "5.\t1.FC Union Berlin\t4\t2\t0\t1\t0\t1\t0");
+        assert_eq!(table.rows[4].ink, [255, 0, 0]);
+        let Some(runner) = on_save(&game, "Forl", &format!("{liga}\nnow row 1284 22")) else {
+            return
+        };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Pl.\\tVerein\\tSpieltage\\tAnzahl");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 12);
+        assert_eq!(table.rows[0].text, "1.\tRB Leipzig\t3\t3");
+        assert_eq!(table.rows[8].text, "9.\t1.FC Union Berlin\t3\t1");
+        assert_eq!(table.rows[8].ink, [255, 0, 0]);
+    }
 }
