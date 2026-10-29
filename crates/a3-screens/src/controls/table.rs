@@ -87,6 +87,14 @@ pub struct Graph {
     pub bars: Vec<(i32, bool)>,
     /// How many steps the axis has (`+0xf0`), a tick at each end of one.
     pub steps: i32,
+    /// How far the first bar stands lower than the goal pages' (`+0x7bc`,
+    /// ten on the Stadion pages, none where the goal pages leave it).
+    pub top: i32,
+    /// The unit label the goal pages leave empty (`+0xfc`): the Stadion
+    /// pages' "Zuschauer/1000" at the axis's end, out of the window.
+    pub unit: String,
+    /// The axis title (`+0x100`) over the standing axis.
+    pub title: String,
     /// The canvas's drawing, in its order; the bars are left out then.
     pub shapes: Vec<Shape>,
     /// The Spielplan's own bar over the canvas (`FUN_006e0649`): the
@@ -198,13 +206,14 @@ impl TableState {
     /// Where the rows stand: the first one's top, and how far apart.
     fn layout(&self, height: i32) -> (i32, i32) {
         let rows = self.rows.len() as i32;
-        if self.graph.is_some() {
+        if let Some(graph) = &self.graph {
             // `FUN_0071e017`: at most twenty bars share the window's
-            // height less sixteen one pixel apart, none higher than 40;
-            // the first stands ten down.
+            // height less its top offset and sixteen one pixel apart,
+            // none higher than 40; the first stands ten under the offset.
             let bars = rows.min(0x14).max(1);
-            let high = ((height - 16 - (bars - 1)) / bars).min(0x28);
-            return (10, high + 1);
+            let top = graph.top;
+            let high = ((height - 16 - top - (bars - 1)) / bars).min(0x28);
+            return (top + 10, high + 1);
         }
         if self.cross.is_some() {
             // `FUN_0072c918`: under the bar's twenty pixels, as many
@@ -378,7 +387,7 @@ impl TableState {
         let high = pitch - 1;
         // The axis lies where the loop has run past the last bar.
         let bars = self.rows.len().min(0x14) as i32;
-        let axis_y = bars * pitch + 9;
+        let axis_y = graph.top + bars * pitch + 9;
         let right = area.width() as i32 - 16;
         for (i, (row, &(len, green))) in
             self.rows.iter().zip(&graph.bars).take(0x14).enumerate()
@@ -409,6 +418,14 @@ impl TableState {
         for k in 0..=graph.steps.max(0) {
             let x = (f64::from(k) * f64::from(step) + 0.5) as i32 + 3;
             pen_line(area, (x, axis_y), (x, axis_y + 7), black);
+        }
+        // The unit label stands at the axis's end, past the window's edge
+        // on the Stadion pages; the axis title over the standing one.
+        if !graph.unit.is_empty() {
+            font.draw(area, right + 0x12, axis_y - 7, &graph.unit, black, false);
+        }
+        if !graph.title.is_empty() {
+            font.draw(area, 0xc, 0, &graph.title, black, false);
         }
     }
 

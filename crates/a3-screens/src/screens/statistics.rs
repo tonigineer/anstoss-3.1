@@ -188,6 +188,18 @@ const STADION_STADIUMS_HEADER_COLUMNS: [(u16, u16); 4] =
     [(0, 140), (140, 90), (C | 240, 60), (300, 120)];
 const STADION_STADIUMS_ROW_COLUMNS: [(u16, u16); 4] =
     [(0, 140), (140, 90), (R | 230, 60), (300, 120)];
+/// The Stadion bar pages' texts: the three titles, the first's caption of
+/// the current average (`FUN_00474164`'s sprintf), the axis titles and
+/// the unit label at the axis's end, and the plan bar's text.
+const STADION_FILL_TITLE: u16 = 2651;
+const STADION_FANS_TITLE: u16 = 2654;
+const STADION_AWAY_TITLE: u16 = 2656;
+const STADION_FILL_CAPTION: u16 = 3373;
+const STADION_FILL_AXIS: u16 = 2653;
+const STADION_FANS_AXIS: u16 = 2655;
+const STADION_AWAY_AXIS: u16 = 2657;
+const STADION_UNIT: u16 = 2652;
+const STADION_PLANNED: u16 = 3066;
 /// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
 /// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
 /// the European cups and the cup.
@@ -1785,7 +1797,7 @@ fn eleven_page(
             width: ROW_WIDTH,
             scroll: 0,
             cross: None,
-            graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+            graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None, ..Graph::default() }),
         };
     }
     true
@@ -2253,6 +2265,15 @@ impl Statistics {
             Some(statistics::STADION_STADIUMS) if self.category == STADION => {
                 self.stadion_stadiums_page(cx, view)
             }
+            Some(statistics::STADION_FILL) if self.category == STADION => {
+                self.stadion_fill_page(cx, view)
+            }
+            Some(statistics::STADION_FANS) if self.category == STADION => {
+                self.stadion_fans_page(cx, view)
+            }
+            Some(statistics::STADION_AWAY_FILL) if self.category == STADION => {
+                self.stadion_away_page(cx, view)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -2260,6 +2281,7 @@ impl Statistics {
             set_header(view, dialog, String::new(), &[(0, 0)]);
             if let Some(t) = table.and_then(|c| view.table_mut(c)) {
                 t.rows.clear();
+                t.graph = None;
             }
         }
         mark_inert(view, dialog, |t| hub::on_bar(dialog, t).is_none_or(hub::bar_works));
@@ -2617,6 +2639,273 @@ impl Statistics {
         true
     }
 
+    /// The scale of the two attendance pages' bars (`FUN_00474164`):
+    /// steps of a thousand, a decade of ten-thousands when they pass
+    /// thirty and a decade of hundreds when they fall short of three,
+    /// with the factor that turns a value into the 370 pixels of the
+    /// plot shared among those steps.
+    fn fill_scale(max: i32) -> (i32, i32, f32) {
+        let mut steps = max / 1_000 + i32::from(max % 1_000 != 0);
+        let mut unit = 1_000;
+        let f = if steps > 30 {
+            steps = steps / 10 + i32::from(steps % 10 != 0);
+            unit = 10_000;
+            370.0 / steps as f32 / 10.0
+        } else if steps < 3 {
+            steps *= 10;
+            unit = 100;
+            370.0 / steps as f32 * 10.0
+        } else {
+            370.0 / steps as f32
+        };
+        (steps, unit, f)
+    }
+
+    /// The scale of the fan page's bars (`FUN_00474a6d`): like the other,
+    /// but past thirty the steps only shed the tens they can — whole
+    /// divisions — and the unit stays at its thousand, so the label can
+    /// fall behind the axis and a bar can run past the 370 pixels.
+    fn fan_scale(max: i32) -> (i32, f32) {
+        let mut steps = max / 1_000 + i32::from(max % 1_000 != 0);
+        let f = if steps > 30 {
+            steps /= 10;
+            370.0 / steps as f32 / 10.0
+        } else if steps < 3 {
+            steps *= 10;
+            370.0 / steps as f32 * 10.0
+        } else {
+            370.0 / steps as f32
+        };
+        (steps, f)
+    }
+
+    /// The unit label by the axis's end: text 2652's "Zuschauer/1000"
+    /// cut before its thousand, the scale's unit in its place.
+    fn unit_label(text: &str, unit: i32) -> String {
+        match text.find("1000") {
+            Some(at) => format!("{}{unit}", &text[..at]),
+            None => format!("{text}{unit}"),
+        }
+    }
+
+    /// Auslastung (`FUN_00474164`): the own club's league fixtures in the
+    /// calendar's order, the home ones among them a bar each for the gate
+    /// the club drew there — the gates stand in the club record in the
+    /// order the home games came — and one bar more for what the plan of
+    /// attendance reckoned. The header names the average of the games
+    /// played and its share of the own stadium; the bars follow the
+    /// thousand-steps of the greatest gate, the plan counted in too. The
+    /// unit label and axis title stand on the graph, at most twenty bars.
+    fn stadion_fill_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        let home_games = usize::from(team.home_games());
+        let gates = team.gates();
+        let avg = if home_games == 0 {
+            0
+        } else {
+            gates.iter().take(home_games).sum::<i32>() / home_games as i32
+        };
+        let cap = a3_core::opponent::stadium(records, own.0, own.1 as u16).map_or(0, |s| s.capacity);
+        let pct = if cap < 1 { 0 } else { (avg * 100 / cap).min(100) };
+        let caption = game
+            .text(STADION_FILL_CAPTION)
+            .replacen("%s", &avg.to_string(), 1)
+            .replacen("%s", &format!("{pct}%"), 1);
+        set_header(
+            view,
+            dialog,
+            format!("{} {caption}", game.text(STADION_FILL_TITLE)),
+            &[(0, 0)],
+        );
+        let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
+        let planned = team.planned();
+        let max = gates.iter().copied().max().unwrap_or(0).max(planned);
+        let (steps, unit, f) = Self::fill_scale(max);
+        let mut rows: Vec<TableRow> = Vec::new();
+        let mut bars: Vec<(i32, bool)> = Vec::new();
+        let mut k = 0;
+        for fixture in &fixtures {
+            if !fixture.home {
+                continue;
+            }
+            let v = gates.get(k).copied().unwrap_or(0);
+            k += 1;
+            if v > 0 {
+                let name = game.club_name(Some(records), own.0 as u8, fixture.opponent);
+                rows.push(TableRow {
+                    text: format!("{name} ( {v} )"),
+                    ink: INK,
+                    mark: None,
+                    columns: None,
+                });
+                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, false));
+            }
+        }
+        if planned > 0 {
+            rows.push(TableRow {
+                text: game.text(STADION_PLANNED).replacen("%i", &planned.to_string(), 1),
+                ink: INK,
+                mark: None,
+                columns: None,
+            });
+            bars.push(((planned as f32 * f / 1000.0 + 0.5) as i32, false));
+        }
+        rows.truncate(0x14);
+        bars.truncate(0x14);
+        let unit = Self::unit_label(game.text(STADION_UNIT), unit);
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: vec![],
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: Some(Graph {
+                    bars,
+                    steps,
+                    top: 10,
+                    unit,
+                    title: game.text(STADION_FILL_AXIS).to_owned(),
+                    ..Graph::default()
+                }),
+            };
+        }
+        true
+    }
+
+    /// Gegnerische Fans (`FUN_00474a6d`): the own club's home games
+    /// again, each with the number of fans the guest brought along — kept
+    /// in the extra block at `+0x3f4` in the order the home games came —
+    /// over the thousand-steps of the greatest of all twenty-three. No
+    /// plan bar, and its unit label stays on "Zuschauer/1000" whatever
+    /// the steps make of it.
+    fn stadion_fans_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        set_header(view, dialog, game.text(STADION_FANS_TITLE).to_owned(), &[(0, 0)]);
+        let zeros = [0i32; 23];
+        let extra = records
+            .managers
+            .iter()
+            .zip(&records.extras)
+            .find(|(m, _)| (u16::from(m.country()), m.team() as i16) == own)
+            .map(|(_, e)| e);
+        let fans: [i32; 23] = extra.map_or(zeros, |e| e.fan_gates());
+        let max = fans.iter().copied().max().unwrap_or(0);
+        let (steps, f) = Self::fan_scale(max);
+        let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
+        let mut rows: Vec<TableRow> = Vec::new();
+        let mut bars: Vec<(i32, bool)> = Vec::new();
+        let mut k = 0;
+        for fixture in &fixtures {
+            if !fixture.home {
+                continue;
+            }
+            let v = fans.get(k).copied().unwrap_or(0);
+            k += 1;
+            if v > 0 {
+                let name = game.club_name(Some(records), own.0 as u8, fixture.opponent);
+                rows.push(TableRow {
+                    text: format!("{name} ( {v} )"),
+                    ink: INK,
+                    mark: None,
+                    columns: None,
+                });
+                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, false));
+            }
+        }
+        rows.truncate(0x14);
+        bars.truncate(0x14);
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: vec![],
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: Some(Graph {
+                    bars,
+                    steps,
+                    top: 10,
+                    unit: game.text(STADION_UNIT).to_owned(),
+                    title: game.text(STADION_FANS_AXIS).to_owned(),
+                    ..Graph::default()
+                }),
+            };
+        }
+        true
+    }
+
+    /// Auswärtsauslastung (`FUN_00474ff5`): the own club's away fixtures
+    /// in the calendar's order, each with the gate the host's stadium
+    /// drew — kept in the extra block at `+0x398` in the order the away
+    /// games came — the greatest of the played ones giving the steps.
+    fn stadion_away_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        set_header(view, dialog, game.text(STADION_AWAY_TITLE).to_owned(), &[(0, 0)]);
+        let zeros = [0i32; 23];
+        let extra = records
+            .managers
+            .iter()
+            .zip(&records.extras)
+            .find(|(m, _)| (u16::from(m.country()), m.team() as i16) == own)
+            .map(|(_, e)| e);
+        let gates: [i32; 23] = extra.map_or(zeros, |e| e.away_gates());
+        let away_games = usize::from(team.away_games());
+        let max = gates.iter().take(away_games).copied().max().unwrap_or(0);
+        let (steps, unit, f) = Self::fill_scale(max);
+        let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
+        let mut rows: Vec<TableRow> = Vec::new();
+        let mut bars: Vec<(i32, bool)> = Vec::new();
+        let mut k = 0;
+        for fixture in fixtures.iter().filter(|f| !f.home).take(away_games) {
+            let v = gates.get(k).copied().unwrap_or(0);
+            k += 1;
+            if v > 0 {
+                let name = game.club_name(Some(records), own.0 as u8, fixture.opponent);
+                rows.push(TableRow {
+                    text: format!("{name} ( {v} )"),
+                    ink: INK,
+                    mark: None,
+                    columns: None,
+                });
+                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, false));
+            }
+        }
+        rows.truncate(0x14);
+        bars.truncate(0x14);
+        let unit = Self::unit_label(game.text(STADION_UNIT), unit);
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: vec![],
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: Some(Graph {
+                    bars,
+                    steps,
+                    top: 10,
+                    unit,
+                    title: game.text(STADION_AWAY_AXIS).to_owned(),
+                    ..Graph::default()
+                }),
+            };
+        }
+        true
+    }
+
     /// The season's results (`FUN_00445951` into the game's
     /// `CTabellenWnd`): the league the strip stands on laid crosswise,
     /// rows and columns in the league's own places — the order the
@@ -2707,7 +2996,7 @@ impl Statistics {
                 centred: -1,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars, steps: axis / 25, shapes: Vec::new(), bar: None }),
+                graph: Some(Graph { bars, steps: axis / 25, ..Graph::default() }),
             };
         }
         true
@@ -2955,7 +3244,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None, ..Graph::default() }),
             };
         }
         true
@@ -2998,7 +3287,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None, ..Graph::default() }),
             };
         }
         true
@@ -3197,7 +3486,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None, ..Graph::default() }),
             };
         }
         true
@@ -3277,7 +3566,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: 0,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar: None, ..Graph::default() }),
             };
         }
         true
@@ -4843,7 +5132,7 @@ impl Statistics {
                 width: ROW_WIDTH,
                 scroll: at,
                 cross: None,
-                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar }),
+                graph: Some(Graph { bars: Vec::new(), steps: 0, shapes, bar, ..Graph::default() }),
             };
         }
         true

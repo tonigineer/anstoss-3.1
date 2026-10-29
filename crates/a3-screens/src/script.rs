@@ -6496,4 +6496,56 @@ mod tests {
         let table = view.table(control(dialog, 29999).unwrap()).unwrap();
         assert_eq!(table.rows[0].text, "Signal Iduna Park\tDortmund\t81365\tBorussia Dortmund");
     }
+
+    /// The Stadion category's three bar pages stand their bars on an
+    /// axis: the own club's home games at their gates with the plan of
+    /// attendance behind, the guest clubs' fans at those games, and the
+    /// gates the away games drew — each labelled "name ( value )", the
+    /// steps of a thousand and the unit by the axis's end.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_stadion_stands_bars_on_the_axis() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let stad = "now click bar 14\nuntil dialog 18\nnow row 1283 5";
+        // Auslastung: the played home game's gate and the plan's bar.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 0")) else {
+            return
+        };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let graph = table.graph.as_ref().unwrap();
+        assert_eq!(
+            table.rows.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(),
+            ["Borussia Dortmund ( 22012 )", "Kalkuliert ( 22012 )"]
+        );
+        assert_eq!(graph.steps, 23);
+        assert_eq!(graph.bars, vec![(354, false), (354, false)]);
+        assert_eq!(graph.top, 10);
+        assert_eq!(graph.unit, "Zuschauer/1000");
+        // Gegnerische Fans: the fans the guest brought, its own steps.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 1")) else {
+            return
+        };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        let graph = table.graph.as_ref().unwrap();
+        assert_eq!(table.rows.len(), 1);
+        assert_eq!(table.rows[0].text, "Borussia Dortmund ( 3926 )");
+        assert_eq!(graph.steps, 4);
+        assert_eq!(graph.bars, vec![(363, false)]);
+        assert_eq!(graph.unit, "Zuschauer/1000");
+        // Auswärtsauslastung: the gates the two away games drew.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 2")) else {
+            return
+        };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        let graph = table.graph.as_ref().unwrap();
+        assert_eq!(
+            table.rows.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(),
+            ["Hamburger SV ( 57000 )", "VfL Wolfsburg ( 24589 )"]
+        );
+        assert_eq!(graph.steps, 6);
+        assert_eq!(graph.bars, vec![(352, false), (152, false)]);
+    }
 }
