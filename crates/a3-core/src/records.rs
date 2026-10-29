@@ -197,6 +197,9 @@ record! {
     /// Condition and freshness, in hundredths.
     0x1ce => condition, set_condition: i16;
     0x1d0 => freshness, set_freshness: [i16; 3];
+    /// His room in the training camp, 0 to 19; below 0 none (the player
+    /// object's +0xc9, [`crate::rooms`]).
+    0x1d6 => room, set_room: i8;
     /// Set with an injury: the game's day it happened (`FUN_00766b92`).
     0x1d8 => injured_on, set_injured_on: u16;
     /// The injury lasts to this year and day of the year.
@@ -650,6 +653,14 @@ record! {
     0x282a => co_training_focus, set_co_training_focus: [u8; 9];
     /// The player the detective watches (0 nobody).
     0x2834 => detective, set_detective: u16;
+    /// The training units given this season and last week, by unit
+    /// (the club object's +0xcd6 and +0xcaf, copied with the plan); the
+    /// four session counts above are four of the first.
+    0x33c => season_units, set_season_units: [i16; 39];
+    0x315 => week_units, set_week_units: [u8; 39];
+    /// How many weeks of the team's fitness are kept
+    /// ([`Extra::fitness_weeks`]).
+    0xb90 => fitness_count, set_fitness_count: i16;
     /// How many past seasons' balances are kept ([`Extra::balances`]).
     0x1e48 => balance_count, set_balance_count: i16;
     /// How many past seasons' transfer balances are kept
@@ -713,6 +724,15 @@ impl Extra {
                 strength: self.get(r + 8),
                 result: self.get(r + 0xc),
             })
+            .collect()
+    }
+
+    /// The team's fitness week by week (`FUN_00632833` copies them out):
+    /// at most fifty records of seven bytes from +0xb92, of which the
+    /// training statistics draw bytes 3, 4 and 6 as their curves.
+    pub fn fitness_weeks(&self) -> Vec<[u8; 7]> {
+        (0..self.fitness_count().clamp(0, 50) as usize)
+            .map(|k| self.get(0xb92 + k * 7))
             .collect()
     }
 
@@ -1313,6 +1333,10 @@ record! {
     /// Where the game cycle goes on after loading (`FUN_006da3a9`): 998
     /// inside the week, the half weeks at a week's turn.
     0xb5d172 => resume, set_resume: u16;
+    /// A lottery drawn for every season after the first, below 1000 (the
+    /// first season sets it to 1): only at 0 does Atlantis open for a
+    /// training camp (`DAT_00b5d174`).
+    0xb5d174 => lottery, set_lottery: u16;
 }
 
 impl Globals {

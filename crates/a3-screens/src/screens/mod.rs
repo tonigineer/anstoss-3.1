@@ -8,9 +8,11 @@ pub mod announcement;
 pub mod bank;
 pub mod board;
 pub mod calendar;
+pub mod camp;
 pub mod comparison;
 pub mod contacts;
 pub mod discipline;
+pub mod donations;
 pub mod doping;
 pub mod duties;
 pub mod finances;
@@ -20,6 +22,7 @@ pub mod honours;
 pub mod hub;
 pub mod jobs;
 pub mod kalkulation;
+pub mod licence;
 pub mod konfig3d;
 pub mod market;
 pub mod medical;
@@ -249,6 +252,13 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(training::individual::IndividualTraining::default()),
         Box::new(training::individual::AbilityChoice::default()),
         Box::new(training::settings::CoTrainerSettings::default()),
+        Box::new(training::performance::TrainingStatistics::default()),
+        Box::new(training::rooms::Rooms::default()),
+        Box::new(camp::WorldMap::default()),
+        Box::new(camp::CampConfirm),
+        Box::new(camp::CampGroup),
+        Box::new(donations::Donations::default()),
+        Box::new(licence::Licence),
     ]
 }
 
@@ -276,6 +286,11 @@ pub fn compose(game: &mut Game) {
     training::long::compose(&mut game.dialogs, &game.data.rules);
     training::individual::compose(&mut game.dialogs, &game.data.rules);
     training::settings::compose(&mut game.dialogs);
+    training::performance::compose(&mut game.dialogs);
+    training::rooms::compose(&mut game.dialogs);
+    camp::compose(&mut game.dialogs, &game.data.rules);
+    donations::compose(&mut game.dialogs);
+    licence::compose(&mut game.dialogs);
     popups::compose(&mut game.dialogs);
     planner::compose(&mut game.dialogs, &game.data.rules);
     notepad::compose(&mut game.dialogs);

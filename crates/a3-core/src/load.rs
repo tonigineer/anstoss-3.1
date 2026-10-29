@@ -74,6 +74,7 @@ pub fn season(records: &Records, data: &Data, random: Random) -> Season {
         // before its matches.
         before_match: records.globals.resume() == MATCHES_RESUMED,
         random,
+        donations: Vec::new(),
     }
 }
 

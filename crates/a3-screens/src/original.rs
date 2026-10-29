@@ -49,6 +49,8 @@ const ANSWER: Duration = Duration::from_secs(60);
 const FRAMES: [u16; 1] = [214];
 /// The game's day, counted from the start of the first season (16 bits).
 const DAY: u32 = 0xb5cbd4;
+/// The game's random numbers' state, two halves (`DAT_0089dcc0`).
+const RANDOM: u32 = 0x89dcc0;
 /// Keys: to the end of a field, and back over a character.
 const VK_END: u8 = 0x23;
 const VK_BACK: u8 = 0x08;
@@ -304,6 +306,14 @@ impl<'a> Original<'a> {
         self.log.push(format!("  {action:?}"));
         if let Action::Wait = action {
             return self.wait(up);
+        }
+        if let Action::Random(s1, s2) = *action {
+            for (at, half) in [(RANDOM, s1), (RANDOM + 4, s2)] {
+                let bytes = (half as i32).to_le_bytes();
+                let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                self.probe.ask(format!("poke {at:#x} {hex}").as_bytes())?;
+            }
+            return Ok(());
         }
         if let Action::ClickAt((x, y)) = *action {
             self.click(Vec2::new(f32::from(x), f32::from(y)))?;

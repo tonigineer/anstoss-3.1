@@ -434,6 +434,7 @@ fn printed(cx: &Cx, text: u16, fills: [Fill; 2]) -> String {
         .filter_map(|&fill| match fill {
             Fill::None => None,
             Fill::Number(n) => Some(n.to_string()),
+            Fill::Count(n) => Some(super::finances::count(n)),
             Fill::Money64(v) => Some(super::finances::money64(cx.game, v)),
             Fill::Money(v) => Some(super::playerinfo::money(cx.game, v)),
         })

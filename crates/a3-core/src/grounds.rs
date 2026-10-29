@@ -193,6 +193,17 @@ impl Grounds {
         long(&self.data, COUNT)
     }
 
+    /// What the buildings on the club's land are worth, at the prices
+    /// they were bought for (`FUN_007be417`).
+    pub fn value(&self) -> i64 {
+        (0..ENTRIES)
+            .map(|k| self.entry(k))
+            .filter(|e| e.used && e.owned)
+            .filter_map(|e| TYPES.get(usize::try_from(e.kind).ok()?))
+            .map(|t| i64::from(t.price))
+            .sum()
+    }
+
     /// The entry covering a tile, if any.
     pub fn at(&self, x: usize, y: usize) -> Option<usize> {
         let k = word(&self.data, GRID + 2 * (y * SIZE + x));

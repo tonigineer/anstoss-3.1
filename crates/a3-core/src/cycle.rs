@@ -241,13 +241,15 @@ pub struct Negotiation {
     pub join: Option<i16>,
 }
 
-/// What a `%` of a text stands for: nothing, a number, an amount of
-/// money as the game writes a 64-bit one (`FUN_004db27e`) or a 32-bit one
+/// What a `%` of a text stands for: nothing, a number, a count with
+/// points between the thousands (`FUN_004dacb9`), an amount of money as
+/// the game writes a 64-bit one (`FUN_004db27e`) or a 32-bit one
 /// (`FUN_004daf8f`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fill {
     None,
     Number(i32),
+    Count(i32),
     Money64(i64),
     Money(i64),
 }
@@ -256,6 +258,12 @@ pub enum Fill {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Args {
     None,
+    /// The world map of the training camps' places, for a camp from a day.
+    CampDay(usize),
+    /// A camp's place to confirm, from 0, and its first day.
+    Camp { place: usize, day: usize },
+    /// The choice among a group's other places, from 0: up to three.
+    CampGroup { places: [u8; 3], count: u8 },
     /// The text of a question or notice, by its id.
     Text(u16),
     /// A job offer, by its tab.

@@ -21,7 +21,8 @@
 //! <value>`, `rclick <control>`, `drag <box or row> <box or row>|off` (a
 //! box or row is `<control>` or `<list> row <row>`), and `wait` until the
 //! screen moves on by itself; or on the dialog's pixels: `click at <x>
-//! <y>`, `drag at <x> <y> to <x> <y>`. A dialog the script has no actions
+//! <y>`, `drag at <x> <y> to <x> <y>`; and `random <s1> <s2>`, which sets
+//! the game's random numbers to that state. A dialog the script has no actions
 //! for stops it, as does an action for a control the dialog does not have.
 //!
 //! Dialogs go by their ids in the game's dialog file, as the original knows
@@ -98,6 +99,8 @@ pub(crate) enum Action {
     /// a list's row, which the game takes for a choice.
     Dbl(Box<Action>),
     Wait,
+    /// The game's random numbers set to a state, both halves.
+    Random(i64, i64),
 }
 
 /// A control, or a row of a list, by its id.
@@ -240,6 +243,7 @@ fn parse_action(action: &str) -> Option<Action> {
         ["ok"] => Action::Ok,
         ["cancel"] => Action::Cancel,
         ["wait"] => Action::Wait,
+        ["random", s1, s2] => Action::Random(s1.parse().ok()?, s2.parse().ok()?),
         ["press", button] => Action::Press(id(button)?),
         ["click", "bar", symbol] => Action::Bar(symbol.parse().ok()?),
         ["click", control] => Action::Click(id(control)?),
@@ -413,6 +417,12 @@ impl<'a> Runner<'a> {
                 return Ok(());
             }
             Action::Wait => return self.wait(shown),
+            Action::Random(s1, s2) => {
+                if let Some(season) = self.host.state().season.as_mut() {
+                    season.random = a3_core::random::Random::from_state(s1, s2);
+                }
+                return Ok(());
+            }
             Action::PointAt(at) => {
                 self.host.view_mut().hovered = self.click_at(shown, at).ok();
                 self.host.view_mut().pointer = Some(Vec2::new(at.0.into(), at.1.into()));
@@ -570,6 +580,7 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::RightClick(spot) => Target::Menu(grip(controls, dialog, spot)?),
         Action::Type(id, _) => Target::Edit(find(id)?),
         Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
+        Action::Random(..) => return Err(Error::Unsupported(dialog, "random numbers".into())),
         // A double click acts twice; the runner does that, not this.
         Action::Dbl(_) => return Err(Error::Unsupported(dialog, "a double click".into())),
         Action::DragAt(..) | Action::ClickAt(_) | Action::PointAt(_) => {
@@ -1670,6 +1681,74 @@ mod tests {
         let view = runner.host.view();
         let notice = view.text(crate::screens::control(&game.dialogs[&380], 4730).unwrap());
         assert_eq!(notice, game.text(4582));
+    }
+
+    /// Going public, on A with a profit in each of the last three seasons
+    /// patched in: 645.000 shares offered for 25.80 Mio €, as the original
+    /// offers them; taken, at the random numbers poked into the original
+    /// before its OK, the club stands on the market as the original put it
+    /// there (peeked: drift 1, 1610 shares to be had, 219.45 € high, low
+    /// and current), an AG, the proceeds in the bank.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_bilanz_takes_the_club_public() {
+        let Some(dir) = std::env::var_os("ANSTOSS3_DIR").map(PathBuf::from) else { return };
+        if !dir.join("saves/A.an3").exists() && !dir.join("../saves-kept/A.an3").exists() {
+            return;
+        }
+        let root = patched(&dir, "A", "going-public", |records| {
+            let team = usize::from(records.managers[0].team());
+            for at in [0x908, 0x910, 0x918] {
+                records.teams[team].put::<i64>(at, 0);
+            }
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let ask = "now click bar 8\nuntil dialog 349\nnow press 6152\nuntil dialog 384";
+        let runner = on_save(&game, "going-public", ask).unwrap();
+        let view = runner.host.view();
+        let question = view.text(control(&game.dialogs[&384], 4738).unwrap()).to_owned();
+        let offered = question.contains("645.000 Aktien") && question.contains("25.80 Mio €");
+        assert!(offered, "{question}");
+
+        let taken = format!("{ask}\nnow random 12345 67890\nnow press 4741\nuntil dialog 349");
+        let runner = on_save(&game, "going-public", &taken).unwrap();
+        let dialog = &game.dialogs[&349];
+        let view = runner.host.view();
+        let text = |id: u16| view.text(control(dialog, id).unwrap()).trim().to_owned();
+        assert_eq!([text(5510), text(5511), text(5512), text(5513)], [
+            "AG",
+            "645.000",
+            "219,44 €",
+            "141.54 Mio €"
+        ]);
+        assert_eq!(text(4463), "31.72 Mio €");
+        assert!(view.disabled(control(dialog, 6152).unwrap()));
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let market = records.block("0x8be408").unwrap();
+        assert_eq!(i32::from_le_bytes(market[..4].try_into().unwrap()), 204);
+        let entry = &market[0x14 + 203 * 0x108..0x14 + 204 * 0x108];
+        let price = 0x435b7333u32.to_le_bytes();
+        let mut expected = vec![0u8; 0x108];
+        expected[..17].copy_from_slice(b"1.FC Union Berlin");
+        for (at, bytes) in [
+            (0x1c, &14i16.to_le_bytes()[..]),
+            (0x1e, &84i16.to_le_bytes()),
+            (0x20, &645_000i32.to_le_bytes()),
+            (0x24, &50i16.to_le_bytes()),
+            (0x26, &1i16.to_le_bytes()),
+            (0x28, &1610i32.to_le_bytes()),
+            (0x30, &price),
+            (0x34, &price),
+            (0x38 + 50 * 4, &price),
+        ] {
+            expected[at..at + bytes.len()].copy_from_slice(bytes);
+        }
+        assert_eq!(entry, &expected[..]);
+        let team = &records.teams[usize::from(records.managers[0].team())];
+        assert_eq!(team.legal_form() & 1, 1);
+        assert_eq!(team.get::<u32>(0x308) & 0x8000, 0x8000);
     }
 
     #[test]
@@ -6786,5 +6865,218 @@ mod tests {
             return;
         };
         assert!(theirs.is_empty());
+    }
+
+    /// The long-term training's 4418 opens the training statistics: on
+    /// A twenty players train well for their super condition, none badly;
+    /// the units list all but the eleventh, the season's and last week's;
+    /// the graph draws nine weeks in three curves. Patched, a tired
+    /// keeper trains badly, one with morale too low and tired as well
+    /// names only the last reason, and one with reasons both ways shows
+    /// in neither list.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_training_statistics_list_who_trains_well_and_badly() {
+        let open = "now click bar 3\nuntil dialog 345\nnow press 4418\nuntil dialog 406";
+        let rows = |game: &Game, save: &str| -> Option<[Vec<String>; 3]> {
+            let runner = on_save(game, save, open)?;
+            let dialog = &game.dialogs[&406];
+            let list = |id: u16| runner.host.view().list(control(dialog, id).unwrap()).unwrap().rows.clone();
+            Some([list(4821), list(4822), list(4823)])
+        };
+        let game = game();
+        let Some([good, bad, units]) = rows(&game, "A") else { return };
+        assert_eq!(good.len(), 20);
+        assert_eq!(good[0], "Rönnow, F.\tTO\t9\tSuper Kondition");
+        assert!(bad.is_empty());
+        assert_eq!(units.len(), 38);
+        assert_eq!(units[6], "brutale Kondition\t36\t0");
+        assert_eq!(units[7], "Ecken\t6\t2");
+        let runner = on_save(&game, "A", open).unwrap();
+        let graph = control(&game.dialogs[&406], 5526).unwrap();
+        assert_eq!(runner.host.view().paint(graph).unwrap().lines.len(), 27);
+
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "A", "training-moods", |records| {
+            let (fit, fresh) = (records.players[3257].condition(), records.players[3257].freshness());
+            let mut set = |id: usize, morale: u8, condition: i16, freshness: [i16; 3]| {
+                let p = &mut records.players[id];
+                p.set_morale(morale);
+                p.set_condition(condition);
+                p.set_freshness(freshness);
+            };
+            set(3257, 100, fit, [1000; 3]);
+            set(3258, 120, 3000, fresh);
+            set(3259, 80, fit, [1000; 3]);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let [good, bad, _] = rows(&game, "training-moods").unwrap();
+        assert_eq!(good.len(), 17);
+        assert_eq!(bad, ["Rönnow, F.\tTO\t9\tmüde", "Klaus, C.\tTO\t6\tmüde"]);
+    }
+
+    /// The camp's rooms seat the squad as their records keep them, a pair
+    /// of best friends blue. A name dragged onto a free bed moves there;
+    /// one dragged onto Bianca's picture swaps with her, and she shows in
+    /// his room. OK keeps the rooms, Bianca's place aside: opened again,
+    /// the one who stood there is back in his room and Bianca at hers.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_camp_rooms_swap_names_and_bianca() {
+        use crate::controls::ControlState;
+        let game = game();
+        let dialog = &game.dialogs[&407];
+        let open = "now click bar 3\nuntil dialog 345\nnow press 4890\nuntil dialog 407";
+        let names = |runner: &Runner, ids: &[u16]| -> Vec<String> {
+            ids.iter().map(|&id| runner.host.view().text(control(dialog, id).unwrap()).to_owned()).collect()
+        };
+        let Some(runner) = on_save(&game, "A", open) else { return };
+        assert_eq!(names(&runner, &[4810, 4811, 4893]), ["Leite, D.", "Moore, M.", "Frei"]);
+        let nsoki = control(dialog, 4812).unwrap();
+        let ink = match &runner.host.view().controls[nsoki].state {
+            ControlState::Static(s) => s.ink,
+            _ => None,
+        };
+        assert_eq!(ink, Some([0, 0, 255]));
+        let then = format!("{open}\nnow drag 4810 4893\nnow drag 4811 4824");
+        let runner = on_save(&game, "A", &then).unwrap();
+        assert_eq!(names(&runner, &[4810, 4811, 4893]), ["Frei", "Bianca", "Leite, D."]);
+        let again = format!("{then}\nnow press 1\nuntil dialog 345\nnow press 4890\nuntil dialog 407");
+        let runner = on_save(&game, "A", &again).unwrap();
+        assert_eq!(names(&runner, &[4810, 4811, 4893]), ["Moore, M.", "Frei", "Leite, D."]);
+    }
+
+    /// The year calendar's camp, dragged onto the 17th of September, asks
+    /// for its place on the world map; the Dutch sports school confirmed,
+    /// it starts there that day and ends the next. Cape Canaveral's point
+    /// offers its group's three places, the Mars base not yet. Atlantis
+    /// shows only in the lottery's lucky season.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_calendar_books_a_training_camp_from_the_world_map() {
+        let game = game();
+        let map = "now click bar 6\nuntil dialog 348\nnow drag at 480 210 to 180 260\nuntil dialog 488";
+        let booked = format!("{map}\nnow click at 297 150\nuntil dialog 285\nnow press 1\nuntil dialog 348");
+        let Some(runner) = on_save(&game, "A", &booked) else { return };
+        let state = runner.host.state();
+        let calendar = &state.records.as_ref().unwrap().calendars[0];
+        let (start, end) = (a3_core::year::day(calendar, 72), a3_core::year::day(calendar, 73));
+        assert!(start.camp_start() && start.place() == 2);
+        assert!(end.kind() == a3_core::year::CAMP && !end.camp_start());
+
+        let group = format!("{map}\nnow click at 132 200\nuntil dialog 50");
+        let runner = on_save(&game, "A", &group).unwrap();
+        let rows = control(&game.dialogs[&50], 1447).unwrap();
+        let labels = &runner.host.view().options(rows).unwrap().labels;
+        assert_eq!(labels[..3], ["Raumstation", "Mondbasis Alpha", "Marsbasis 51"]);
+        let mars = format!("{group}\nnow click at 320 366\nuntil dialog 380");
+        let runner = on_save(&game, "A", &mars).unwrap();
+        assert_eq!(runner.host.view().id, 380);
+
+        let atlantis = |runner: &Runner| {
+            let dialog = &game.dialogs[&488];
+            let shown = |id: u16| !runner.host.view().controls[control(dialog, id).unwrap()].hidden;
+            (shown(6156), shown(100 + 20))
+        };
+        let runner = on_save(&game, "A", map).unwrap();
+        assert_eq!(atlantis(&runner), (false, false));
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "A", "lucky-season", |records| records.globals.set_lottery(0));
+        let mut lucky = Game::load(&root).unwrap();
+        compose(&mut lucky);
+        let runner = on_save(&lucky, "lucky-season", map).unwrap();
+        assert_eq!(atlantis(&runner), (true, true));
+    }
+
+    /// The Finanzen screen's donations offer what the bank holds up to
+    /// 100.000, in hundreds on the slider's steps; on A only good causes,
+    /// no other human. Given, the amount joins the club's costs, the
+    /// manager's popularity with the public and in the media rises by one,
+    /// the board's confidence falls by one, the club's image rises by one.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_screen_gives_donations() {
+        let game = game();
+        let dialog = &game.dialogs[&63];
+        let open = "now click bar 9\nuntil dialog 417\nnow press 2222\nuntil dialog 63";
+        let Some(runner) = on_save(&game, "A", open) else { return };
+        let text = |runner: &Runner, id: u16| runner.host.view().text(control(dialog, id).unwrap()).to_owned();
+        assert_eq!([text(&runner, 1628), text(&runner, 1629), text(&runner, 1630)], [
+            "100.000 €",
+            "5.92 Mio €",
+            "17.42 Mio €"
+        ]);
+        let rows = runner.host.view().options(control(dialog, 6022).unwrap()).unwrap().labels.clone();
+        assert_eq!(rows[1..], ["---", "---", "---"]);
+        let figures = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = &records.managers[0];
+            let team = &records.teams[usize::from(manager.team())];
+            let costs = team.get::<i32>(0x2c0 + a3_core::finances::CLUB_TO_TEAM);
+            (manager.popularity(), manager.confidence(), team.public_image(), costs)
+        };
+        let before = figures(&runner);
+        let slid = format!("{open}\nnow slide 1631 60");
+        let runner = on_save(&game, "A", &slid).unwrap();
+        assert_eq!(text(&runner, 1628), "10.000 €");
+        let given = format!("{open}\nnow press 1\nuntil dialog 417");
+        let runner = on_save(&game, "A", &given).unwrap();
+        let ([public, fans, media], confidence, image, costs) = before;
+        assert_eq!(
+            figures(&runner),
+            ([public + 1, fans, media + 1], confidence - 1, image + 1, costs + 100_000)
+        );
+    }
+
+    /// The association's conditions: none on A. Patched with a debt limit,
+    /// no building and no camps, they stand a line each and the outlook
+    /// grants the licence; with 31 Mio more costs booked the chance is gone
+    /// and the Finanzen screen refuses (text 3108) — not so for a club
+    /// whose cash itself is in the red by more than 10 Mio in the first
+    /// season, which gets it after all.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_screen_shows_the_licence_conditions() {
+        let open = "now click bar 9\nuntil dialog 417\nnow press 1619\nuntil dialog 64";
+        let texts = |game: &Game, save: &str| -> Option<(String, String)> {
+            let runner = on_save(game, save, open)?;
+            let dialog = &game.dialogs[&64];
+            let text = |id: u16| runner.host.view().text(control(dialog, id).unwrap()).to_owned();
+            Some((text(1637), text(1636)))
+        };
+        let game = game();
+        let Some((conditions, outlook)) = texts(&game, "A") else { return };
+        assert_eq!(conditions, format!("{}\n", game.text(2444)));
+        assert!(outlook.is_empty());
+
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        fn own(records: &mut a3_core::records::Records) -> &mut a3_core::records::Team {
+            let team = usize::from(records.managers[0].team());
+            &mut records.teams[team]
+        }
+        let root = patched(&dir, "A", "licence-conditions", |records| {
+            let team = own(records);
+            team.put(0x12b, 0x08u8 | 0x01 | 0x02);
+            team.put(0x5d8 + a3_core::finances::CLUB_TO_TEAM, 5u8);
+        });
+        let mut patched_game = Game::load(&root).unwrap();
+        compose(&mut patched_game);
+        let (conditions, outlook) = texts(&patched_game, "licence-conditions").unwrap();
+        let debt = game.text(2811).replacen("%s", "5.00 Mio €", 1);
+        assert_eq!(conditions, format!("{debt}\n{}\n{}\n", game.text(2441), game.text(2442)));
+        assert!(outlook.starts_with(game.text(2819)), "{outlook}");
+
+        let root = patched(&dir, "A", "licence-gone", |records| {
+            let at = 0x2c0 + a3_core::finances::CLUB_TO_TEAM;
+            let team = own(records);
+            team.put(at, team.get::<i32>(at) + 31_000_000);
+        });
+        let mut broke = Game::load(&root).unwrap();
+        compose(&mut broke);
+        let refused = "now click bar 9\nuntil dialog 417\nnow press 1619\nuntil dialog 380";
+        let runner = on_save(&broke, "licence-gone", refused).unwrap();
+        assert_eq!(runner.host.view().id, 380);
     }
 }

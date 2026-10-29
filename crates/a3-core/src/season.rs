@@ -281,6 +281,20 @@ pub struct Season {
     /// the money's and the club's screens (`FUN_00652a86`).
     pub before_match: bool,
     pub random: Random,
+    /// The week's donations to other humans' clubs (`CSpenden`, the table
+    /// at 0x1bac688, which no save keeps).
+    pub donations: Vec<Donation>,
+}
+
+/// A donation to another human's club: by the giving manager, to the club
+/// (country and number), the amount. The week's end books it with the
+/// club's other income (`FUN_006eeda7`); until then the giver may give no
+/// more (`FUN_006eecd7`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Donation {
+    pub manager: usize,
+    pub club: (u8, i16),
+    pub amount: i32,
 }
 
 /// What the game follows of a club with a human manager.
@@ -639,6 +653,7 @@ impl Season {
             planner_message: None,
             before_match: false,
             random,
+            donations: Vec::new(),
         };
         for m in 0..season.managers.len() {
             if let Some(club) = season.managers[m].club {

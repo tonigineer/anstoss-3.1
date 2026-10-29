@@ -199,10 +199,11 @@ impl Balance {
     }
 }
 
-/// Why a club may not go to the stock market, as far as the game's checks
-/// are known (`OnClicked_IDC_BIL_NEU_BUT_AG_00481c8d`): below the second
-/// league, the amateurs of another club, a fortune below the least, more
-/// loans than deposits, a loss in one of the last three seasons.
+/// Why a club may not go to the stock market
+/// (`OnClicked_IDC_BIL_NEU_BUT_AG_00481c8d`): below the second league, the
+/// amateurs of another club, a fortune below the least, more loans than
+/// deposits, a loss in one of the last three seasons, a stadium and
+/// grounds worth less than the least together.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Refusal {
     League,
@@ -210,6 +211,53 @@ pub enum Refusal {
     Fortune(i64),
     Loans,
     Losses,
+    Worth(i64),
+}
+
+/// What the stadium and the grounds must be worth together to go public
+/// (`DAT_00a3b2d0`).
+pub const LEAST_WORTH: i64 = 10_000_000;
+/// What a share brings the club (`DAT_00a3b40c`), and what the club's
+/// worth is counted in shares by (`DAT_00a3b408`): in hundreds, at most
+/// five millions.
+pub const SHARE_PRICE: i32 = 40;
+const SHARE_WORTH: i64 = 50;
+const SHARES_ROUND: i32 = 100;
+const MOST_SHARES: i32 = 5_000_000;
+/// The club object's flags at +0xdf8 (team +0x308), with the bit going
+/// public sets.
+const CLUB_FLAGS: usize = 0x308;
+const PUBLIC: u32 = 0x8000;
+const SHARES_SOLD: usize = 0x2d0;
+
+/// The shares a club going public issues (asm 0x48229b–0x482370): a fifth
+/// of what its stadium, its grounds and its squad at half the players'
+/// market values are worth, with its fortune and the merchandise in stock,
+/// a share for every 50 €, in hundreds; none when that comes to nothing.
+pub fn shares_offered(
+    stadium: i64,
+    grounds: i64,
+    fortune: i64,
+    merchandise: i32,
+    squad: i64,
+) -> Option<i32> {
+    let worth = (stadium / 5)
+        .wrapping_add(grounds / 5)
+        .wrapping_add(fortune)
+        .wrapping_add(merchandise.into())
+        .wrapping_add(squad / 5);
+    let shares = (worth / SHARE_WORTH) as i32 / SHARES_ROUND * SHARES_ROUND;
+    (shares > 0).then(|| shares.min(MOST_SHARES))
+}
+
+/// The club made a company once its shares are on the market: the AG's
+/// bit (`FUN_0069d75e`), the club's flag, the shares' proceeds.
+pub fn go_public(team: &mut Team, shares: i32) {
+    team.set_legal_form(team.legal_form() | 1);
+    let flags: u32 = team.get(CLUB_FLAGS);
+    team.put(CLUB_FLAGS, flags | PUBLIC);
+    let sold: i32 = team.get(SHARES_SOLD + CLUB_TO_TEAM);
+    team.put(SHARES_SOLD + CLUB_TO_TEAM, sold.wrapping_add(shares.wrapping_mul(SHARE_PRICE)));
 }
 
 /// The least fortune a club on the stock market has.
@@ -218,8 +266,9 @@ const LEAST_FORTUNE: i64 = 2_000_000;
 const PAST_RESULTS: [usize; 3] = [0x908, 0x910, 0x918];
 
 impl Balance {
-    /// The first check a club fails of those for the stock market, if it
-    /// fails one; the stadium's and the grounds' value are not checked.
+    /// The first check a club fails of those for the stock market that go
+    /// by its accounts, if it fails one; then the stadium's and the
+    /// grounds' worth are checked ([`LEAST_WORTH`]).
     pub fn refusal(&self, team: &Team) -> Option<Refusal> {
         if team.level() >= 2 {
             return Some(Refusal::League);
@@ -952,6 +1001,47 @@ const STEP_TABLES: [&[(i64, i64)]; 9] = [
     &[(10_000, 2000), (100_000, 5000), (500_000, 10_000), (ON, 20_000)],
     &[(100_000, 10_000), (500_000, 20_000), (1_000_000, 50_000), (ON, 100_000)],
 ];
+
+/// Donations (`CSpenden`, dialog 63; FINANZUEBERSICHT.md §4.3): money in
+/// hundreds, the slider's steps over them (the table at 0x887cf8);
+/// offered at first all the bank holds up to 100.000, at most 10 Mio
+/// (`DAT_00a3b3fc`, `DAT_00a3b37c`, `DAT_00a3b2d0`).
+pub const DONATION_UNIT: i64 = 100;
+pub const DONATION_OFFER: i64 = 100_000;
+pub const DONATION_MOST: i64 = 10_000_000;
+pub const DONATION_STEPS: [(i64, i64); 7] =
+    [(50, 1), (100, 5), (400, 10), (1000, 50), (5000, 100), (10_000, 500), (ON, 1000)];
+/// A donation weighs its hundred thousands, ten at most; it is booked
+/// with the other costs at club +0x2c0.
+const DONATION_WEIGHT: i64 = 100_000;
+const DONATION_WEIGHT_MOST: i64 = 10;
+const DONATIONS: usize = 0x2c0;
+/// The club's public image stays between these (`FUN_00698d01`).
+const IMAGE_LEAST: i32 = 10;
+const IMAGE_MOST: i32 = 50;
+
+/// What a donation does (`FUN_005419e5`): nothing if it is nothing;
+/// otherwise the amount joins the club's other costs, and by its weight
+/// the manager's popularity with the public rises by it and in the media
+/// by half of it rounded up (`FUN_00418394` into his record's three
+/// bytes, each kept to 0..100), the board's confidence falls by that half
+/// (`FUN_00418597`, 0..100), and the club's public image rises by the
+/// weight, kept to 10..50 (`FUN_00698d01`).
+pub fn donate(team: &mut Team, manager: &mut Manager, amount: i64) {
+    if amount == 0 {
+        return;
+    }
+    let booked = team.get::<i32>(at(DONATIONS)).wrapping_add(amount as i32);
+    team.put(at(DONATIONS), booked);
+    let weight = (amount / DONATION_WEIGHT).min(DONATION_WEIGHT_MOST) as i32;
+    let half = (weight + 1) / 2;
+    let [public, fans, media] = manager.popularity();
+    let up = |v: u8, by: i32| (i32::from(v) + by).clamp(0, 100) as u8;
+    manager.set_popularity([up(public, weight), fans, up(media, half)]);
+    manager.set_confidence((i32::from(manager.confidence()) - half).clamp(0, 100) as i16);
+    let image = (i32::from(team.public_image()) + weight).clamp(IMAGE_LEAST, IMAGE_MOST);
+    team.set_public_image(image as u8);
+}
 
 /// The steps of a slider running to `max`.
 pub fn steps(max: i64) -> &'static [(i64, i64)] {

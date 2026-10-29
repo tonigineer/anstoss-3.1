@@ -45,6 +45,14 @@ const ARTICLES: usize = 40;
 const ARTICLE: usize = 0x50;
 const WEEKLY_SALES: usize = 0x4c;
 const SEASON_WEEKS: i32 = 52;
+/// An article's kind and the pieces of it in stock; the kinds' records
+/// (0x1c bytes, `0x890188`), each with the price a piece is bought at in
+/// cents first (`FUN_00613ea2`).
+const ARTICLE_KIND: usize = 2;
+const IN_STOCK: usize = 0xc;
+const KINDS_AT: u32 = 0x890188;
+const KINDS: usize = 0x45;
+const KIND: usize = 0x1c;
 /// A stadium's level of perimeter advertising, in its block.
 const STADIUM_AT: u32 = 0x1a48138;
 const PERIMETER_LEVEL: usize = 0x66;
@@ -54,6 +62,8 @@ pub struct ForecastTables {
     months_left: Vec<u8>,
     perimeter: Vec<i16>,
     pub tickets: TicketTables,
+    /// What a piece of each kind of article is bought at, in cents.
+    bought_at: Vec<i32>,
 }
 
 impl ForecastTables {
@@ -66,8 +76,35 @@ impl ForecastTables {
                 .map(|&v| v as i16)
                 .collect(),
             tickets: TicketTables::load(exe)?,
+            bought_at: exe
+                .u32s(KINDS_AT, KINDS * KIND / 4)?
+                .chunks(KIND / 4)
+                .map(|kind| kind[0] as i32)
+                .collect(),
         })
     }
+}
+
+/// What a human club's merchandise in stock is worth at the prices it was
+/// bought at (`FUN_00613ea2`), each article's in whole euros.
+pub fn merchandise_value(records: &Records, team: &Team, tables: &ForecastTables) -> i32 {
+    let Some(block) = usize::from(team.human())
+        .checked_sub(1)
+        .filter(|&slot| slot < crate::records::MANAGERS)
+        .and_then(|slot| records.block(&format!("{MERCHANDISE_AT:#x}[{slot}]")))
+    else {
+        return 0;
+    };
+    let long = |a: &[u8], at: usize| i32::from_le_bytes(a[at..at + 4].try_into().unwrap());
+    (0..ARTICLES)
+        .filter_map(|k| block.get(k * ARTICLE..(k + 1) * ARTICLE))
+        .filter(|a| a[0] != 0)
+        .fold(0i32, |sum, a| {
+            let kind = usize::try_from(i16::from_le_bytes([a[ARTICLE_KIND], a[ARTICLE_KIND + 1]]));
+            let price = kind.ok().and_then(|k| tables.bought_at.get(k)).copied().unwrap_or(0);
+            let value = f64::from(long(a, IN_STOCK)) * f64::from(price) / 100.0;
+            sum.wrapping_add(value as i32)
+        })
 }
 
 /// A club's forecast: its records, the month and the day, and what its

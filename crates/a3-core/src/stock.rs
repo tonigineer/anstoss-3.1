@@ -3,7 +3,8 @@
 //! places, and the majority which carries a manager's confidence to 100
 //! (`FUN_00405e95`, `FUN_0040689a`, `FUN_00406b4f`, `FUN_007701b2`).
 
-use crate::records::Records;
+use crate::random::Random;
+use crate::records::{Records, Team};
 
 /// The stock market object (`0x8be408`, its data from +0x20): an i32
 /// count and entries of 0x108 from +0x14.
@@ -163,4 +164,245 @@ pub fn confidence(records: &Records, index: usize) -> i32 {
         Some(manager) => manager.shown_confidence(),
         None => 0,
     }
+}
+
+/// A club going public on the market (`FUN_00406201` in a game on one
+/// machine): one already there takes the shares; a new one goes on at the
+/// end with its first price (`FUN_00404dcd`), and the count grows.
+pub fn list(records: &mut Records, index: usize, shares: i32, random: &mut Random) {
+    let Some(team) = records.teams.get(index) else { return };
+    let (country, number) = (i16::from(team.country()), i16::from(team.number()));
+    let Some(mut market) = records.block(&format!("{MARKET_AT:#x}")).map(<[u8]>::to_vec) else {
+        return;
+    };
+    let count = usize::try_from(long(&market, MARKET_COUNT)).unwrap_or(0);
+    let found = (0..count).map(|k| MARKET_FIRST + k * MARKET_ENTRY).find(|&e| {
+        word(&market, e + CLUB_COUNTRY) == country && word(&market, e + CLUB_NUMBER) == number
+    });
+    if let Some(e) = found {
+        put_long(&mut market, e + CLUB_SHARES, shares);
+    } else {
+        let e = MARKET_FIRST + count * MARKET_ENTRY;
+        if market.len() < e + MARKET_ENTRY {
+            return;
+        }
+        let name: Vec<u8> = team.bytes().iter().copied().take_while(|&b| b != 0).collect();
+        {
+            let entry = &mut market[e..e + MARKET_ENTRY];
+            put_word(entry, CLUB_WEEK, NEW_WEEK);
+            put_long(entry, CLUB_SHARES, NO_SHARES);
+            put_word(entry, CLUB_COUNTRY, country);
+            put_word(entry, CLUB_NUMBER, number);
+            put_long(entry, NAME_END, 0);
+            // The name goes in as `strcpy` puts it, over what follows.
+            let end = (name.len() + 1).min(MARKET_ENTRY);
+            entry[..end].copy_from_slice(&[&name[..], &[0]].concat()[..end]);
+            put_long(entry, CLUB_SHARES, shares);
+        }
+        let price = first_price(records, team, &mut market, e, random);
+        let entry = &mut market[e..e + MARKET_ENTRY];
+        entry[HIGH..HIGH + 4].copy_from_slice(&price.to_le_bytes());
+        entry[LOW..LOW + 4].copy_from_slice(&price.to_le_bytes());
+        put_long(&mut market, MARKET_COUNT, count as i32 + 1);
+    }
+    if let Some(block) = records.block_mut(&format!("{MARKET_AT:#x}")) {
+        block.copy_from_slice(&market);
+    }
+}
+
+/// A new entry's week in the ring before its first price, the shares it
+/// holds until it takes the club's, and where its name ends.
+const NEW_WEEK: i16 = 51;
+const NO_SHARES: i32 = 99_999_999;
+const NAME_END: usize = 0x14;
+/// What else an entry keeps: a bonus on its price in percent, the
+/// price's drift, the shares to be had, the change on the week before in
+/// percent, the highest and lowest price.
+const BONUS: usize = 0x18;
+const DRIFT: usize = 0x26;
+const TO_BE_HAD: usize = 0x28;
+const CHANGE: usize = 0x2c;
+const HIGH: usize = 0x30;
+const LOW: usize = 0x34;
+const DRIFT_MOST: i16 = 50;
+/// The least a share is priced at (`DAT_00a3b424`).
+const LEAST_PRICE: f32 = 5.0;
+/// The team's fields the price goes by: its table place, last season's,
+/// its squad's rank (club +0x109, +0x10b, +0x107); the honours it won
+/// (`FUN_0069a031`), a cup run's bit (`FUN_0069a261`), its form at
+/// home and away by three bits each (club +0xd8).
+const PLACE: usize = 0x132;
+const LAST_PLACE: usize = 0x134;
+const SQUAD_RANK: usize = 0x130;
+const HONOURS: usize = 0x8ea;
+const RUNS: usize = 0x110;
+const CUP_RUN: u16 = 0x1000;
+const FORM: usize = 0xfc;
+/// The European cups' holders, three of country and number
+/// (`DAT_00ae6dd4`, `FUN_0042419d`).
+const HOLDERS_AT: u32 = 0xae6dd4;
+const HOLDERS: usize = 3;
+/// The league's teams and its matchdays played, in its record.
+const LEAGUE_AT: u32 = 0x1a09d48;
+const LEAGUE_TEAMS: usize = 0x30;
+const LEAGUE_PLAYED: usize = 0x46;
+const LOWEST_LEAGUE: u8 = 6;
+const DEFAULT_TEAMS: i16 = 18;
+
+fn put_word(b: &mut [u8], at: usize, v: i16) {
+    b[at..at + 2].copy_from_slice(&v.to_le_bytes());
+}
+
+fn put_long(b: &mut [u8], at: usize, v: i32) {
+    b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+}
+
+fn float(b: &[u8], at: usize) -> f32 {
+    f32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+}
+
+/// A club's price for the week (`FUN_00405024` for a club whose country
+/// keeps its teams): from 120, 60 or 30 by its league's level, six points a
+/// place its squad ranks above the league's last, four a place it stands
+/// above the last, now or last season as the season has gone on, ten for
+/// the top; 30, 20 and 10 for its honours, half or one and a half of
+/// those again for a cup run or a European cup held; its form at home and
+/// away rolled in; its drift; up to a euro more. Then the bonus, at least
+/// five euros, the change on the week before, and the highest and lowest.
+fn first_price(
+    records: &Records,
+    team: &Team,
+    market: &mut [u8],
+    e: usize,
+    random: &mut Random,
+) -> f32 {
+    let mut week = word(&market[e..], CLUB_WEEK) - 1;
+    if week < 0 {
+        week = NEW_WEEK;
+    }
+    put_word(&mut market[e..], CLUB_WEEK, week);
+    let mut base: f32 = match team.level() {
+        0 => 120.0,
+        1 => 60.0,
+        _ => 30.0,
+    };
+    let (teams, played) = league(records, team);
+    let (now, last): (f32, f32) = match played {
+        0 => (0.0, 1.0),
+        1 => (0.2, 0.8),
+        2 => (0.4, 0.6),
+        3 => (0.6, 0.4),
+        4 => (0.8, 0.2),
+        _ => (1.0, 0.0),
+    };
+    let above = |at: usize| f64::from(i32::from(teams) - i32::from(team.get::<u8>(at)));
+    base = (above(PLACE) * f64::from(now) * 4.0 + f64::from(base)) as f32;
+    base = (above(LAST_PLACE) * f64::from(last) * 4.0 + f64::from(base)) as f32;
+    base = (above(SQUAD_RANK) * 6.0 + f64::from(base)) as f32;
+    if team.get::<u8>(PLACE) == 1 {
+        base += 10.0;
+    }
+    let honours = team.get::<u8>(HONOURS);
+    let mut won = 0.0f32;
+    for (bits, points) in [(1, 30.0), (2, 20.0), (3, 10.0)] {
+        if honours & bits != 0 {
+            base += points;
+            won += points;
+        }
+    }
+    if team.get::<u16>(RUNS) & CUP_RUN != 0 {
+        base = (f64::from(won) * 0.5 + f64::from(base)) as f32;
+    }
+    if holds_cup(records, team) {
+        base = (f64::from(won) * 1.5 + f64::from(base)) as f32;
+    }
+    let form = team.get::<i16>(FORM);
+    for (bits, most) in [(form & 7, 20), ((form >> 3) & 7, 10)] {
+        base = match bits {
+            0 | 1 => base + random.below(most) as f32,
+            2 => base - random.below(most) as f32,
+            3 => (f64::from(random.below(10)) - 5.0 + f64::from(base)) as f32,
+            _ => base,
+        };
+    }
+    let entry = &mut market[e..e + MARKET_ENTRY];
+    let drift = word(entry, DRIFT).wrapping_add(2 - random.below(5) as i16);
+    let drift = drift.clamp(-DRIFT_MOST, DRIFT_MOST);
+    put_word(entry, DRIFT, drift);
+    base = (f64::from(drift) + f64::from(base)) as f32;
+    let ring = |w: i16| PRICES_AT + usize::try_from(w).unwrap_or(0) % PRICES * 4;
+    let mut price = (f64::from(random.below(100)) / 100.0 + f64::from(base)) as f32;
+    let to_be_had = random.below(0x97) + random.below(0x47) + 0x5a + random.below(0x1f);
+    let to_be_had = to_be_had as i32 * 10;
+    put_long(entry, TO_BE_HAD, to_be_had);
+    let held: i32 = (0..crate::records::MANAGERS as i16)
+        .map(|slot| held(records, market, slot + 1, team))
+        .fold(0, i32::wrapping_add);
+    let entry = &mut market[e..e + MARKET_ENTRY];
+    let free = long(entry, CLUB_SHARES).wrapping_sub(held);
+    if long(entry, TO_BE_HAD) > free {
+        put_long(entry, TO_BE_HAD, free);
+    }
+    price = (f64::from(float(entry, BONUS)) / 100.0 * f64::from(price) + f64::from(price)) as f32;
+    if price < LEAST_PRICE {
+        price = LEAST_PRICE;
+    }
+    entry[ring(week)..ring(week) + 4].copy_from_slice(&price.to_le_bytes());
+    let before = float(entry, ring((week + 1) % PRICES as i16));
+    let change = if before == 0.0 {
+        0.0
+    } else {
+        let points = ((f64::from(price) - f64::from(before)) * 100.0) as f32;
+        (f64::from(points) / f64::from(before)) as f32
+    };
+    entry[CHANGE..CHANGE + 4].copy_from_slice(&change.to_le_bytes());
+    if price > float(entry, HIGH) {
+        entry[HIGH..HIGH + 4].copy_from_slice(&price.to_le_bytes());
+    }
+    if price < float(entry, LOW) {
+        entry[LOW..LOW + 4].copy_from_slice(&price.to_le_bytes());
+    }
+    price
+}
+
+/// The club's league: how many teams it has (`FUN_00692a88`) and how many
+/// matchdays it has played where the game follows it (`FUN_00692744`).
+fn league(records: &Records, team: &Team) -> (i16, i16) {
+    if team.level() >= LOWEST_LEAGUE {
+        return (DEFAULT_TEAMS, 0);
+    }
+    let country = usize::from(team.country());
+    let index = records.countries.first_league(country) + i16::from(team.level());
+    let block = records.block(&format!("{LEAGUE_AT:#x}[{index}]"));
+    let teams = block.map_or(0, |b| word(b, LEAGUE_TEAMS));
+    let played = records.globals.played(country as i16);
+    (teams, if played { block.map_or(0, |b| word(b, LEAGUE_PLAYED)) } else { 0 })
+}
+
+/// Whether the club holds a European cup (`FUN_0042419d`).
+fn holds_cup(records: &Records, team: &Team) -> bool {
+    records.block(&format!("{HOLDERS_AT:#x}")).is_some_and(|b| {
+        (0..HOLDERS).any(|k| {
+            b.get(k * 4) == Some(&team.country())
+                && word(b, k * 4 + 2) as u16 == u16::from(team.number())
+        })
+    })
+}
+
+/// What the human at this place among the managers holds of a club, by
+/// the first of his places that holds it (`FUN_0040689a`), reading the
+/// market as it now is.
+fn held(records: &Records, market: &[u8], slot: i16, team: &Team) -> i32 {
+    let Some(b) = records.block(&format!("{PORT_AT:#x}[{}]", slot - 1)) else {
+        return 0;
+    };
+    (0..PORT_SLOTS)
+        .find(|&k| {
+            let at = PORT_ENTRY + k * PORT_STEP;
+            let e = (long(b, at) as usize).wrapping_mul(MARKET_ENTRY).wrapping_add(MARKET_FIRST);
+            b.get(PORT_USED + k).is_some_and(|&u| u != 0)
+                && word(market, e.wrapping_add(CLUB_COUNTRY)) == i16::from(team.country())
+                && word(market, e.wrapping_add(CLUB_NUMBER)) == i16::from(team.number())
+        })
+        .map_or(0, |k| long(b, PORT_SHARES + k * PORT_STEP))
 }

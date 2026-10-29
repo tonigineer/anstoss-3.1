@@ -73,6 +73,9 @@ const RULES: usize = 6;
 /// The co-trainer's odds of the manager's templates, a row of fourteen by
 /// the kind of training he plans: cumulative, out of 100.
 const CO_ODDS_AT: u32 = 0x8ab1f0;
+/// The nations' languages, a byte each up to the next table at 0x89df40.
+const LANGUAGES_AT: u32 = 0x89dec8;
+const NATIONS: usize = 0x78;
 /// The game's own 18 week templates, which the strip's third item puts
 /// back (`DAT_008aad90`); the block of 18 templates a manager keeps and
 /// a `plan\*.Woc` file holds.
@@ -344,6 +347,10 @@ pub struct TrainingTables {
     /// item puts back.
     pub originals: Vec<Template>,
     co_odds: Vec<u8>,
+    /// Each nation's language (`DAT_0089dec8`, a byte by nation): the
+    /// camp's rooms mark two players of one nation who do not speak the
+    /// club country's.
+    pub languages: Vec<u8>,
 }
 
 /// A list of the unit popup: where it starts in the popup, and its units
@@ -383,6 +390,7 @@ impl TrainingTables {
             rule_texts: u16s(RULE_TEXTS_AT, RULES)?,
             originals: week_templates(exe.bytes(ORIGINAL_WEEKS_AT, BLOCK)?),
             co_odds: exe.bytes(CO_ODDS_AT, CO_KINDS * CO_TEMPLATES)?.to_vec(),
+            languages: exe.bytes(LANGUAGES_AT, NATIONS)?.to_vec(),
         })
     }
 

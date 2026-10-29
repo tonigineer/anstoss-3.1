@@ -46,11 +46,39 @@ const EVENTS_AT: u32 = 0x882b4c;
 const EVENTS: usize = 7;
 const PARTIES_AT: u32 = 0x882b5c;
 const PARTIES: usize = 6;
-/// The camps' places: 26 records, the name's text at +0x36.
+/// The camps' places: 26 records of 0x38 bytes ([`Place`]).
 const PLACES_AT: u32 = 0x8ab318;
 const PLACES: u32 = 26;
 const PLACE_SIZE: u32 = 0x38;
-const PLACE_NAME: u32 = 0x36;
+/// The places' pictures and balls, by the records' indices (a u16 every
+/// four bytes).
+const PLACE_PICTURES_AT: u32 = 0x88b72c;
+const PLACE_PICTURES: usize = 21;
+const BALL_PICTURES_AT: u32 = 0x88b780;
+const BALL_PICTURES: usize = 5;
+/// A group of places with one map point for all (`FUN_005cd5b7`): the
+/// sub-choice offers at most this many of the others.
+const GROUP_OFFERS: usize = 3;
+
+/// A training camp's place (`DAT_008ab318`): its picture's and its ball's
+/// indices, what is drunk there (0 vodka, 1 water, 2 to 4 that many
+/// glasses of sparkling wine less one), the cost, its point on the world
+/// map (x below 0 none), the season it opens after (below 1 always), set
+/// when only the lottery's lucky season shows it, the control that stands
+/// for it, its group (below 1 none), and its name's text.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Place {
+    pub picture: u8,
+    pub drink: u8,
+    pub ball: u8,
+    pub cost: i32,
+    pub at: (i16, i16),
+    pub first_year: i16,
+    pub lucky: bool,
+    pub control: i16,
+    pub group: i16,
+    pub name: u16,
+}
 
 /// A day of the calendar, as stored.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -110,18 +138,68 @@ pub struct YearTables {
     pub party_texts: Vec<u16>,
     /// The camps' places' names, from place 1.
     pub place_texts: Vec<u16>,
+    /// The camps' places, and the pictures of their places and balls.
+    pub places: Vec<Place>,
+    pub place_pictures: Vec<u16>,
+    pub ball_pictures: Vec<u16>,
 }
 
 impl YearTables {
     pub fn load(exe: &Exe) -> io::Result<Self> {
+        let places: Vec<Place> = (0..PLACES)
+            .map(|p| {
+                let b = exe.bytes(PLACES_AT + p * PLACE_SIZE, PLACE_SIZE as usize)?;
+                let word = |at: usize| i16::from_le_bytes([b[at], b[at + 1]]);
+                Ok(Place {
+                    picture: b[0],
+                    drink: b[1],
+                    ball: b[2],
+                    cost: i32::from_le_bytes([b[4], b[5], b[6], b[7]]),
+                    at: (word(8), word(0xa)),
+                    first_year: word(0xc),
+                    lucky: word(0xe) >= 1,
+                    control: word(0x10),
+                    group: word(0x12),
+                    name: word(0x36) as u16,
+                })
+            })
+            .collect::<io::Result<_>>()?;
         Ok(Self {
             kinds: exe.bytes(KINDS_AT, KINDS * KIND_SIZE)?.to_vec(),
             event_texts: exe.u16s(EVENTS_AT, EVENTS)?,
             party_texts: exe.u16s(PARTIES_AT, PARTIES)?,
-            place_texts: (0..PLACES)
-                .map(|p| Ok(exe.u16s(PLACES_AT + p * PLACE_SIZE + PLACE_NAME, 1)?[0]))
-                .collect::<io::Result<_>>()?,
+            place_texts: places.iter().map(|p| p.name).collect(),
+            places,
+            place_pictures: every_fourth(exe, PLACE_PICTURES_AT, PLACE_PICTURES)?,
+            ball_pictures: every_fourth(exe, BALL_PICTURES_AT, BALL_PICTURES)?,
         })
+    }
+
+    /// Whether a place may be chosen this season (`FUN_005ccf5a`): it opens
+    /// after the season's year, and a lucky one only while the lottery
+    /// (`DAT_00b5d174`) stands at 0.
+    pub fn open(&self, place: usize, year: i32, lottery: u16) -> bool {
+        self.places.get(place).is_some_and(|p| {
+            (p.first_year < 1 || i32::from(p.first_year) < year) && (!p.lucky || lottery == 0)
+        })
+    }
+
+    /// Whether a place's first season has come: the sub-choice tells the
+    /// others "Noch nicht möglich!" (`FUN_005cd5b7`).
+    pub fn begun(&self, place: usize, year: i32) -> bool {
+        self.places.get(place).is_some_and(|p| p.first_year < 1 || i32::from(p.first_year) < year)
+    }
+
+    /// The other places of a place's group, at most three, in their order;
+    /// none for a place without one.
+    pub fn group_of(&self, place: usize) -> Vec<usize> {
+        let Some(group) = self.places.get(place).map(|p| p.group).filter(|&g| g >= 1) else {
+            return Vec::new();
+        };
+        (0..self.places.len())
+            .filter(|&k| k != place && self.places[k].group == group)
+            .take(GROUP_OFFERS)
+            .collect()
     }
 
     fn of(&self, kind: u8, column: usize) -> u8 {
@@ -176,6 +254,22 @@ pub fn book(calendar: &mut Planner, d: usize, kind: u8, value: i16) {
     entry[1] = 1;
     entry[4..6].copy_from_slice(&value.to_le_bytes());
     calendar.set_entry(d, entry);
+}
+
+/// A camp booked from a day: its first day with the place, from 1, and
+/// the next as its last (`FUN_0072e973`, `FUN_0072f30d`); a click in the
+/// calendar's camp column moves the end.
+pub fn book_camp(calendar: &mut Planner, d: usize, place: i16) {
+    for (day, start) in [(d, 1i16), (d + 1, 0)] {
+        let mut entry = [0; PLANNER_ENTRY];
+        entry[0] = CAMP;
+        entry[1] = 1;
+        entry[CAMP_START..CAMP_START + 2].copy_from_slice(&start.to_le_bytes());
+        if start != 0 {
+            entry[CAMP_PLACE..CAMP_PLACE + 2].copy_from_slice(&place.to_le_bytes());
+        }
+        calendar.set_entry(day, entry);
+    }
 }
 
 /// A day's entry gone (`FUN_0072dc32`).
@@ -283,4 +377,10 @@ mod tests {
         clear(&mut c, 80);
         assert_eq!(day(&c, 80).kind(), 0);
     }
+}
+
+/// A table of u16 values a u32 apart.
+fn every_fourth(exe: &Exe, at: u32, count: usize) -> io::Result<Vec<u16>> {
+    let bytes = exe.bytes(at, 4 * count)?;
+    Ok(bytes.chunks(4).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
 }
