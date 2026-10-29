@@ -548,8 +548,10 @@ record! {
     /// [`Team::will_to_win`] (`FUN_0069ee6d`).
     0x958 => will_base, set_will_base: i16;
     /// Season tickets: the target the preseason sells towards, and how many
-    /// are sold (the club object's +0x22c and +0x498).
-    0x4a4 => ticket_target, set_ticket_target: i32;
+    /// are sold (the club object's +0x124 and +0x498; the target stands
+    /// right behind the plan of attendance at +0x398, like the club's pair
+    /// at +0x120 and +0x124).
+    0x39c => ticket_target, set_ticket_target: i32;
     0x710 => tickets, set_tickets: i32;
 }
 
@@ -623,6 +625,9 @@ record! {
     0x398 => away_gates, set_away_gates: [i32; 23];
     0x3f4 => fan_gates, set_fan_gates: [i32; 23];
     0x450 => home_incomes, set_home_incomes: [i32; 23];
+    /// How many past seasons are kept below; the Zuschauer- and
+    /// Dauerkartenentwicklung pages count from it ([`Extra::history`]).
+    0x23fc => history_count, set_history_count: i16;
     /// The line-up's special settings (`CMannaufSpezial`): bit 1 the
     /// co-trainer lines the team up before a match in a system of his
     /// choosing, bit 2 in the one it stands in.
@@ -637,7 +642,33 @@ record! {
     0x2834 => detective, set_detective: u16;
 }
 
+/// One past season as the development pages draw it: the sum of the home
+/// gates, what attendance and season tickets were planned, how many were
+/// sold, and the league's level (`FUN_0063410d` appends one at the
+/// season's end).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeasonHistory {
+    pub gates: i32,
+    pub planned: i32,
+    pub tickets: i32,
+    pub level: u8,
+}
+
 impl Extra {
+    /// The past seasons (`FUN_00634041` copies them out): at most twenty,
+    /// sixteen bytes each from +0x2400, the oldest shifted away by
+    /// `FUN_0063410d` when they fill up.
+    pub fn history(&self) -> Vec<SeasonHistory> {
+        (0..self.history_count().clamp(0, 20) as usize)
+            .map(|k| SeasonHistory {
+                gates: self.get(0x2400 + k * 0x10),
+                planned: self.get(0x2404 + k * 0x10),
+                tickets: self.get(0x2408 + k * 0x10),
+                level: self.get(0x240d + k * 0x10),
+            })
+            .collect()
+    }
+
     /// What the training sessions add to cohesion, before the game halves
     /// what is above 30.
     pub fn training(&self) -> i32 {

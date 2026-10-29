@@ -6548,4 +6548,70 @@ mod tests {
         assert_eq!(graph.steps, 6);
         assert_eq!(graph.bars, vec![(352, false), (152, false)]);
     }
+
+    /// The Stadion category's two development pages join the list once
+    /// the manager has seen a season end: on a copy of A with his season
+    /// count raised, the gates and the plan of attendance stand as two
+    /// curves over the years, the sold season tickets and the target the
+    /// preseason sells towards as bars.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_stadion_develops_its_crowds_and_tickets() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let stad = "now click bar 14\nuntil dialog 18\nnow row 1283 5";
+        // The plain A's manager stands in his first season: eight pages.
+        let Some(runner) = on_save(&game, "A", stad) else { return };
+        let list = runner.host.view().list(control(dialog, 1284).unwrap()).unwrap();
+        assert_eq!(list.rows.len(), 8);
+        // On the copy whose manager reached a second season, the two
+        // development pages come between the matchday and the season
+        // ticket pages.
+        let Some(runner) = on_save(&game, "Ap", stad) else { return };
+        let list = runner.host.view().list(control(dialog, 1284).unwrap()).unwrap();
+        assert_eq!(list.rows.len(), 10);
+        // Zuschauerentwicklung: the one season's gate sum and planned
+        // attendance, the first point handed in twice, the unit risen to
+        // hundred-thousands — the plan times the league's eighteen clubs
+        // near the top, the gates at the axis.
+        let then = format!("{stad}\nnow row 1284 6");
+        let Some(runner) = on_save(&game, "Ap", &then) else { return };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows.is_empty());
+        let graph = table.graph.as_ref().unwrap();
+        assert!(graph.bars.is_empty());
+        let curves = graph
+            .shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::Pen { from, to, colour } if *colour != [0, 0, 0] => {
+                    Some((*from, *to, *colour))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            curves,
+            [
+                ((6, 301), (232, 301), [255, 255, 255]),
+                ((6, 11), (232, 11), [255, 0, 0])
+            ]
+        );
+        // Dauerkartenentwicklung: the league the season tickets were sold
+        // in, counted from one, and the target as the "Kalkuliert" bar,
+        // both on steps of a thousand without the goal pages' offset.
+        let then = format!("{stad}\nnow row 1284 7");
+        let Some(runner) = on_save(&game, "Ap", &then) else { return };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(
+            table.rows.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(),
+            ["1. Liga (9570)", "Kalkuliert (9184)"]
+        );
+        let graph = table.graph.as_ref().unwrap();
+        assert_eq!(graph.steps, 10);
+        assert_eq!(graph.bars, vec![(354, false), (340, false)]);
+        assert_eq!(graph.top, 0);
+        assert_eq!(graph.unit, "Dauerkarten/1000");
+    }
 }

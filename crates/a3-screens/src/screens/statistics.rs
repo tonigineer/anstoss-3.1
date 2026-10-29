@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 
 use a3_core::opponent::League;
-use a3_core::records::{Player, Records, Team};
+use a3_core::records::{Player, Records, SeasonHistory, Team};
 use a3_core::season::Rules;
 use a3_core::statistics::{self, CATEGORY_NAMES, Club, Page};
 use a3_files::rch::{Align, Control, Dialog, Kind};
@@ -200,6 +200,20 @@ const STADION_FANS_AXIS: u16 = 2655;
 const STADION_AWAY_AXIS: u16 = 2657;
 const STADION_UNIT: u16 = 2652;
 const STADION_PLANNED: u16 = 3066;
+/// The Stadion development pages' texts: the two titles, the curves'
+/// legends ("Schnitt", "Kalkuliert"), the ticket page's unit label and
+/// its "Kalkuliert" bar, and the bar's "%d. Liga (%d)" label (3067).
+/// The curves take COLORREF 0xffffff and 0xff: white and red.
+const STADION_DEV_CROWDS_TITLE: u16 = 2660;
+const STADION_DEV_TICKETS_TITLE: u16 = 2663;
+const STADION_DEV_CALC: u16 = 2664;
+const STADION_DEV_TICKETS_UNIT: u16 = 2665;
+const STADION_DEV_LEAGUE_LABEL: u16 = 3067;
+const STADION_DEV_LEGENDS: [u16; 2] = [2661, 2662];
+const STADION_DEV_INKS: [[u8; 3]; 2] = [[255, 255, 255], [255, 0, 0]];
+/// The curve window's height (`FUN_0071dc15`'s 310 for the two Stadion
+/// development pages).
+const DEV_GRAPH_HEIGHT: i32 = 310;
 /// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
 /// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
 /// the European cups and the cup.
@@ -2274,6 +2288,12 @@ impl Statistics {
             Some(statistics::STADION_AWAY_FILL) if self.category == STADION => {
                 self.stadion_away_page(cx, view)
             }
+            Some(statistics::STADION_CROWD_DEVELOP) if self.category == STADION => {
+                self.stadion_dev_crowds_page(cx, view)
+            }
+            Some(statistics::STADION_TICKET_DEVELOP) if self.category == STADION => {
+                self.stadion_dev_tickets_page(cx, view)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -2899,6 +2919,186 @@ impl Statistics {
                     top: 10,
                     unit,
                     title: game.text(STADION_AWAY_AXIS).to_owned(),
+                    ..Graph::default()
+                }),
+            };
+        }
+        true
+    }
+
+    /// Zuschauerentwicklung (`FUN_00475e60`): the past seasons from the
+    /// extra block, joined by the current one while its games have gates
+    /// — its sum drawn, not its average — as two curves over the axis:
+    /// white the season's gate sum, red what the plan of attendance
+    /// times that season's league's clubs reckoned. The first season's
+    /// point stands twice, as the page hands it in before the loop; the
+    /// steps count thousands, each decade over thirty one shrinking the
+    /// unit label at the top left.
+    fn stadion_dev_crowds_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(STADION_DEV_CROWDS_TITLE).to_owned(), &[(0, 0)]);
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        let extra = records
+            .managers
+            .iter()
+            .zip(&records.extras)
+            .find(|(m, _)| (u16::from(m.country()), m.team() as i16) == own)
+            .map(|(_, e)| e);
+        let mut seasons = extra.map_or_else(Vec::new, |e| e.history());
+        let home_games = usize::from(team.home_games());
+        if home_games > 0 {
+            seasons.push(SeasonHistory {
+                gates: team.gates().iter().take(home_games).sum(),
+                planned: team.planned(),
+                tickets: 0,
+                level: team.level(),
+            });
+        }
+        if seasons.is_empty() {
+            if let Some(table) = view.table_mut(c) {
+                *table = TableState {
+                    columns: vec![],
+                    rows: vec![],
+                    width: ROW_WIDTH,
+                    centred: -1,
+                    scroll: 0,
+                    cross: None,
+                    graph: None,
+                };
+            }
+            return true;
+        }
+        // The steps take the thousand up one place per full ten of them
+        // over thirty (`FUN_00475e60`), the scale over 310 pixels.
+        let values = |h: &SeasonHistory| {
+            [h.gates, h.planned * statistics::league_size(records, own.0, h.level)]
+        };
+        let max = seasons.iter().flat_map(values).max().unwrap_or(0);
+        let mut x = max as f32 / 1000.0;
+        let mut unit = 1_000;
+        while x > 30.0 {
+            x /= 10.0;
+            unit *= 10;
+        }
+        let mut steps = (x + 0.5) as i32;
+        if x - steps as f32 > 0.0 {
+            steps += 1;
+        }
+        let f = if steps > 0 {
+            310.0 / (unit * steps) as f32
+        } else {
+            f32::INFINITY
+        };
+        let points = |pick: &dyn Fn(&SeasonHistory) -> i32| -> Vec<i32> {
+            let mut v: Vec<i32> =
+                seasons.iter().map(|h| (pick(h) as f32 * f + 0.5) as i32).collect();
+            let first = v.first().copied().unwrap_or(0);
+            v.insert(0, first);
+            v
+        };
+        let lines = [
+            GraphLine {
+                values: points(&|h| h.gates),
+                colour: STADION_DEV_INKS[0],
+                label: game.text(STADION_DEV_LEGENDS[0]).to_owned(),
+            },
+            GraphLine {
+                values: points(&|h| h.planned * statistics::league_size(records, own.0, h.level)),
+                colour: STADION_DEV_INKS[1],
+                label: game.text(STADION_DEV_LEGENDS[1]).to_owned(),
+            },
+        ];
+        let rect = dialog.controls[c].rect;
+        let size = (rect.width() as i32, rect.height() as i32);
+        let y_label = Self::unit_label(game.text(STADION_UNIT), unit);
+        let shapes = line_graph(game, size, DEV_GRAPH_HEIGHT, steps, &lines, ("", &y_label));
+        if let Some(table) = view.table_mut(c) {
+            *table = TableState {
+                columns: vec![],
+                rows: vec![],
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: 0,
+                cross: None,
+                graph: Some(Graph {
+                    bars: Vec::new(),
+                    steps: 0,
+                    shapes,
+                    bar: None,
+                    ..Graph::default()
+                }),
+            };
+        }
+        true
+    }
+
+    /// Dauerkartenentwicklung (`FUN_004766b1`): the past seasons' sold
+    /// season tickets, each bar labelled with the league it played in —
+    /// counted from one — and the current club's number joined on, the
+    /// target the preseason sells towards as the "Kalkuliert" bar; every
+    /// season gets its row, sold or not, the target its own. Same
+    /// thousand-steps as the fan page, its label cut by thirty and
+    /// staying at 1000; the unit label "Dauerkarten/1000" past the
+    /// window's edge, no axis title.
+    fn stadion_dev_tickets_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(STADION_DEV_TICKETS_TITLE).to_owned(), &[(0, 0)]);
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        let extra = records
+            .managers
+            .iter()
+            .zip(&records.extras)
+            .find(|(m, _)| (u16::from(m.country()), m.team() as i16) == own)
+            .map(|(_, e)| e);
+        let target = team.ticket_target();
+        let mut seasons = extra.map_or_else(Vec::new, |e| e.history());
+        seasons.push(SeasonHistory {
+            tickets: team.tickets(),
+            level: team.level().min(2),
+            ..SeasonHistory::default()
+        });
+        let max = seasons.iter().map(|h| h.tickets).max().unwrap_or(0).max(target);
+        let (steps, f) = Self::fan_scale(max);
+        let mut rows: Vec<TableRow> = Vec::new();
+        let mut bars: Vec<(i32, bool)> = Vec::new();
+        for h in &seasons {
+            rows.push(TableRow {
+                text: game
+                    .text(STADION_DEV_LEAGUE_LABEL)
+                    .replacen("%d", &format!("{}", u16::from(h.level) + 1), 1)
+                    .replacen("%d", &h.tickets.to_string(), 1),
+                ink: INK,
+                mark: None,
+                columns: None,
+            });
+            bars.push(((h.tickets as f32 * f / 1000.0 + 0.5) as i32, false));
+        }
+        rows.push(TableRow {
+            text: format!("{} ({target})", game.text(STADION_DEV_CALC)),
+            ink: INK,
+            mark: None,
+            columns: None,
+        });
+        bars.push(((target as f32 * f / 1000.0 + 0.5) as i32, false));
+        rows.truncate(0x14);
+        bars.truncate(0x14);
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: vec![],
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: Some(Graph {
+                    bars,
+                    steps,
+                    unit: game.text(STADION_DEV_TICKETS_UNIT).to_owned(),
                     ..Graph::default()
                 }),
             };
