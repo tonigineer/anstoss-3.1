@@ -21,7 +21,8 @@
 //! <value>`, `rclick <control>`, `drag <box or row> <box or row>|off` (a
 //! box or row is `<control>` or `<list> row <row>`), and `wait` until the
 //! screen moves on by itself; or on the dialog's pixels: `click at <x>
-//! <y>`, `drag at <x> <y> to <x> <y>`. A dialog the script has no actions
+//! <y>`, `drag at <x> <y> to <x> <y>`; and `random <s1> <s2>`, which sets
+//! the game's random numbers to that state. A dialog the script has no actions
 //! for stops it, as does an action for a control the dialog does not have.
 //!
 //! Dialogs go by their ids in the game's dialog file, as the original knows
@@ -98,6 +99,8 @@ pub(crate) enum Action {
     /// a list's row, which the game takes for a choice.
     Dbl(Box<Action>),
     Wait,
+    /// The game's random numbers set to a state, both halves.
+    Random(i64, i64),
 }
 
 /// A control, or a row of a list, by its id.
@@ -240,6 +243,7 @@ fn parse_action(action: &str) -> Option<Action> {
         ["ok"] => Action::Ok,
         ["cancel"] => Action::Cancel,
         ["wait"] => Action::Wait,
+        ["random", s1, s2] => Action::Random(s1.parse().ok()?, s2.parse().ok()?),
         ["press", button] => Action::Press(id(button)?),
         ["click", "bar", symbol] => Action::Bar(symbol.parse().ok()?),
         ["click", control] => Action::Click(id(control)?),
@@ -413,6 +417,12 @@ impl<'a> Runner<'a> {
                 return Ok(());
             }
             Action::Wait => return self.wait(shown),
+            Action::Random(s1, s2) => {
+                if let Some(season) = self.host.state().season.as_mut() {
+                    season.random = a3_core::random::Random::from_state(s1, s2);
+                }
+                return Ok(());
+            }
             Action::PointAt(at) => {
                 self.host.view_mut().hovered = self.click_at(shown, at).ok();
                 self.host.view_mut().pointer = Some(Vec2::new(at.0.into(), at.1.into()));
@@ -570,6 +580,7 @@ pub(crate) fn target_of(controls: &Dialog, dialog: u16, action: &Action) -> Resu
         Action::RightClick(spot) => Target::Menu(grip(controls, dialog, spot)?),
         Action::Type(id, _) => Target::Edit(find(id)?),
         Action::Wait => return Err(Error::Unsupported(dialog, "wait on a control".into())),
+        Action::Random(..) => return Err(Error::Unsupported(dialog, "random numbers".into())),
         // A double click acts twice; the runner does that, not this.
         Action::Dbl(_) => return Err(Error::Unsupported(dialog, "a double click".into())),
         Action::DragAt(..) | Action::ClickAt(_) | Action::PointAt(_) => {
@@ -1670,6 +1681,74 @@ mod tests {
         let view = runner.host.view();
         let notice = view.text(crate::screens::control(&game.dialogs[&380], 4730).unwrap());
         assert_eq!(notice, game.text(4582));
+    }
+
+    /// Going public, on A with a profit in each of the last three seasons
+    /// patched in: 645.000 shares offered for 25.80 Mio €, as the original
+    /// offers them; taken, at the random numbers poked into the original
+    /// before its OK, the club stands on the market as the original put it
+    /// there (peeked: drift 1, 1610 shares to be had, 219.45 € high, low
+    /// and current), an AG, the proceeds in the bank.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_bilanz_takes_the_club_public() {
+        let Some(dir) = std::env::var_os("ANSTOSS3_DIR").map(PathBuf::from) else { return };
+        if !dir.join("saves/A.an3").exists() && !dir.join("../saves-kept/A.an3").exists() {
+            return;
+        }
+        let root = patched(&dir, "A", "going-public", |records| {
+            let team = usize::from(records.managers[0].team());
+            for at in [0x908, 0x910, 0x918] {
+                records.teams[team].put::<i64>(at, 0);
+            }
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let ask = "now click bar 8\nuntil dialog 349\nnow press 6152\nuntil dialog 384";
+        let runner = on_save(&game, "going-public", ask).unwrap();
+        let view = runner.host.view();
+        let question = view.text(control(&game.dialogs[&384], 4738).unwrap()).to_owned();
+        let offered = question.contains("645.000 Aktien") && question.contains("25.80 Mio €");
+        assert!(offered, "{question}");
+
+        let taken = format!("{ask}\nnow random 12345 67890\nnow press 4741\nuntil dialog 349");
+        let runner = on_save(&game, "going-public", &taken).unwrap();
+        let dialog = &game.dialogs[&349];
+        let view = runner.host.view();
+        let text = |id: u16| view.text(control(dialog, id).unwrap()).trim().to_owned();
+        assert_eq!([text(5510), text(5511), text(5512), text(5513)], [
+            "AG",
+            "645.000",
+            "219,44 €",
+            "141.54 Mio €"
+        ]);
+        assert_eq!(text(4463), "31.72 Mio €");
+        assert!(view.disabled(control(dialog, 6152).unwrap()));
+        let state = runner.host.state();
+        let records = state.records.as_ref().unwrap();
+        let market = records.block("0x8be408").unwrap();
+        assert_eq!(i32::from_le_bytes(market[..4].try_into().unwrap()), 204);
+        let entry = &market[0x14 + 203 * 0x108..0x14 + 204 * 0x108];
+        let price = 0x435b7333u32.to_le_bytes();
+        let mut expected = vec![0u8; 0x108];
+        expected[..17].copy_from_slice(b"1.FC Union Berlin");
+        for (at, bytes) in [
+            (0x1c, &14i16.to_le_bytes()[..]),
+            (0x1e, &84i16.to_le_bytes()),
+            (0x20, &645_000i32.to_le_bytes()),
+            (0x24, &50i16.to_le_bytes()),
+            (0x26, &1i16.to_le_bytes()),
+            (0x28, &1610i32.to_le_bytes()),
+            (0x30, &price),
+            (0x34, &price),
+            (0x38 + 50 * 4, &price),
+        ] {
+            expected[at..at + bytes.len()].copy_from_slice(bytes);
+        }
+        assert_eq!(entry, &expected[..]);
+        let team = &records.teams[usize::from(records.managers[0].team())];
+        assert_eq!(team.legal_form() & 1, 1);
+        assert_eq!(team.get::<u32>(0x308) & 0x8000, 0x8000);
     }
 
     #[test]

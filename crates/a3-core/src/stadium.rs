@@ -720,13 +720,45 @@ pub const DREAMS: usize = 3;
 
 pub struct StadiumTables {
     pub dreams: Vec<Sub>,
+    /// What a stadium of each kind is worth in millions, as its value
+    /// reads it: by the kind itself where the prices go by the kind less
+    /// two, so a dream stadium reads past the prices (0x889e60).
+    values: Vec<i64>,
 }
+
+/// Where the values lie, and how many kinds they cover.
+const VALUES_AT: u32 = 0x889e60;
+const KINDS: usize = 5;
 
 impl StadiumTables {
     pub fn load(exe: &Exe) -> io::Result<Self> {
         let bytes = exe.bytes(DREAMS_AT, DREAMS * SUB)?;
-        Ok(Self { dreams: bytes.chunks(SUB).map(|b| Sub(b.to_vec())).collect() })
+        let values = exe.bytes(VALUES_AT, KINDS * 8)?;
+        Ok(Self {
+            dreams: bytes.chunks(SUB).map(|b| Sub(b.to_vec())).collect(),
+            values: values.chunks(8).map(|b| i64::from_le_bytes(b.try_into().unwrap())).collect(),
+        })
     }
+}
+
+/// What a stadium is worth (`FUN_0057e859`): its stands built anew from
+/// nothing, or a dream stadium's value by its kind, with their roofs, less
+/// what renovating and heating them would cost, at least nought
+/// (`FUN_0057baba`); its scoreboard's price added.
+pub fn value(tables: &StadiumTables, sub: &Sub) -> i64 {
+    let empty = Sub(vec![0; SUB]);
+    let costs: Vec<StandCost> = (0..STANDS).map(|s| stand_cost(sub, &empty, s)).collect();
+    let built = if sub.kind() < 2 {
+        costs.iter().map(|c| i64::from(c.cost)).sum()
+    } else {
+        let value = usize::try_from(sub.kind()).ok().and_then(|k| tables.values.get(k));
+        value.copied().unwrap_or(0).wrapping_mul(MILLION)
+    };
+    let roofs = costs.iter().fold(0i32, |sum, c| sum.wrapping_add(c.roof));
+    let renovation = costs.iter().fold(0i32, |sum, c| sum.wrapping_add(c.renovation));
+    let stands = built.wrapping_add(roofs.into()).wrapping_sub(renovation.into()).max(0);
+    let scoreboard = SCOREBOARDS.get(sub.scoreboard()).copied().unwrap_or(0);
+    stands + i64::from(scoreboard.wrapping_mul(PRICE_UNIT))
 }
 
 /// A dream stadium's price.

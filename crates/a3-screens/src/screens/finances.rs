@@ -4,13 +4,12 @@
 
 use std::collections::HashMap;
 
-use a3_core::cycle::Request;
+use a3_core::cycle::{Fill, Request};
 use a3_core::finances::{self, Balance as Figures, LEAST_LOAN, Refusal};
 use a3_core::forecast::Forecast;
 use a3_core::records::{Records, Team};
 use a3_core::season::Rules;
 use a3_files::rch::Dialog;
-use tracing::info;
 
 use super::hub::{self, BALANCE, BALANCE_SYMBOL, FINANCES, FINANCES_SYMBOL};
 use super::kalkulation;
@@ -20,7 +19,7 @@ use crate::controls::bitmap::Picture;
 use crate::game::Game;
 use crate::pointer::Target;
 use crate::view::View;
-use a3_core::cycle::dialogs::{INVESTMENTS, LOANS as LOANS_DIALOG, NO_CREDIT, NOTICE};
+use a3_core::cycle::dialogs::{INVESTMENTS, LOANS as LOANS_DIALOG, NO_CREDIT, NOTICE, QUESTION};
 
 /// The OK, whose place the bar takes.
 const OK: u16 = 1;
@@ -60,6 +59,9 @@ const AMATEURS_REFUSAL: u16 = 4441;
 const FORTUNE_REFUSAL: u16 = 4580;
 const LOANS_REFUSAL: u16 = 4581;
 const LOSSES_REFUSAL: u16 = 4579;
+const WORTH_REFUSAL: u16 = 4583;
+/// The offer of shares to issue, and what they would bring.
+const AG_OFFER: u16 = 4585;
 /// What the figures are written with: money below a thousand, below a
 /// million, below a billion, and above; a share's price below a thousand
 /// and below a million.
@@ -97,6 +99,8 @@ fn open_screen(cx: &mut Cx, view: &mut View, symbol: usize) {
 pub struct Balance {
     /// Whether the whistle asks.
     whistle: bool,
+    /// The shares offered for going public, while the question asks.
+    offer: Option<i32>,
 }
 
 impl Screen for Balance {
@@ -105,7 +109,7 @@ impl Screen for Balance {
     }
 
     fn open(&mut self, cx: &mut Cx, view: &mut View, _: Args) {
-        let (game, dialog) = (cx.game, cx.dialog);
+        let dialog = cx.dialog;
         open_screen(cx, view, BALANCE_SYMBOL);
         fill_balance(cx, view);
         let works = |target: Target| match target {
@@ -114,11 +118,6 @@ impl Screen for Balance {
             _ => hub::on_bar(dialog, target).is_some_and(hub::bar_works),
         };
         mark_inert(view, dialog, works);
-        // A company already: the button is off.
-        let listed = own_team(game, cx).is_some_and(|(_, team)| team.legal_form() & 1 != 0);
-        if let Some(button) = control(dialog, AG_BUTTON) {
-            view.set_disabled(button, listed);
-        }
     }
 
     fn input(&mut self, cx: &mut Cx, view: &mut View, target: Target, _: bool) -> Outcome {
@@ -130,7 +129,15 @@ impl Screen for Balance {
         match target {
             Target::Button(c) if cx.dialog.controls[c].id == Some(AG_BUTTON) => {
                 self.whistle = false;
-                go_public(cx)
+                match go_public(cx) {
+                    Ok(shares) => {
+                        self.offer = Some(shares);
+                        let proceeds = i64::from(shares) * i64::from(finances::SHARE_PRICE);
+                        let fills = [Fill::Count(shares), Fill::Money(proceeds)];
+                        Outcome::Popup(Request::with(QUESTION, Args::Printf(AG_OFFER, fills)))
+                    }
+                    Err(outcome) => outcome,
+                }
             }
             Target::Button(c) if cx.dialog.controls[c].id == Some(DEPOSITS_BUTTON) => {
                 self.whistle = false;
@@ -150,14 +157,21 @@ impl Screen for Balance {
         }
     }
 
-    /// The whistle's question: a yes ends the turn. Back from the
-    /// deposits, the figures anew.
+    /// The whistle's question: a yes ends the turn. The offer's: a yes
+    /// takes the club to the market. Back from the deposits, the figures
+    /// anew.
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if std::mem::take(&mut self.whistle) {
             if reply == Reply::Ok {
                 return Outcome::Close(Reply::Ok);
             }
             return Outcome::Stay;
+        }
+        if let Some(shares) = self.offer.take() {
+            if reply != Reply::Ok {
+                return Outcome::Stay;
+            }
+            listed(cx, shares);
         }
         fill_balance(cx, view);
         Outcome::Stay
@@ -555,24 +569,74 @@ pub(crate) fn own_extra<'a>(
     Some((slot, records.extras.get(slot)?))
 }
 
-/// The stock market: the first check the club fails, told; the rest is
-/// not built (BILANZ.md §4.3).
-fn go_public(cx: &Cx) -> Outcome {
+/// The stock market (BILANZ.md §4.3): the first check the club fails,
+/// told; else the shares it would issue, offered.
+fn go_public(cx: &Cx) -> Result<i32, Outcome> {
     let game = cx.game;
-    let Some((records, team)) = own_team(game, cx) else { return Outcome::Stay };
+    let Some((records, team)) = own_team(game, cx) else { return Err(Outcome::Stay) };
     let figures = Figures::of(team, records.globals.fund_prices(), &records.agreed());
-    let args = match figures.refusal(team) {
+    let (stadium, grounds) = worth(game, records, team);
+    let refusal = figures.refusal(team).or_else(|| {
+        let worth = stadium.wrapping_add(grounds);
+        (worth < finances::LEAST_WORTH).then_some(Refusal::Worth(finances::LEAST_WORTH))
+    });
+    let args = match refusal {
         Some(Refusal::League) => Args::Text(LEAGUE_REFUSAL),
         Some(Refusal::Amateurs) => Args::Text(AMATEURS_REFUSAL),
         Some(Refusal::Fortune(least)) => Args::TextForMoney(FORTUNE_REFUSAL, least),
         Some(Refusal::Loans) => Args::Text(LOANS_REFUSAL),
         Some(Refusal::Losses) => Args::Text(LOSSES_REFUSAL),
+        Some(Refusal::Worth(least)) => Args::TextForMoney(WORTH_REFUSAL, least),
         None => {
-            info!("Börsengang: not built yet");
-            return Outcome::Stay;
+            let forecast = &game.rules.forecast;
+            let merchandise = a3_core::forecast::merchandise_value(records, team, forecast);
+            let squad = squad_halves(cx, records, team);
+            return finances::shares_offered(stadium, grounds, figures.fortune(), merchandise, squad)
+                .ok_or(Outcome::Stay);
         }
     };
-    Outcome::Popup(Request::with(NOTICE, args))
+    Err(Outcome::Popup(Request::with(NOTICE, args)))
+}
+
+/// What the stadium played in (`FUN_0057e859`) and the buildings on the
+/// club's grounds (`FUN_0057e921`) are worth.
+fn worth(game: &Game, records: &Records, team: &Team) -> (i64, i64) {
+    let (country, number) = (team.country(), team.number());
+    let stadium = a3_core::stadium::subs(records, country, number.into())
+        .and_then(|subs| subs.into_iter().next())
+        .map_or(0, |sub| a3_core::stadium::value(&game.rules.stadium, &sub));
+    let grounds = a3_core::grounds::Grounds::of(records, country, number.into());
+    let grounds = grounds.map_or(0, |g| g.value());
+    (stadium, grounds)
+}
+
+/// Half of every player's market value in the squad, summed.
+fn squad_halves(cx: &Cx, records: &Records, team: &Team) -> i64 {
+    let game = cx.game;
+    let Some(today) = cx.state.season.as_ref().map(|s| s.date()) else { return 0 };
+    let stars = records.globals.stars();
+    team.players()
+        .iter()
+        .filter_map(|&id| {
+            let (player, _, status) = a3_core::load::any_player(records, &game.data, id)?;
+            let r = records.player(id)?;
+            let years = status.contract.unwrap_or(0);
+            let value = super::playerinfo::market_value(game, &player, r, stars, years, today);
+            Some(i64::from(value as u32 >> 1))
+        })
+        .sum()
+}
+
+/// The offer taken: the club on the market with its shares, made a
+/// company (`FUN_00406201`, `FUN_0069d75e`).
+fn listed(cx: &mut Cx, shares: i32) {
+    let Some(index) = own_index(cx.game, cx).map(|(_, index)| index) else { return };
+    let state = &mut *cx.state;
+    let (Some(records), Some(season)) = (state.records.as_mut(), state.season.as_mut()) else {
+        return;
+    };
+    a3_core::stock::list(records, index, shares, &mut season.random);
+    finances::go_public(&mut records.teams[index], shares);
 }
 
 /// The manager's club's team record.
@@ -618,6 +682,10 @@ fn fill_balance(cx: &Cx, view: &mut View) {
         set(view, dialog, SO_FAR, money64(forecast.so_far()));
     }
     let none = || "---".to_owned();
+    // A company already: the button is off.
+    if let Some(button) = control(dialog, AG_BUTTON) {
+        view.set_disabled(button, team.legal_form() & 1 != 0);
+    }
     let listing = (team.legal_form() & 1 != 0)
         .then(|| records.listing(team.country(), team.number()))
         .flatten();
