@@ -628,6 +628,12 @@ record! {
     /// How many past seasons are kept below; the Zuschauer- and
     /// Dauerkartenentwicklung pages count from it ([`Extra::history`]).
     0x23fc => history_count, set_history_count: i16;
+    /// How many weeks of cash the Kassenstand page draws, the values
+    /// below ([`Extra::cash_weeks`], `FUN_00633bb5`).
+    0x2264 => cash_count, set_cash_count: i16;
+    /// How many weeks of merchandise turnover the Fanartikelumsatz page
+    /// draws ([`Extra::merch_weeks`], `FUN_00633e08`).
+    0x2330 => merch_count, set_merch_count: i16;
     /// The line-up's special settings (`CMannaufSpezial`): bit 1 the
     /// co-trainer lines the team up before a match in a system of his
     /// choosing, bit 2 in the one it stands in.
@@ -666,6 +672,22 @@ impl Extra {
                 tickets: self.get(0x2408 + k * 0x10),
                 level: self.get(0x240d + k * 0x10),
             })
+            .collect()
+    }
+
+    /// The cash standing at each week's end (`FUN_00633bb5`): up to
+    /// fifty i32 from +0x2268, the Kassenstand page's curve.
+    pub fn cash_weeks(&self) -> Vec<i32> {
+        (0..self.cash_count().clamp(0, 50) as usize)
+            .map(|k| self.get(0x2268 + k * 4))
+            .collect()
+    }
+
+    /// The merchandise turnover of each week (`FUN_00633e08`): up to
+    /// fifty i32 from +0x2334, the Fanartikelumsatz page's curve.
+    pub fn merch_weeks(&self) -> Vec<i32> {
+        (0..self.merch_count().clamp(0, 50) as usize)
+            .map(|k| self.get(0x2334 + k * 4))
             .collect()
     }
 

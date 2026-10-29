@@ -6650,4 +6650,52 @@ mod tests {
             "Danilho Doekhi\tIV\t10\t14\t10.06 Mio €\tNein\t12.7\t+"
         );
     }
+
+    /// The Finanzen category's two line graphs draw the own club's past
+    /// weeks: the cash curve in blue, the merchandise turnover in black.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_draws_the_weeks_of_cash_and_merchandise() {
+        use crate::controls::table::Shape;
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let fin = "now click bar 14\nuntil dialog 18\nnow row 1283 6";
+        let texts = |shapes: &[Shape]| -> Vec<String> {
+            shapes
+                .iter()
+                .filter_map(|s| match s {
+                    Shape::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        // Kassenstand: ten weeks leave nine blue segments; the axis
+        // steps a million apiece, its label at the zero line 17 under.
+        let then = format!("{fin}\nnow row 1284 1");
+        let Some(runner) = on_save(&game, "A", &then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Entwicklung Kassenstand");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert!(table.rows.is_empty());
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        assert_eq!(texts(shapes), ["Kassenstand", "Woche", "1.00 Mio €"]);
+        let blue = shapes
+            .iter()
+            .filter(|s| matches!(s, Shape::Pen { colour: [0, 0, 255], .. }))
+            .count();
+        assert_eq!(blue, 9);
+        // Fanartikelumsatz: eighteen weeks on 318 pixels of height, the
+        // zero line on the bottom - the line starts flat off the axis.
+        let then = format!("{fin}\nnow row 1284 5");
+        let Some(runner) = on_save(&game, "A", &then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Fanartikelumsatz");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let shapes = &table.graph.as_ref().unwrap().shapes;
+        assert_eq!(texts(shapes), ["Fanartikelumsatz"]);
+        assert!(shapes.iter().any(|s| matches!(
+            s,
+            Shape::Pen { from: (6, 326), to: (31, 326), colour: [0, 0, 0] }
+        )));
+    }
 }

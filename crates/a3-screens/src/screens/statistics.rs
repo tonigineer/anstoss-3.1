@@ -264,6 +264,18 @@ const FINANZEN_VALUE_ROW_COLUMNS: [(u16, u16); 8] = [
     (R | 365, 35),
     (430, 0),
 ];
+/// The Kassenstand page's header, legend and axis label (`FUN_0045cfc4`
+/// with texts 0x95e, 0xa58, 0xa59) — its one curve in blue (COLORREF
+/// 0xff0000, blue once the red and blue reach the screen swapped).
+const FINANZEN_CASH_TITLE: u16 = 0x95e;
+const FINANZEN_CASH_LEGEND: u16 = 0xa58;
+const FINANZEN_CASH_AXIS: u16 = 0xa59;
+const FINANZEN_CASH_INK: [u8; 3] = [0, 0, 0xff];
+/// The Fanartikelumsatz page's header and legend (`FUN_0045d579` with
+/// texts 0x960 and 0xa5a); its curve is black and the graph carries no
+/// labels.
+const FINANZEN_MERCH_TITLE: u16 = 0x960;
+const FINANZEN_MERCH_LEGEND: u16 = 0xa5a;
 /// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
 /// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
 /// the European cups and the cup.
@@ -1727,11 +1739,14 @@ struct GraphLine {
 /// `height` / `y_max` pixels from the bottom, rounded; a tick for each
 /// point along the other, (width − 10) / the longest line apart; each
 /// line from its first point on, a pixel above its value; the axes'
-/// labels at the right end below and at the top left.
+/// labels at the right end below and at the top left. The values stand
+/// on a zero line `zero` pixels above the window's bottom, its axis
+/// ticks reaching down to it wherever the line dips below zero.
 fn line_graph(
     game: &Game,
     size: (i32, i32),
     height: i32,
+    zero: i32,
     y_max: i32,
     lines: &[GraphLine],
     (x_label, y_label): (&str, &str),
@@ -1743,7 +1758,7 @@ fn line_graph(
     let round = |v: f64| (v + 0.5) as i32;
     let w = size.0 - 16;
     let full = if height < 0 || height > size.1 - 16 { size.1 - 16 } else { height };
-    let (mut high, mut span, mut lift) = (full, full, 0);
+    let (mut high, mut span, mut lift) = (full, full, zero);
     let mut step = span as f32 / y_max as f32;
     let mut scale = 1.0f32;
     let black = [0, 0, 0];
@@ -1790,6 +1805,14 @@ fn line_graph(
         pen((0, y), (6, y), black);
         y = base - round(f64::from(k) * f64::from(step));
         k += 1;
+    }
+    if lift > 0 {
+        let (mut y, mut k) = (base, 0);
+        while y < base + lift - 2 {
+            pen((0, y), (6, y), black);
+            y = base + round(f64::from(k) * f64::from(step));
+            k += 1;
+        }
     }
     let most = lines.iter().map(|l| l.values.len()).max().unwrap_or(0);
     if most > 0 {
@@ -2349,6 +2372,12 @@ impl Statistics {
             }
             Some(statistics::FINANZEN_VALUES) if self.category == FINANZEN => {
                 self.finanzen_values_page(cx, view)
+            }
+            Some(statistics::FINANZEN_CASH) if self.category == FINANZEN => {
+                self.finanzen_cash_page(cx, view)
+            }
+            Some(statistics::FINANZEN_MERCH) if self.category == FINANZEN => {
+                self.finanzen_merch_page(cx, view)
             }
             _ => false,
         };
@@ -3070,7 +3099,7 @@ impl Statistics {
         let rect = dialog.controls[c].rect;
         let size = (rect.width() as i32, rect.height() as i32);
         let y_label = Self::unit_label(game.text(STADION_UNIT), unit);
-        let shapes = line_graph(game, size, DEV_GRAPH_HEIGHT, steps, &lines, ("", &y_label));
+        let shapes = line_graph(game, size, DEV_GRAPH_HEIGHT, 0, steps, &lines, ("", &y_label));
         if let Some(table) = view.table_mut(c) {
             *table = TableState {
                 columns: vec![],
@@ -3306,6 +3335,172 @@ impl Statistics {
             };
         }
         true
+    }
+
+    /// Kassenstand (`FUN_0045cfc4`): the own club's cash at the end of
+    /// each week as one blue curve. The scale spans the deepest dip
+    /// under zero and the highest standing above it; grid steps start
+    /// at a hundred and take the next power of ten until no more than
+    /// twenty-five of them, and one more where they do not divide the
+    /// span exactly. Their money names the graph top left; the zero
+    /// line stands `zero` pixels over the window's bottom, below it the
+    /// axis' ticks reach down as deep as the scale, and "Woche" names
+    /// the axis at its right end.
+    fn finanzen_cash_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(FINANZEN_CASH_TITLE).to_owned(), &[(0, 0)]);
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        let extra = records
+            .managers
+            .iter()
+            .zip(&records.extras)
+            .find(|(m, _)| (u16::from(m.country()), m.team() as i16) == own)
+            .map(|(_, e)| e);
+        let weeks = extra.map_or_else(Vec::new, |e| e.cash_weeks());
+        if weeks.is_empty() {
+            if let Some(table) = view.table_mut(c) {
+                *table = Self::blank_page();
+            }
+            return true;
+        }
+        let (mut max, mut min) = (0, 0);
+        for &v in &weeks {
+            max = max.max(v);
+            min = min.min(v);
+        }
+        let range = min.abs() + max;
+        if range <= 0 {
+            if let Some(table) = view.table_mut(c) {
+                *table = Self::blank_page();
+            }
+            return true;
+        }
+        let (unit, steps) = Self::money_steps(range, 25);
+        if steps <= 0 {
+            return true;
+        }
+        let h = 310 / steps * steps;
+        let s = (h - 19) as f64 / range as f64;
+        let zero = (-f64::from(min) * s + 0.5) as i32;
+        let lines = [GraphLine {
+            values: weeks.iter().map(|&v| (f64::from(v) * s + 0.5) as i32).collect(),
+            colour: FINANZEN_CASH_INK,
+            label: game.text(FINANZEN_CASH_LEGEND).to_owned(),
+        }];
+        let axis = game.text(FINANZEN_CASH_AXIS);
+        let y_label = super::playerinfo::money(game, i64::from(unit));
+        let rect = dialog.controls[c].rect;
+        let size = (rect.width() as i32, rect.height() as i32);
+        let shapes = line_graph(game, size, h, zero, steps, &lines, (axis, &y_label));
+        if let Some(table) = view.table_mut(c) {
+            *table = Self::graph_page(shapes);
+        }
+        true
+    }
+
+    /// Fanartikelumsatz (`FUN_0045d579`): each week's merchandise
+    /// turnover as one black curve over 320 pixels, on the same scale
+    /// the cash page reckons. Without a week kept the graph is cleared;
+    /// with a span of nought the page returns leaving it as it stands.
+    /// No label names the graph or the axis.
+    fn finanzen_merch_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let Some(c) = control(dialog, TABLE) else { return false };
+        set_header(view, dialog, game.text(FINANZEN_MERCH_TITLE).to_owned(), &[(0, 0)]);
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        let extra = records
+            .managers
+            .iter()
+            .zip(&records.extras)
+            .find(|(m, _)| (u16::from(m.country()), m.team() as i16) == own)
+            .map(|(_, e)| e);
+        let weeks = extra.map_or_else(Vec::new, |e| e.merch_weeks());
+        if weeks.is_empty() {
+            if let Some(table) = view.table_mut(c) {
+                *table = Self::blank_page();
+            }
+            return true;
+        }
+        let (mut max, mut min) = (0, 0);
+        for &v in &weeks {
+            max = max.max(v);
+            min = min.min(v);
+        }
+        let range = min.abs() + max;
+        if range == 0 {
+            return true;
+        }
+        let (_, steps) = Self::money_steps(range, 25);
+        let h = 320 / steps * steps;
+        let s = (h - 19) as f64 / range as f64;
+        let zero = (-f64::from(min) * s + 0.5) as i32;
+        let lines = [GraphLine {
+            values: weeks.iter().map(|&v| (f64::from(v) * s + 0.5) as i32).collect(),
+            colour: [0, 0, 0],
+            label: game.text(FINANZEN_MERCH_LEGEND).to_owned(),
+        }];
+        let rect = dialog.controls[c].rect;
+        let size = (rect.width() as i32, rect.height() as i32);
+        let shapes = line_graph(game, size, h, zero, steps, &lines, ("", ""));
+        if let Some(table) = view.table_mut(c) {
+            *table = Self::graph_page(shapes);
+        }
+        true
+    }
+
+    /// The Finanzen graphs' steps (`FUN_0045cfc4`'s scale): a hundred
+    /// of them, each ten times bigger until no more than `cap` of them
+    /// fit into `range`, and one more where they leave a remainder. The
+    /// unit is that step's money; the count may be nought.
+    fn money_steps(range: i32, cap: i32) -> (i32, i32) {
+        let (mut steps, mut f) = (100, 0.1f64);
+        while steps > cap {
+            f *= 10.0;
+            steps = (f64::from(range) / f) as i32;
+        }
+        let unit = f as i32;
+        if range % unit != 0 {
+            steps += 1;
+        }
+        (unit, steps)
+    }
+
+    /// An empty graph page: the table cleared, no graph (`FUN_0071ef52`
+    /// with four −1s).
+    fn blank_page() -> TableState {
+        TableState {
+            columns: vec![],
+            rows: vec![],
+            width: ROW_WIDTH,
+            centred: -1,
+            scroll: 0,
+            cross: None,
+            graph: None,
+        }
+    }
+
+    /// A graph page's table: no rows, the shapes as the graph.
+    fn graph_page(shapes: Vec<Shape>) -> TableState {
+        TableState {
+            columns: vec![],
+            rows: vec![],
+            width: ROW_WIDTH,
+            centred: -1,
+            scroll: 0,
+            cross: None,
+            graph: Some(Graph {
+                bars: Vec::new(),
+                steps: 0,
+                shapes,
+                bar: None,
+                ..Graph::default()
+            }),
+        }
     }
 
     /// The season's results (`FUN_00445951` into the game's
@@ -3637,7 +3832,7 @@ impl Statistics {
         let rect = dialog.controls[c].rect;
         let size = (rect.width() as i32, rect.height() as i32);
         let labels = (game.text(WEEK_LABEL), game.text(value_label));
-        let shapes = line_graph(game, size, GRAPH_HEIGHT, y_max, &lines, labels);
+        let shapes = line_graph(game, size, GRAPH_HEIGHT, 0, y_max, &lines, labels);
         if let Some(table) = view.table_mut(c) {
             *table = TableState {
                 columns: Vec::new(),
@@ -3680,7 +3875,7 @@ impl Statistics {
         let rect = dialog.controls[c].rect;
         let size = (rect.width() as i32, rect.height() as i32);
         let labels = (game.text(WEEK_LABEL), game.text(TEAM_GRADES_LABEL));
-        let shapes = line_graph(game, size, GRAPH_HEIGHT, 6, &lines, labels);
+        let shapes = line_graph(game, size, GRAPH_HEIGHT, 0, 6, &lines, labels);
         if let Some(table) = view.table_mut(c) {
             *table = TableState {
                 columns: Vec::new(),
@@ -3876,7 +4071,7 @@ impl Statistics {
             .collect();
         let labels = (game.text(MATCHDAY_LABEL), "");
         let shapes = if most > 0 {
-            line_graph(game, size, PLACES_HEIGHT, most, &lines, labels)
+            line_graph(game, size, PLACES_HEIGHT, 0, most, &lines, labels)
         } else {
             Vec::new()
         };
