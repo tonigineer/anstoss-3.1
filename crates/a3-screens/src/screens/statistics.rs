@@ -214,6 +214,56 @@ const STADION_DEV_INKS: [[u8; 3]; 2] = [[255, 255, 255], [255, 0, 0]];
 /// The curve window's height (`FUN_0071dc15`'s 310 for the two Stadion
 /// development pages).
 const DEV_GRAPH_HEIGHT: i32 = 310;
+/// The Finanzen category, over the own club's money. Gehälter and
+/// Marktwerte share their eight columns (`FUN_0045bb3d` with 0x87cc30,
+/// `FUN_0045bfd6` with 0x87ccb0, both 0x87cc50; the rows 0x87cbf0 and
+/// 0x87cc70 with 0x87cc10): name, position, strength, form, the money,
+/// a second money column, D-Form and Tendenz. Their text 1029 is the
+/// Marktwerte's "Nein" where a player has no release fee.
+const FINANZEN: usize = 6;
+const FINANZEN_SALARY_HEADER: u16 = 0xa53;
+const FINANZEN_VALUE_HEADER: u16 = 0xa54;
+const FINANZEN_NO_FEE: u16 = 0x405;
+const FINANZEN_SALARY_HEADER_COLUMNS: [(u16, u16); 8] = [
+    (0, 140),
+    (140, 30),
+    (C | 165, 20),
+    (C | 190, 30),
+    (C | 220, 80),
+    (C | 295, 80),
+    (C | 370, 35),
+    (C | 405, 55),
+];
+const FINANZEN_VALUE_HEADER_COLUMNS: [(u16, u16); 8] = [
+    (0, 140),
+    (C | 140, 30),
+    (C | 165, 20),
+    (C | 190, 30),
+    (C | 220, 80),
+    (C | 295, 80),
+    (C | 370, 35),
+    (C | 405, 55),
+];
+const FINANZEN_SALARY_ROW_COLUMNS: [(u16, u16); 8] = [
+    (0, 140),
+    (140, 30),
+    (C | 165, 20),
+    (R | 180, 30),
+    (R | 210, 80),
+    (R | 285, 80),
+    (R | 365, 35),
+    (430, 0),
+];
+const FINANZEN_VALUE_ROW_COLUMNS: [(u16, u16); 8] = [
+    (0, 140),
+    (C | 140, 30),
+    (C | 165, 20),
+    (R | 180, 30),
+    (R | 210, 80),
+    (R | 285, 80),
+    (R | 365, 35),
+    (430, 0),
+];
 /// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
 /// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
 /// the European cups and the cup.
@@ -2294,6 +2344,12 @@ impl Statistics {
             Some(statistics::STADION_TICKET_DEVELOP) if self.category == STADION => {
                 self.stadion_dev_tickets_page(cx, view)
             }
+            Some(statistics::FINANZEN_SALARIES) if self.category == FINANZEN => {
+                self.finanzen_salaries_page(cx, view)
+            }
+            Some(statistics::FINANZEN_VALUES) if self.category == FINANZEN => {
+                self.finanzen_values_page(cx, view)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -3101,6 +3157,152 @@ impl Statistics {
                     unit: game.text(STADION_DEV_TICKETS_UNIT).to_owned(),
                     ..Graph::default()
                 }),
+            };
+        }
+        true
+    }
+
+    /// Gehälter (`FUN_0045bb3d`): the own squad by salary, biggest first
+    /// (the original's insertion sort, only strictly smaller entries
+    /// moving — ties keep the club's order), all of them shown, black:
+    /// "%s\t%s\t%s\t%d\t%s\t%s\t%2.1f\t%s" — the name, the position's
+    /// abbreviation, the strength or "?", today's form, the salary in
+    /// 1000s and the playing bonus in 100s as money, the D-Form and its
+    /// trend: "+", "-" or blank.
+    fn finanzen_salaries_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(FINANZEN_SALARY_HEADER).to_owned(),
+            &FINANZEN_SALARY_HEADER_COLUMNS,
+        );
+        let mut squad = team.players();
+        let salary = |id: u16| u32::from(records.player(id).map_or(0, |p| p.salary()));
+        for i in 1..squad.len() {
+            let mut j = i;
+            while j > 0 && salary(squad[j]) > salary(squad[j - 1]) {
+                squad.swap(j, j - 1);
+                j -= 1;
+            }
+        }
+        let rows: Vec<TableRow> = squad
+            .iter()
+            .filter_map(|&id| {
+                let p = records.player(id)?;
+                let name = records.known_as(id).unwrap_or_default();
+                let kind = p.positions()[0];
+                let abbreviation =
+                    game.rules.pitch.abbreviations.get(usize::from(kind)).copied().unwrap_or(0);
+                let strength = if p.picks() & STRENGTH_HIDDEN != 0 {
+                    "?".to_owned()
+                } else {
+                    p.strength().to_string()
+                };
+                let text = format!(
+                    "{name}\t{}\t{strength}\t{}\t{}\t{}\t{}\t{}",
+                    game.text(abbreviation as u16),
+                    statistics::form_today(p),
+                    super::playerinfo::money(game, i64::from(p.salary()) * 1000),
+                    super::playerinfo::money(game, i64::from(p.appearance_bonus()) * 100),
+                    tenths(f64::from(statistics::d_form(p)) / 10.0),
+                    statistics::form_trend(p),
+                );
+                Some(TableRow { text, ink: INK, mark: None, columns: None })
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FINANZEN_SALARY_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// Marktwerte (`FUN_0045bfd6`): the same squad and columns, but by
+    /// the market value — nothing for one above id 17000 or one with the
+    /// bit at R+0x26f's top (and none of those unsigned insertion sorts
+    /// moves for equal values); the money column his value cut to whole
+    /// thousands, the second his release fee in 10.000s, "Nein" where he
+    /// has none.
+    fn finanzen_values_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(season) = cx.state.season.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(FINANZEN_VALUE_HEADER).to_owned(),
+            &FINANZEN_VALUE_HEADER_COLUMNS,
+        );
+        let (today, stars) = (season.date(), records.globals.stars());
+        let value = |id: u16| -> i64 {
+            let Some(r) = records.player(id) else { return 0 };
+            if (id as i16) > 17000 || r.retiring() & 0x80 != 0 {
+                return 0;
+            }
+            let Some((player, _, status)) = a3_core::load::any_player(records, &game.data, id)
+            else {
+                return 0;
+            };
+            let years = status.contract.unwrap_or(0);
+            super::playerinfo::market_value(game, &player, r, stars, years, today)
+        };
+        let mut squad = team.players();
+        for i in 1..squad.len() {
+            let mut j = i;
+            while j > 0 && value(squad[j]) > value(squad[j - 1]) {
+                squad.swap(j, j - 1);
+                j -= 1;
+            }
+        }
+        let rows: Vec<TableRow> = squad
+            .iter()
+            .filter_map(|&id| {
+                let p = records.player(id)?;
+                let name = records.known_as(id).unwrap_or_default();
+                let kind = p.positions()[0];
+                let abbreviation =
+                    game.rules.pitch.abbreviations.get(usize::from(kind)).copied().unwrap_or(0);
+                let strength = if p.picks() & STRENGTH_HIDDEN != 0 {
+                    "?".to_owned()
+                } else {
+                    p.strength().to_string()
+                };
+                let fee = match p.fixed_fee() {
+                    0 => game.text(FINANZEN_NO_FEE).to_owned(),
+                    fee => super::playerinfo::money(game, i64::from(fee) * 10_000),
+                };
+                let text = format!(
+                    "{name}\t{}\t{strength}\t{}\t{}\t{}\t{}\t{}",
+                    game.text(abbreviation as u16),
+                    statistics::form_today(p),
+                    super::playerinfo::money(game, value(id) / 1000 * 1000),
+                    fee,
+                    tenths(f64::from(statistics::d_form(p)) / 10.0),
+                    statistics::form_trend(p),
+                );
+                Some(TableRow { text, ink: INK, mark: None, columns: None })
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FINANZEN_VALUE_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
             };
         }
         true

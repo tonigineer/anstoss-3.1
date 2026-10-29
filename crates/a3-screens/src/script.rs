@@ -6614,4 +6614,40 @@ mod tests {
         assert_eq!(graph.top, 0);
         assert_eq!(graph.unit, "Dauerkarten/1000");
     }
+
+    #[test]
+    #[ignore = "needs the game"]
+    fn the_finanzen_pays_salaries_and_estimates_values() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let fin = "now click bar 14\nuntil dialog 18\nnow row 1283 6";
+        // The plain A's manager stands in his first season: seven pages,
+        // the Werbeeinnahmen hidden.
+        let Some(runner) = on_save(&game, "A", fin) else { return };
+        let list = runner.host.view().list(control(dialog, 1284).unwrap()).unwrap();
+        assert_eq!(list.rows.len(), 7);
+        // Gehälter: the whole squad of 26 by salary, biggest first; the
+        // best paid and the last one shown, with D-Form and trend.
+        let then = format!("{fin}\nnow row 1284 2");
+        let Some(runner) = on_save(&game, "A", &then) else { return };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 26);
+        assert_eq!(
+            table.rows[0].text,
+            "Danilho Doekhi\tIV\t10\t14\t793.000 €\t9.900 €\t12.7\t+"
+        );
+        assert_eq!(
+            table.rows[24].text,
+            "Carl Klaus\tTO\t6\t15\t64.000 €\t 800 €\t13.9\t+"
+        );
+        // Marktwerte: the same squad by market value, the top player at
+        // 10.06 million, none of them with a release fee.
+        let then = format!("{fin}\nnow row 1284 3");
+        let Some(runner) = on_save(&game, "A", &then) else { return };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(
+            table.rows[0].text,
+            "Danilho Doekhi\tIV\t10\t14\t10.06 Mio €\tNein\t12.7\t+"
+        );
+    }
 }

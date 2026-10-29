@@ -3521,6 +3521,19 @@ pub const STADION_MATCHDAY_CROWDS: i16 = 7;
 pub const STADION_STADIUMS: i16 = 8;
 pub const STADION_SEASON_TICKETS: i16 = 0xd;
 
+/// The Finanzen category's pages, by the code its drawing picks in
+/// `CArchivTabControl` (page table 0x87be98). The list's order differs
+/// from the codes: the shirts' page carries code 7 and stands before the
+/// sponsors' with code 6.
+pub const FINANZEN_SEASONS: i16 = 0;
+pub const FINANZEN_CASH: i16 = 1;
+pub const FINANZEN_SALARIES: i16 = 2;
+pub const FINANZEN_VALUES: i16 = 3;
+pub const FINANZEN_TRANSFERS: i16 = 4;
+pub const FINANZEN_MERCH: i16 = 5;
+pub const FINANZEN_SPONSORS: i16 = 6;
+pub const FINANZEN_SHIRTS: i16 = 7;
+
 /// Which of the kept leagues' record blocks a league's is: the main
 /// country's levels first, then the more countries in their order
 /// (`FUN_00677b07`; the block at `0x1c1e4c8` has one slot each).
