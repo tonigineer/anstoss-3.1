@@ -2,7 +2,7 @@
 
 [![Progress](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tonigineer/anstoss-3.1/main/.github/badges/progress.json)](#work-in-progress)
 [![CI](https://github.com/tonigineer/anstoss-3.1/actions/workflows/ci.yml/badge.svg)](https://github.com/tonigineer/anstoss-3.1/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tonigineer/anstoss-3.1/main/.github/badges/tests.json)](#tests)
+[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tonigineer/anstoss-3.1/main/.github/badges/tests.json)](https://github.com/tonigineer/anstoss-3.1/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.97%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Bevy](https://img.shields.io/badge/Bevy-0.20-232326)](https://bevyengine.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
@@ -97,35 +97,6 @@ rustup default stable
 git clone https://github.com/tonigineer/anstoss-3.1.git && cd anstoss-3.1
 cargo build --release -p a3-app
 ```
-
-### Debian / Ubuntu
-
-Debian 12 and Ubuntu 24.04 or newer:
-
-```sh
-sudo apt install -y build-essential git rustup pkg-config libasound2-dev \
-    libudev-dev libwayland-dev libxkbcommon-dev libx11-dev
-rustup default stable
-git clone https://github.com/tonigineer/anstoss-3.1.git && cd anstoss-3.1
-cargo build --release -p a3-app
-```
-
-### Windows
-
-Install [rustup](https://rustup.rs) with the MSVC toolchain (it pulls in
-Visual Studio Build Tools), then:
-
-```powershell
-git clone https://github.com/tonigineer/anstoss-3.1.git
-cd anstoss-3.1 && cargo build --release -p a3-app
-```
-
-### Tests
-
-`cargo test` runs the tests that need no game files; with the game,
-`ANSTOSS3_DIR="/path/to/ANSTOSS 3" cargo test -- --include-ignored` runs
-them all. Those tests set up their folders with Unix symlinks, so they
-don't build on Windows.
 
 ## License
 
