@@ -46,6 +46,8 @@ const CO_TRAINER: u16 = 4417;
 /// The training statistics (dialog 406), named "JAHRESPLAN" in the dialog
 /// file.
 const STATISTICS: u16 = 4418;
+/// The training camp's rooms (dialog 407).
+const ROOMS: u16 = 4890;
 /// Saving, loading and restoring the templates and the plan.
 const FILES: u16 = 5652;
 /// Its last item, "Trainingsplan löschen"; its third and fourth save and
@@ -181,7 +183,7 @@ impl Screen for LongTraining {
         self.fill(cx, view);
         let works = |target: Target| match target {
             Target::Button(c) => {
-                [SECRET_BUTTON, CO_PLAN, CO_TRAINER, STATISTICS].contains(&dialog.controls[c].id.unwrap_or(0))
+                [SECRET_BUTTON, CO_PLAN, CO_TRAINER, STATISTICS, ROOMS].contains(&dialog.controls[c].id.unwrap_or(0))
             }
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(TEMPLATES) => true,
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(PAGES) => true,
@@ -295,6 +297,10 @@ impl Screen for LongTraining {
                     super::performance::TRAINING_STATISTICS,
                     Args::None,
                 ));
+            }
+            // The camp's rooms, whatever the season holds (`0x5a07c0`).
+            Target::Button(c) if id(c) == ROOMS => {
+                return Outcome::Popup(Request::with(super::rooms::ROOMS_DIALOG, Args::None));
             }
             _ => {}
         }

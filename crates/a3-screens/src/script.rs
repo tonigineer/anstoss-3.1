@@ -6836,4 +6836,35 @@ mod tests {
         assert_eq!(good.len(), 17);
         assert_eq!(bad, ["Rönnow, F.\tTO\t9\tmüde", "Klaus, C.\tTO\t6\tmüde"]);
     }
+
+    /// The camp's rooms seat the squad as their records keep them, a pair
+    /// of best friends blue. A name dragged onto a free bed moves there;
+    /// one dragged onto Bianca's picture swaps with her, and she shows in
+    /// his room. OK keeps the rooms, Bianca's place aside: opened again,
+    /// the one who stood there is back in his room and Bianca at hers.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_camp_rooms_swap_names_and_bianca() {
+        use crate::controls::ControlState;
+        let game = game();
+        let dialog = &game.dialogs[&407];
+        let open = "now click bar 3\nuntil dialog 345\nnow press 4890\nuntil dialog 407";
+        let names = |runner: &Runner, ids: &[u16]| -> Vec<String> {
+            ids.iter().map(|&id| runner.host.view().text(control(dialog, id).unwrap()).to_owned()).collect()
+        };
+        let Some(runner) = on_save(&game, "A", open) else { return };
+        assert_eq!(names(&runner, &[4810, 4811, 4893]), ["Leite, D.", "Moore, M.", "Frei"]);
+        let nsoki = control(dialog, 4812).unwrap();
+        let ink = match &runner.host.view().controls[nsoki].state {
+            ControlState::Static(s) => s.ink,
+            _ => None,
+        };
+        assert_eq!(ink, Some([0, 0, 255]));
+        let then = format!("{open}\nnow drag 4810 4893\nnow drag 4811 4824");
+        let runner = on_save(&game, "A", &then).unwrap();
+        assert_eq!(names(&runner, &[4810, 4811, 4893]), ["Frei", "Bianca", "Leite, D."]);
+        let again = format!("{then}\nnow press 1\nuntil dialog 345\nnow press 4890\nuntil dialog 407");
+        let runner = on_save(&game, "A", &again).unwrap();
+        assert_eq!(names(&runner, &[4810, 4811, 4893]), ["Moore, M.", "Frei", "Leite, D."]);
+    }
 }

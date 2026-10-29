@@ -197,6 +197,9 @@ record! {
     /// Condition and freshness, in hundredths.
     0x1ce => condition, set_condition: i16;
     0x1d0 => freshness, set_freshness: [i16; 3];
+    /// His room in the training camp, 0 to 19; below 0 none (the player
+    /// object's +0xc9, [`crate::rooms`]).
+    0x1d6 => room, set_room: i8;
     /// Set with an injury: the game's day it happened (`FUN_00766b92`).
     0x1d8 => injured_on, set_injured_on: u16;
     /// The injury lasts to this year and day of the year.

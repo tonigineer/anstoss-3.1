@@ -32,6 +32,7 @@ pub mod playtime;
 pub mod random;
 pub mod records;
 pub mod refit;
+pub mod rooms;
 pub mod season;
 pub mod squadlist;
 pub mod stadium;
