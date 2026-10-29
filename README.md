@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="#work-in-progress"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tonigineer/anstoss-3.1/main/.github/badges/progress.json" alt="Progress"></a>
-  <a href="https://github.com/tonigineer/anstoss-3.1/actions/workflows/ci.yml"><img src="https://github.com/tonigineer/anstoss-3.1/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/tonigineer/anstoss-3.1/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/tonigineer/anstoss-3.1/ci.yml?branch=main&label=CI" alt="CI"></a>
   <a href="https://github.com/tonigineer/anstoss-3.1/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tonigineer/anstoss-3.1/main/.github/badges/tests.json" alt="Tests"></a>
   <br>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-1.97%2B-orange?logo=rust" alt="Rust 1.97+"></a>
