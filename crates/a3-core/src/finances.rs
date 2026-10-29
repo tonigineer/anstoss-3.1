@@ -74,9 +74,21 @@ fn booked(team: &Team, transfers: i64) -> i64 {
     f
 }
 
+/// The season's booked result, the transfers as their net at club +0x258
+/// (`FUN_00621f50`): what the Statistics' Saisonbilanzen page shows.
+pub fn booked_result(team: &Team) -> i64 {
+    booked(team, i64::from(transfer_net(team)))
+}
+
+/// The season's transfers so far, net: each sale adds its fee, each
+/// purchase takes it off (club +0x258; `FUN_0070e3f5`, `FUN_0070e4c1`).
+pub fn transfer_net(team: &Team) -> i32 {
+    team.get::<i32>(at(0x258))
+}
+
 /// The figure, in the game's money (`FUN_00621eac`).
 pub fn figure(team: &Team, fund_prices: [i32; 5]) -> i64 {
-    let f = booked(team, i64::from(team.get::<i32>(at(0x258)))); // transfers, net
+    let f = booked_result(team);
     i64_(team, 0x210)
         .wrapping_add(i64::from(team.get::<i32>(at(0x2d0))))
         .wrapping_add(f)

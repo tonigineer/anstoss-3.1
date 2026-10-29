@@ -276,6 +276,36 @@ const FINANZEN_CASH_INK: [u8; 3] = [0, 0, 0xff];
 /// labels.
 const FINANZEN_MERCH_TITLE: u16 = 0x960;
 const FINANZEN_MERCH_LEGEND: u16 = 0xa5a;
+/// The Saisonbilanzen page's header (0xa52, `FUN_0045b65c` with 0x87cbb0
+/// and 0x87cbd0) and its ten row columns (0x87cb60 and 0x87cb88): the
+/// season, league, place, the interim gap's star, points, the goals both
+/// ways about a ":" of their own, the team's strength and the result.
+const FINANZEN_SEASONS_HEADER: u16 = 0xa52;
+const FINANZEN_SEASONS_HEADER_COLUMNS: [(u16, u16); 8] = [
+    (0, 40),
+    (C | 50, 30),
+    (C | 78, 30),
+    (C | 116, 37),
+    (C | 153, 30),
+    (C | 180, 40),
+    (C | 242, 40),
+    (C | 287, 90),
+];
+const FINANZEN_SEASONS_ROW_COLUMNS: [(u16, u16); 10] = [
+    (0, 40),
+    (R | 40, 30),
+    (R | 68, 30),
+    (C | 103, 37),
+    (R | 145, 30),
+    (R | 180, 22),
+    (202, 0),
+    (207, 0),
+    (R | 232, 40),
+    (R | 287, 90),
+];
+/// The country whose leagues are classed down to the fourth
+/// (`FUN_006755b8`).
+const FOUR_CLASSES: u8 = 16;
 /// The Trikots page's header ("Spieler\tTrikots", 0xbc5; `FUN_0045daa8`
 /// with 0x87ccf0 and 0x87ccf8), its name left and the count centred at
 /// 200; the rows (`6df48b`'s 0x87cd00 and 0x87cd08) right-align it at 200.
@@ -2373,6 +2403,9 @@ impl Statistics {
             Some(statistics::STADION_TICKET_DEVELOP) if self.category == STADION => {
                 self.stadion_dev_tickets_page(cx, view)
             }
+            Some(statistics::FINANZEN_SEASONS) if self.category == FINANZEN => {
+                self.finanzen_seasons_page(cx, view)
+            }
             Some(statistics::FINANZEN_SALARIES) if self.category == FINANZEN => {
                 self.finanzen_salaries_page(cx, view)
             }
@@ -3458,6 +3491,87 @@ impl Statistics {
         let shapes = line_graph(game, size, h, zero, steps, &lines, ("", ""));
         if let Some(table) = view.table_mut(c) {
             *table = Self::graph_page(shapes);
+        }
+        true
+    }
+
+    /// Saisonbilanzen (`FUN_0045b65c`): the running season first —
+    /// "%02d/%02d" of the start year and the next, the league's class
+    /// (`FUN_006755b8`) from 1, then the place, points (`FUN_0067805c`:
+    /// the wins at the country's win points, and the draws) and goals,
+    /// or dashes for a club outside a table, the squad's strength
+    /// (club +0x9c) and the booked result (`FUN_00621f50`) — then the
+    /// kept seasons newest first, a star for the interim gap.
+    fn finanzen_seasons_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(FINANZEN_SEASONS_HEADER).to_owned(),
+            &FINANZEN_SEASONS_HEADER_COLUMNS,
+        );
+        let season = |year: i32| format!("{:02}/{:02}", year % 100, (year + 1) % 100);
+        let (country, level) = (team.country(), team.level());
+        let class = if i16::from(country) == records.globals.main_country() {
+            level.min(if country == FOUR_CLASSES { 3 } else { 2 })
+        } else {
+            0
+        };
+        let mut text = format!(
+            "{}\t{}\t",
+            season(i32::from(records.globals.start_year())),
+            u32::from(class) + 1
+        );
+        let place = team.table_place();
+        if place != 0 {
+            let [won, drawn, _] = team.record();
+            let points = i32::from(won) * i32::from(records.win_points(country)) + i32::from(drawn);
+            let [scored, conceded] = team.goals();
+            text.push_str(&format!("{place}\t\t{points}\t{scored}\t:\t{conceded}\t"));
+        } else {
+            text.push_str("-\t\t-\t-\t\t-\t");
+        }
+        // The club keeps its squad's strength anew as the day goes; the
+        // save's is the last one stored.
+        let strength = cx
+            .state
+            .season
+            .as_ref()
+            .and_then(|s| s.manager().and_then(|m| s.clubs.get(&m.club?)))
+            .map_or(team.squad_strength(), |club| {
+                statistics::squad_strength(&game.rules.pitch, club)
+            });
+        let result = a3_core::finances::booked_result(team);
+        text.push_str(&format!("{strength}\t{}", super::finances::money64(game, result)));
+        let mut rows = vec![TableRow { text, ink: INK, mark: None, columns: None }];
+        let history = team.human().checked_sub(1).and_then(|s| records.extras.get(usize::from(s)));
+        for b in history.map(|e| e.balances()).unwrap_or_default().iter().rev() {
+            let text = format!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t:\t{}\t{}\t{}",
+                season(i32::from(b.year)),
+                u32::from(b.league) + 1,
+                b.place & 0x7f,
+                if b.place & 0x80 != 0 { "*" } else { "" },
+                b.points,
+                b.goals[0],
+                b.goals[1],
+                b.strength,
+                super::playerinfo::money(game, i64::from(b.result)),
+            );
+            rows.push(TableRow { text, ink: INK, mark: None, columns: None });
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FINANZEN_SEASONS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
         }
         true
     }

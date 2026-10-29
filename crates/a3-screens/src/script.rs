@@ -6723,4 +6723,22 @@ mod tests {
         assert_eq!(table.rows[9].text, "David Preu\t28");
         assert_eq!(table.rows[13].text, "Toni Lubiniecki\t22");
     }
+
+    /// Saisonbilanzen sums up the running season in one row: the class
+    /// from 1, place, points and goals, the squad's strength as the club
+    /// keeps it anew (207, where the save still holds 210) and the result
+    /// booked so far; a first season has no kept ones below it.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_sums_up_the_season() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 6\nnow row 1284 0";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert!(view.text(control(dialog, 1292).unwrap()).starts_with("Saison"));
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let rows: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(rows, ["25/26\t1\t11\t\t3\t4\t:\t4\t207\t3.67 Mio €"]);
+    }
 }

@@ -2480,6 +2480,17 @@ pub fn strength(records: &Records, team: &Team) -> i16 {
     if count < 1 { 1 } else { (i32::from(sum) * 10 / count) as i16 }
 }
 
+/// The squad's strength as the club keeps it at +0x9c (`FUN_006a10bb`,
+/// stored by `FUN_006a10a0`): every player's strength on his main
+/// position (`FUN_006a144e`) summed in 16 bits, a tenth of it.
+pub fn squad_strength(tables: &crate::lineup::Tables, club: &crate::season::ClubState) -> i16 {
+    let sum = club.players.iter().enumerate().fold(0i16, |sum, (p, player)| {
+        let fitness = crate::lineup::fitness_of(&club.fitness, p);
+        sum.wrapping_add(tables.strength_at(player, fitness, player.positions[0]) as i16)
+    });
+    sum / 10
+}
+
 /// The Mannschaftsübersicht's order (`FUN_0044c9c7`): the strongest team
 /// first, by the page's exchange sort.
 pub fn by_strength(mut rows: Vec<ClubFigures>) -> Vec<ClubFigures> {

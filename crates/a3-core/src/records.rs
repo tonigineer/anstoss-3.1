@@ -414,6 +414,10 @@ record! {
     0xa8 => humans, set_humans: [u8; 2];
     /// League wins, draws and defeats this season.
     0xd4 => record, set_record: [u8; 3];
+    /// League goals scored and conceded this season (club +0xca, +0xcb).
+    0xea => goals, set_goals: [u8; 2];
+    /// The squad's strength as last stored (club +0x9c, `FUN_006a10a0`).
+    0xc0 => squad_strength, set_squad_strength: i16;
     /// What the board is like (`FUN_007309a3`), 0 to 5.
     0x123 => board, set_board: u8;
     /// Its place among its league's teams, and in the table.
@@ -646,6 +650,23 @@ record! {
     0x282a => co_training_focus, set_co_training_focus: [u8; 9];
     /// The player the detective watches (0 nobody).
     0x2834 => detective, set_detective: u16;
+    /// How many past seasons' balances are kept ([`Extra::balances`]).
+    0x1e48 => balance_count, set_balance_count: i16;
+}
+
+/// One past season as the Saisonbilanzen page lists it (0x18 bytes): its
+/// start year, the league's class from 0, the place — bit 0x80 the
+/// interim gap's star — points, goals scored and conceded, the team's
+/// strength and the season's result.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeasonBalance {
+    pub year: i16,
+    pub league: u8,
+    pub place: u8,
+    pub points: u8,
+    pub goals: [u8; 2],
+    pub strength: i16,
+    pub result: i32,
 }
 
 /// One past season as the development pages draw it: the sum of the home
@@ -671,6 +692,23 @@ impl Extra {
                 planned: self.get(0x2404 + k * 0x10),
                 tickets: self.get(0x2408 + k * 0x10),
                 level: self.get(0x240d + k * 0x10),
+            })
+            .collect()
+    }
+
+    /// The past seasons' balances (`FUN_00633447` copies them out): at
+    /// most twenty, 0x18 bytes each from +0x1e4c, the oldest first.
+    pub fn balances(&self) -> Vec<SeasonBalance> {
+        (0..self.balance_count().clamp(0, 20) as usize)
+            .map(|k| 0x1e4c + k * 0x18)
+            .map(|r| SeasonBalance {
+                year: self.get(r),
+                league: self.get(r + 2),
+                place: self.get(r + 3),
+                points: self.get(r + 4),
+                goals: self.get(r + 5),
+                strength: self.get(r + 8),
+                result: self.get(r + 0xc),
             })
             .collect()
     }
@@ -1632,6 +1670,16 @@ impl Records {
         let slot = self.countries.slot(usize::from(country));
         let block = self.block(&format!("0x19f7fd0[{slot}]"))?;
         Some(text(block.get(AT + k * STEP..)?, LEN))
+    }
+
+    /// The points a league win brings in a country (`FUN_006811cc`:
+    /// `DAT_019f817e` in the country's slot of `0x19f7fd0`).
+    pub fn win_points(&self, country: u8) -> i16 {
+        const AT: usize = 0x18e;
+        let slot = self.countries.slot(usize::from(country));
+        self.block(&format!("0x19f7fd0[{slot}]"))
+            .and_then(|b| b.get(AT..AT + 2))
+            .map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
     }
 
     /// The name of a country's cup, "DFB-Pokal" (`0x19f7fd0[slot]`, the
