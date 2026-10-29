@@ -6787,4 +6787,53 @@ mod tests {
         };
         assert!(theirs.is_empty());
     }
+
+    /// The long-term training's 4418 opens the training statistics: on
+    /// A twenty players train well for their super condition, none badly;
+    /// the units list all but the eleventh, the season's and last week's;
+    /// the graph draws nine weeks in three curves. Patched, a tired
+    /// keeper trains badly, one with morale too low and tired as well
+    /// names only the last reason, and one with reasons both ways shows
+    /// in neither list.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_training_statistics_list_who_trains_well_and_badly() {
+        let open = "now click bar 3\nuntil dialog 345\nnow press 4418\nuntil dialog 406";
+        let rows = |game: &Game, save: &str| -> Option<[Vec<String>; 3]> {
+            let runner = on_save(game, save, open)?;
+            let dialog = &game.dialogs[&406];
+            let list = |id: u16| runner.host.view().list(control(dialog, id).unwrap()).unwrap().rows.clone();
+            Some([list(4821), list(4822), list(4823)])
+        };
+        let game = game();
+        let Some([good, bad, units]) = rows(&game, "A") else { return };
+        assert_eq!(good.len(), 20);
+        assert_eq!(good[0], "Rönnow, F.\tTO\t9\tSuper Kondition");
+        assert!(bad.is_empty());
+        assert_eq!(units.len(), 38);
+        assert_eq!(units[6], "brutale Kondition\t36\t0");
+        assert_eq!(units[7], "Ecken\t6\t2");
+        let runner = on_save(&game, "A", open).unwrap();
+        let graph = control(&game.dialogs[&406], 5526).unwrap();
+        assert_eq!(runner.host.view().paint(graph).unwrap().lines.len(), 27);
+
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "A", "training-moods", |records| {
+            let (fit, fresh) = (records.players[3257].condition(), records.players[3257].freshness());
+            let mut set = |id: usize, morale: u8, condition: i16, freshness: [i16; 3]| {
+                let p = &mut records.players[id];
+                p.set_morale(morale);
+                p.set_condition(condition);
+                p.set_freshness(freshness);
+            };
+            set(3257, 100, fit, [1000; 3]);
+            set(3258, 120, 3000, fresh);
+            set(3259, 80, fit, [1000; 3]);
+        });
+        let mut game = Game::load(&root).unwrap();
+        compose(&mut game);
+        let [good, bad, _] = rows(&game, "training-moods").unwrap();
+        assert_eq!(good.len(), 17);
+        assert_eq!(bad, ["Rönnow, F.\tTO\t9\tmüde", "Klaus, C.\tTO\t6\tmüde"]);
+    }
 }

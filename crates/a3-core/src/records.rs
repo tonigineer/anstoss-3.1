@@ -650,6 +650,14 @@ record! {
     0x282a => co_training_focus, set_co_training_focus: [u8; 9];
     /// The player the detective watches (0 nobody).
     0x2834 => detective, set_detective: u16;
+    /// The training units given this season and last week, by unit
+    /// (the club object's +0xcd6 and +0xcaf, copied with the plan); the
+    /// four session counts above are four of the first.
+    0x33c => season_units, set_season_units: [i16; 39];
+    0x315 => week_units, set_week_units: [u8; 39];
+    /// How many weeks of the team's fitness are kept
+    /// ([`Extra::fitness_weeks`]).
+    0xb90 => fitness_count, set_fitness_count: i16;
     /// How many past seasons' balances are kept ([`Extra::balances`]).
     0x1e48 => balance_count, set_balance_count: i16;
     /// How many past seasons' transfer balances are kept
@@ -713,6 +721,15 @@ impl Extra {
                 strength: self.get(r + 8),
                 result: self.get(r + 0xc),
             })
+            .collect()
+    }
+
+    /// The team's fitness week by week (`FUN_00632833` copies them out):
+    /// at most fifty records of seven bytes from +0xb92, of which the
+    /// training statistics draw bytes 3, 4 and 6 as their curves.
+    pub fn fitness_weeks(&self) -> Vec<[u8; 7]> {
+        (0..self.fitness_count().clamp(0, 50) as usize)
+            .map(|k| self.get(0xb92 + k * 7))
             .collect()
     }
 

@@ -43,6 +43,9 @@ const SECRET_BUTTON: u16 = 5344;
 const CO_PLAN: u16 = 6465;
 /// The corner's co-trainer button, which opens his settings.
 const CO_TRAINER: u16 = 4417;
+/// The training statistics (dialog 406), named "JAHRESPLAN" in the dialog
+/// file.
+const STATISTICS: u16 = 4418;
 /// Saving, loading and restoring the templates and the plan.
 const FILES: u16 = 5652;
 /// Its last item, "Trainingsplan löschen"; its third and fourth save and
@@ -178,7 +181,7 @@ impl Screen for LongTraining {
         self.fill(cx, view);
         let works = |target: Target| match target {
             Target::Button(c) => {
-                [SECRET_BUTTON, CO_PLAN, CO_TRAINER].contains(&dialog.controls[c].id.unwrap_or(0))
+                [SECRET_BUTTON, CO_PLAN, CO_TRAINER, STATISTICS].contains(&dialog.controls[c].id.unwrap_or(0))
             }
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(TEMPLATES) => true,
             Target::Option { control: c, .. } if dialog.controls[c].id == Some(PAGES) => true,
@@ -284,6 +287,14 @@ impl Screen for LongTraining {
                     ));
                 }
                 return Outcome::Popup(Request::with(NOTICE, Args::Text(NO_CO_TRAINER)));
+            }
+            // The training statistics; nothing here changes after them
+            // (`0x5a0373`).
+            Target::Button(c) if id(c) == STATISTICS => {
+                return Outcome::Popup(Request::with(
+                    super::performance::TRAINING_STATISTICS,
+                    Args::None,
+                ));
             }
             _ => {}
         }

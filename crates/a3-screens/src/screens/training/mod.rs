@@ -11,6 +11,7 @@
 pub mod editor;
 pub mod individual;
 pub mod long;
+pub mod performance;
 pub mod settings;
 
 use std::collections::HashMap;

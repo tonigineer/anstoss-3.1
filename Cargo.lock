@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "a3-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "a3-core",
  "a3-files",
@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "a3-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "a3-files",
  "chrono",
@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "a3-files"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bevy_math",
  "image",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "a3-screens"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "a3-core",
  "a3-files",
