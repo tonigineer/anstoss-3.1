@@ -2,7 +2,8 @@ name: CI
 
 # On every push to main and every pull request: the tests that need no game
 # on Linux, and a build on Windows. The tests with the game run locally; their
-# count reaches the README through tools/badges.py.
+# count reaches the README through tools/badges.py. A pull request must come
+# from a feature/ or fix/ branch: main's ruleset requires all three checks.
 on:
   push:
     branches: [main]
@@ -17,6 +18,20 @@ env:
   CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
+  branch-name:
+    name: Branch name
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only feature/ and fix/ branches merge into main
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$HEAD_REF" in
+            feature/*|fix/*) echo "$HEAD_REF may be merged" ;;
+            *) echo "::error::$HEAD_REF is neither a feature/ nor a fix/ branch"; exit 1 ;;
+          esac
+
   linux:
     name: Test (Linux)
     runs-on: ubuntu-latest
