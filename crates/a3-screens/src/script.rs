@@ -4630,10 +4630,10 @@ mod tests {
         assert_eq!(row(0), (aug.to_owned(), [0; 3], None));
         let own = "1.FC Union Berlin\t-\t1.FC Köln\t4\t:\t1\t ";
         assert_eq!(row(1), (own.to_owned(), [255, 0, 0], None));
-        let Dortmund = "Borussia Dortmund\t-\tSV 07 Elversberg\t0\t:\t1\tn.V.";
-        assert_eq!(table.rows[4].text, Dortmund);
-        let Frankfurt = "Eintracht Frankfurt\t-\tKarlsruher SC\t5\t:\t3\tn.E.";
-        assert_eq!(table.rows[5].text, Frankfurt);
+        let dortmund = "Borussia Dortmund\t-\tSV 07 Elversberg\t0\t:\t1\tn.V.";
+        assert_eq!(table.rows[4].text, dortmund);
+        let frankfurt = "Eintracht Frankfurt\t-\tKarlsruher SC\t5\t:\t3\tn.E.";
+        assert_eq!(table.rows[5].text, frankfurt);
         let on = format!("{de}\nnow click at 545 436");
         let Some(runner) = on_save(&game, "A", &on) else { return };
         let view = runner.host.view();
