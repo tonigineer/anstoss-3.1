@@ -733,12 +733,11 @@ pub const HOME_MATCHES: u8 = 1;
 pub const AWAY_MATCHES: u8 = 2;
 
 /// The club's league record against every club of its country
-/// (`FUN_0040c97b`), the matches of `mode` this season counted — three
-/// points a win, one each a draw (`FUN_0040d1a1`) — and sorted with the
-/// exchange sort: the most points taken over given first, then the more
-/// taken, the better difference, the more goals. The original adds the
-/// seasons before from its league archive (`DAT_00b21adc`, the last
-/// `seasons` − 1 of ten) — not read here, as in a first season.
+/// (`FUN_0040c97b`), the matches of `mode` counted — three points a win,
+/// one each a draw (`FUN_0040d1a1`) — and sorted with the exchange sort:
+/// the most points taken over given first, then the more taken, the
+/// better difference, the more goals. The seasons before come from the
+/// league archive (`archived_games`), this season's from the fixtures.
 pub fn opponents(
     records: &Records,
     calendar: &crate::calendar::Calendar,
@@ -760,18 +759,17 @@ pub fn opponents(
             continue;
         };
         let (own, other) = if f.home { (home, away) } else { (away, home) };
-        let (own, other) = (i16::from(own), i16::from(other));
-        e.games += 1;
-        match own.cmp(&other) {
-            std::cmp::Ordering::Greater => e.points += 3,
-            std::cmp::Ordering::Equal => {
-                e.points += 1;
-                e.given += 1;
+        add_game(e, i16::from(own), i16::from(other));
+    }
+    for (number, at_home, away) in crate::opponent::archived_games(records, team) {
+        let Some(e) = table.get_mut(usize::from(number)) else { continue };
+        for (bit, game) in [(HOME_MATCHES, at_home), (AWAY_MATCHES, away)] {
+            if mode & bit == 0 {
+                continue;
             }
-            std::cmp::Ordering::Less => e.given += 3,
+            let Some((own, other)) = game else { continue };
+            add_game(e, i16::from(own), i16::from(other));
         }
-        e.goals += own;
-        e.against += other;
     }
     for e in &mut table {
         e.diff = e.goals - e.against;
@@ -788,6 +786,22 @@ pub fn opponents(
         }
     }
     table
+}
+
+/// One match added to the record (`FUN_0040d1a1`): the game, its points
+/// and its goals.
+fn add_game(e: &mut Opponent, own: i16, other: i16) {
+    e.games += 1;
+    match own.cmp(&other) {
+        std::cmp::Ordering::Greater => e.points += 3,
+        std::cmp::Ordering::Equal => {
+            e.points += 1;
+            e.given += 1;
+        }
+        std::cmp::Ordering::Less => e.given += 3,
+    }
+    e.goals += own;
+    e.against += other;
 }
 
 /// How many matchdays the club's league has (`FUN_00692997`): the
@@ -3437,5 +3451,77 @@ mod tests {
         let sums = [[-26, 0, -26, -26], [26, 0, 26, 26]];
         assert_eq!(goal_graph(&sums, 2).1, 50);
         assert_eq!(goal_graph(&[[-26, 0, -26, -26]], 2).1, 25);
+    }
+
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_archived_season_adds_games_to_the_records() {
+        use a3_files::an3::Save;
+        use std::collections::BTreeMap;
+        use std::path::PathBuf;
+
+        // A2 with two seasons behind it and a hand-made archived league of
+        // four clubs in slot 9 (the last completed season) of league 0:
+        // the human club first, then three it also meets this season, and
+        // six of their games; everything else stays "not played" (0xFF).
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").expect("ANSTOSS3_DIR"));
+        let data = crate::data::Data::load(&dir).unwrap();
+        let mut records =
+            Records::from_save(Save::read(&dir.join("saves/A2.an3")).unwrap()).unwrap();
+        records.globals.set_seasons(2);
+        let manager = records.humans().next().unwrap();
+        let (country, club) = (manager.country(), manager.team());
+        let number = u8::try_from(records.team(country, club).unwrap().number()).unwrap();
+        let at = (0xb21adc - 0xb1f860) + 9 * 0x972;
+        let block = records.block_mut("0xb1f860").unwrap();
+        let slot = &mut block[at..at + 0x972];
+        slot[0x72..].fill(0xFF);
+        slot[0..2].copy_from_slice(&country.to_le_bytes());
+        slot[2..4].copy_from_slice(&4u16.to_le_bytes());
+        for (i, c) in [number, 0x06, 0x03, 0x16].into_iter().enumerate() {
+            slot[0x12 + i] = c;
+        }
+        let game = |slot: &mut [u8], row: usize, col: usize, home: u8, away: u8| {
+            let at = 0x72 + row * 0x60 + col * 4;
+            slot[at] = home;
+            slot[at + 1] = away;
+        };
+        game(slot, 0, 1, 2, 1); // own home against the first: won
+        game(slot, 1, 0, 0, 2); // and away there: won
+        game(slot, 0, 2, 1, 1); // own home against the second: a draw
+        game(slot, 2, 0, 3, 0); // away there: lost
+        game(slot, 0, 3, 0, 3); // own home against the third: lost
+        game(slot, 3, 0, 1, 4); // away there: won
+
+        let team = records.team(country, club).unwrap();
+        let ago: BTreeMap<_, _> = crate::opponent::archived_games(&records, team)
+            .into_iter()
+            .map(|(n, h, a)| (n, (h, a)))
+            .collect();
+        for (n, h, a) in [
+            (0x06u8, Some((2, 1)), Some((2, 0))),
+            (0x03, Some((1, 1)), Some((0, 3))),
+            (0x16, Some((0, 3)), Some((4, 1))),
+        ] {
+            assert_eq!(ago.get(&n), Some(&(h, a)), "against {n:#04x}");
+        }
+
+        // The seasons before merge into this season's record: three games
+        // each, the points and goals the crafted games and A2's own
+        // fixture of this season add up to.
+        let rows = opponents(&records, &data.calendar, team, HOME_MATCHES | AWAY_MATCHES);
+        let row = |n: i16| *rows.iter().find(|e| e.team == n).unwrap();
+        assert_eq!(
+            row(0x06),
+            Opponent { team: 0x06, games: 3, points: 9, given: 0, goals: 7, against: 1, diff: 6 }
+        );
+        assert_eq!(
+            row(0x16),
+            Opponent { team: 0x16, games: 3, points: 3, given: 6, goals: 4, against: 6, diff: -2 }
+        );
+        assert_eq!(
+            row(0x03),
+            Opponent { team: 0x03, games: 3, points: 1, given: 7, goals: 2, against: 6, diff: -4 }
+        );
     }
 }

@@ -526,6 +526,43 @@ pub fn archived_result(
     Some(archive.result(i, if second { j + archive.teams() } else { j }))
 }
 
+/// The club's games of the seasons gone by, against every club of the
+/// archived league it played in that season (`FUN_0040cfde`, from
+/// `FUN_0040c97b`'s loop over the seasons `10 − seasons < season < 10`):
+/// the opponent's number and the own goals first, once for the club's
+/// own home game and once for its own away game. A game stored with its
+/// home side's goals at 0xFF was never taken (`FUN_0040dd50`).
+pub fn archived_games(
+    records: &Records,
+    team: &Team,
+) -> Vec<(u8, Option<(u8, u8)>, Option<(u8, u8)>)> {
+    let seasons = usize::from(records.globals.seasons());
+    let mut games = Vec::new();
+    for season in (0..ARCHIVE_SEASONS).filter(|&s| s + seasons > ARCHIVE_SEASONS) {
+        let league = if team.country() as i16 == records.globals.main_country() {
+            archived_league(records, team.number(), season)
+        } else {
+            more_league(records, team.country().into())
+        };
+        let Some(archive) = league.and_then(|l| archived(records, l, season)) else { continue };
+        let Some(own) = archive.place_of(team.number()) else { continue };
+        for j in 0..archive.teams() {
+            if j == own {
+                continue;
+            }
+            let Some(&number) = archive.data.get(0x12 + j) else { continue };
+            let played = |(home, _): (u8, _)| home != 0xFF;
+            let (at_home, away) = (archive.result(own, j), archive.result(j, own));
+            games.push((
+                number,
+                played(at_home).then_some(at_home),
+                played(away).then_some((away.1, away.0)),
+            ));
+        }
+    }
+    games
+}
+
 /// A club's home record against another (`FUN_0040d3a0`): in the seasons
 /// archived, and this season's league.
 pub fn home_record(records: &Records, calendar: &Calendar, a: &Team, b: &Team) -> Record {
