@@ -3,7 +3,9 @@ name: CI
 # On every push to main and every pull request: the tests that need no game
 # on Linux, and a build on Windows. The tests with the game run locally; their
 # count reaches the README through tools/badges.py. A pull request must come
-# from a feature/ or fix/ branch: main's ruleset requires all three checks.
+# from a feature/ or fix/ branch, and a feature/ branch must raise the version
+# above main's (fix/ branches may keep it): main's ruleset requires all four
+# checks.
 on:
   push:
     branches: [main]
@@ -31,6 +33,38 @@ jobs:
             feature/*|fix/*) echo "$HEAD_REF may be merged" ;;
             *) echo "::error::$HEAD_REF is neither a feature/ nor a fix/ branch"; exit 1 ;;
           esac
+
+  version:
+    name: Version
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: A feature/ branch raises the version
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch -q --depth=1 origin "$BASE_REF"
+          python3 - <<'EOF'
+          import os, subprocess, tomllib
+
+          def version(text):
+              v = tomllib.loads(text)["workspace"]["package"]["version"]
+              return v, tuple(int(n) for n in v.split("-")[0].split("+")[0].split("."))
+
+          base, base_n = version(subprocess.check_output(["git", "show", "FETCH_HEAD:Cargo.toml"], text=True))
+          head, head_n = version(open("Cargo.toml", encoding="utf-8").read())
+          ref = os.environ["HEAD_REF"]
+          if not ref.startswith("feature/"):
+              print(f"{ref} needs no new version ({base} -> {head})")
+          elif head_n <= base_n:
+              print(f"::error::{ref} must raise the version above {base}; Cargo.toml has {head}")
+              raise SystemExit(1)
+          else:
+              print(f"{base} -> {head}")
+          EOF
 
   linux:
     name: Test (Linux)
