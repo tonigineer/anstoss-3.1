@@ -3500,11 +3500,13 @@ impl Statistics {
             })
             .collect();
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            // `FUN_00458c56` gets the count kept before the cap of twenty,
+            // so the rows shown stand centred in the window's height.
             *table = TableState {
                 columns: FINANZEN_SHIRTS_ROW_COLUMNS.to_vec(),
                 rows,
                 width: ROW_WIDTH,
-                centred: -1,
+                centred: i32::try_from(kept.len()).unwrap_or(-1),
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,

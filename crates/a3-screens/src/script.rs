@@ -6713,7 +6713,9 @@ mod tests {
         // The text itself names the two columns with a literal "\t".
         assert_eq!(view.text(control(dialog, 1292).unwrap()), r"Spieler\tTrikots");
         let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        // Twenty of the 31 sellers shown, centred for all 31.
         assert_eq!(table.rows.len(), 20);
+        assert_eq!(table.centred, 31);
         assert_eq!(table.rows[0].text, "Diogo Leite\t343");
         // 28 twice, then 25 twice: the exchange sort keeps the slot's
         // order where the counts are equal.
