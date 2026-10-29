@@ -953,6 +953,47 @@ const STEP_TABLES: [&[(i64, i64)]; 9] = [
     &[(100_000, 10_000), (500_000, 20_000), (1_000_000, 50_000), (ON, 100_000)],
 ];
 
+/// Donations (`CSpenden`, dialog 63; FINANZUEBERSICHT.md §4.3): money in
+/// hundreds, the slider's steps over them (the table at 0x887cf8);
+/// offered at first all the bank holds up to 100.000, at most 10 Mio
+/// (`DAT_00a3b3fc`, `DAT_00a3b37c`, `DAT_00a3b2d0`).
+pub const DONATION_UNIT: i64 = 100;
+pub const DONATION_OFFER: i64 = 100_000;
+pub const DONATION_MOST: i64 = 10_000_000;
+pub const DONATION_STEPS: [(i64, i64); 7] =
+    [(50, 1), (100, 5), (400, 10), (1000, 50), (5000, 100), (10_000, 500), (ON, 1000)];
+/// A donation weighs its hundred thousands, ten at most; it is booked
+/// with the other costs at club +0x2c0.
+const DONATION_WEIGHT: i64 = 100_000;
+const DONATION_WEIGHT_MOST: i64 = 10;
+const DONATIONS: usize = 0x2c0;
+/// The club's public image stays between these (`FUN_00698d01`).
+const IMAGE_LEAST: i32 = 10;
+const IMAGE_MOST: i32 = 50;
+
+/// What a donation does (`FUN_005419e5`): nothing if it is nothing;
+/// otherwise the amount joins the club's other costs, and by its weight
+/// the manager's popularity with the public rises by it and in the media
+/// by half of it rounded up (`FUN_00418394` into his record's three
+/// bytes, each kept to 0..100), the board's confidence falls by that half
+/// (`FUN_00418597`, 0..100), and the club's public image rises by the
+/// weight, kept to 10..50 (`FUN_00698d01`).
+pub fn donate(team: &mut Team, manager: &mut Manager, amount: i64) {
+    if amount == 0 {
+        return;
+    }
+    let booked = team.get::<i32>(at(DONATIONS)).wrapping_add(amount as i32);
+    team.put(at(DONATIONS), booked);
+    let weight = (amount / DONATION_WEIGHT).min(DONATION_WEIGHT_MOST) as i32;
+    let half = (weight + 1) / 2;
+    let [public, fans, media] = manager.popularity();
+    let up = |v: u8, by: i32| (i32::from(v) + by).clamp(0, 100) as u8;
+    manager.set_popularity([up(public, weight), fans, up(media, half)]);
+    manager.set_confidence((i32::from(manager.confidence()) - half).clamp(0, 100) as i16);
+    let image = (i32::from(team.public_image()) + weight).clamp(IMAGE_LEAST, IMAGE_MOST);
+    team.set_public_image(image as u8);
+}
+
 /// The steps of a slider running to `max`.
 pub fn steps(max: i64) -> &'static [(i64, i64)] {
     STEP_TABLES[STEP_LIMITS.iter().position(|&l| l > max).unwrap_or(STEP_LIMITS.len())]

@@ -6909,4 +6909,45 @@ mod tests {
         let runner = on_save(&lucky, "lucky-season", map).unwrap();
         assert_eq!(atlantis(&runner), (true, true));
     }
+
+    /// The Finanzen screen's donations offer what the bank holds up to
+    /// 100.000, in hundreds on the slider's steps; on A only good causes,
+    /// no other human. Given, the amount joins the club's costs, the
+    /// manager's popularity with the public and in the media rises by one,
+    /// the board's confidence falls by one, the club's image rises by one.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_screen_gives_donations() {
+        let game = game();
+        let dialog = &game.dialogs[&63];
+        let open = "now click bar 9\nuntil dialog 417\nnow press 2222\nuntil dialog 63";
+        let Some(runner) = on_save(&game, "A", open) else { return };
+        let text = |runner: &Runner, id: u16| runner.host.view().text(control(dialog, id).unwrap()).to_owned();
+        assert_eq!([text(&runner, 1628), text(&runner, 1629), text(&runner, 1630)], [
+            "100.000 €",
+            "5.92 Mio €",
+            "17.42 Mio €"
+        ]);
+        let rows = runner.host.view().options(control(dialog, 6022).unwrap()).unwrap().labels.clone();
+        assert_eq!(rows[1..], ["---", "---", "---"]);
+        let figures = |runner: &Runner| {
+            let state = runner.host.state();
+            let records = state.records.as_ref().unwrap();
+            let manager = &records.managers[0];
+            let team = &records.teams[usize::from(manager.team())];
+            let costs = team.get::<i32>(0x2c0 + a3_core::finances::CLUB_TO_TEAM);
+            (manager.popularity(), manager.confidence(), team.public_image(), costs)
+        };
+        let before = figures(&runner);
+        let slid = format!("{open}\nnow slide 1631 60");
+        let runner = on_save(&game, "A", &slid).unwrap();
+        assert_eq!(text(&runner, 1628), "10.000 €");
+        let given = format!("{open}\nnow press 1\nuntil dialog 417");
+        let runner = on_save(&game, "A", &given).unwrap();
+        let ([public, fans, media], confidence, image, costs) = before;
+        assert_eq!(
+            figures(&runner),
+            ([public + 1, fans, media + 1], confidence - 1, image + 1, costs + 100_000)
+        );
+    }
 }

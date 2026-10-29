@@ -178,6 +178,8 @@ pub struct Finances {
     finding: usize,
     compared: usize,
     comparisons: Vec<usize>,
+    /// Whether the donations are open.
+    donating: bool,
 }
 
 /// The combos: how the figures are found, what they are compared with,
@@ -268,6 +270,10 @@ const DARK_GREEN: u16 = 2626;
 const AMOUNTS: [u16; 3] = [2500, 2499, 2445];
 /// The rows' labels, buttons that open their calculations.
 const ROW_BUTTONS: std::ops::RangeInclusive<u16> = 5767..=5779;
+/// The picture button to the donations, and its refusal once the manager
+/// gave to another human this week.
+const DONATIONS_BUTTON: u16 = 2222;
+const GIVEN_THIS_WEEK: u16 = 4602;
 
 impl Screen for Finances {
     fn ids(&self) -> &[u16] {
@@ -281,7 +287,8 @@ impl Screen for Finances {
         self.calculation = None;
         let works = |target: Target| match target {
             Target::Button(c) => dialog.controls[c].id.is_some_and(|id| {
-                ROW_BUTTONS.contains(&id)
+                id == DONATIONS_BUTTON
+                    || ROW_BUTTONS.contains(&id)
                     && kalkulation::BUILT
                         .contains(&kalkulation::ROW_DIALOGS[usize::from(id - ROW_BUTTONS.start())])
             }),
@@ -312,6 +319,17 @@ impl Screen for Finances {
             self.whistle = matches!(outcome, Outcome::Popup(_));
             return outcome;
         }
+        // The donations, unless the manager gave to another human this
+        // week (`0x4a3893`); the figures anew afterwards.
+        if let Target::Button(c) = target
+            && cx.dialog.controls[c].id == Some(DONATIONS_BUTTON)
+        {
+            if super::donations::given(cx) {
+                return Outcome::Popup(Request::with(NOTICE, Args::Text(GIVEN_THIS_WEEK)));
+            }
+            self.donating = true;
+            return Outcome::Popup(Request::new(super::donations::DONATIONS));
+        }
         if let Target::Button(c) = target
             && let Some(id) = cx.dialog.controls[c].id.filter(|id| ROW_BUTTONS.contains(id))
         {
@@ -340,6 +358,10 @@ impl Screen for Finances {
     /// the last's; its OK or cancel brings the figures anew, as the
     /// calculations may have booked.
     fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
+        if std::mem::take(&mut self.donating) {
+            self.fill(cx, view);
+            return Outcome::Stay;
+        }
         if let Some(row) = self.calculation.take() {
             if let Reply::Choice(choice @ (kalkulation::NEXT | kalkulation::PREVIOUS)) = reply
                 && let Some(next) = kalkulation::step(cx, row, choice)
