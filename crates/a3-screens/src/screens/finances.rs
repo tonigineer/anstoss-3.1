@@ -273,6 +273,8 @@ const ROW_BUTTONS: std::ops::RangeInclusive<u16> = 5767..=5779;
 /// The picture button to the donations, and its refusal once the manager
 /// gave to another human this week.
 const DONATIONS_BUTTON: u16 = 2222;
+/// The picture button to the association's conditions for the licence.
+const LICENCE_BUTTON: u16 = 1619;
 const GIVEN_THIS_WEEK: u16 = 4602;
 
 impl Screen for Finances {
@@ -288,6 +290,7 @@ impl Screen for Finances {
         let works = |target: Target| match target {
             Target::Button(c) => dialog.controls[c].id.is_some_and(|id| {
                 id == DONATIONS_BUTTON
+                    || id == LICENCE_BUTTON
                     || ROW_BUTTONS.contains(&id)
                     && kalkulation::BUILT
                         .contains(&kalkulation::ROW_DIALOGS[usize::from(id - ROW_BUTTONS.start())])
@@ -318,6 +321,20 @@ impl Screen for Finances {
             let outcome = hub::bar_click(cx, view, item, FINANCES_SYMBOL);
             self.whistle = matches!(outcome, Outcome::Popup(_));
             return outcome;
+        }
+        // The association's conditions, unless the licence's chance is
+        // gone (`0x4a3ac6`); nothing anew afterwards.
+        if let Target::Button(c) = target
+            && cx.dialog.controls[c].id == Some(LICENCE_BUTTON)
+        {
+            let chance = match (cx.state.records.as_ref(), super::squad::own_team(cx)) {
+                (Some(records), Some(team)) => a3_core::licence::chance(records, team),
+                _ => 0,
+            };
+            if chance < 1 {
+                return Outcome::Popup(Request::with(NOTICE, Args::Text(super::licence::NO_LICENCE)));
+            }
+            return Outcome::Popup(Request::new(super::licence::LICENCE));
         }
         // The donations, unless the manager gave to another human this
         // week (`0x4a3893`); the figures anew afterwards.

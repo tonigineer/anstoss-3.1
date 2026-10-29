@@ -22,6 +22,7 @@ pub mod honours;
 pub mod hub;
 pub mod jobs;
 pub mod kalkulation;
+pub mod licence;
 pub mod konfig3d;
 pub mod market;
 pub mod medical;
@@ -257,6 +258,7 @@ pub fn registry() -> Vec<Box<dyn Screen>> {
         Box::new(camp::CampConfirm),
         Box::new(camp::CampGroup),
         Box::new(donations::Donations::default()),
+        Box::new(licence::Licence),
     ]
 }
 
@@ -288,6 +290,7 @@ pub fn compose(game: &mut Game) {
     training::rooms::compose(&mut game.dialogs);
     camp::compose(&mut game.dialogs, &game.data.rules);
     donations::compose(&mut game.dialogs);
+    licence::compose(&mut game.dialogs);
     popups::compose(&mut game.dialogs);
     planner::compose(&mut game.dialogs, &game.data.rules);
     notepad::compose(&mut game.dialogs);

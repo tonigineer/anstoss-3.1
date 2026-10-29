@@ -6950,4 +6950,54 @@ mod tests {
             ([public + 1, fans, media + 1], confidence - 1, image + 1, costs + 100_000)
         );
     }
+
+    /// The association's conditions: none on A. Patched with a debt limit,
+    /// no building and no camps, they stand a line each and the outlook
+    /// grants the licence; with 31 Mio more costs booked the chance is gone
+    /// and the Finanzen screen refuses (text 3108) — not so for a club
+    /// whose cash itself is in the red by more than 10 Mio in the first
+    /// season, which gets it after all.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_screen_shows_the_licence_conditions() {
+        let open = "now click bar 9\nuntil dialog 417\nnow press 1619\nuntil dialog 64";
+        let texts = |game: &Game, save: &str| -> Option<(String, String)> {
+            let runner = on_save(game, save, open)?;
+            let dialog = &game.dialogs[&64];
+            let text = |id: u16| runner.host.view().text(control(dialog, id).unwrap()).to_owned();
+            Some((text(1637), text(1636)))
+        };
+        let game = game();
+        let Some((conditions, outlook)) = texts(&game, "A") else { return };
+        assert_eq!(conditions, format!("{}\n", game.text(2444)));
+        assert!(outlook.is_empty());
+
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        fn own(records: &mut a3_core::records::Records) -> &mut a3_core::records::Team {
+            let team = usize::from(records.managers[0].team());
+            &mut records.teams[team]
+        }
+        let root = patched(&dir, "A", "licence-conditions", |records| {
+            let team = own(records);
+            team.put(0x12b, 0x08u8 | 0x01 | 0x02);
+            team.put(0x5d8 + a3_core::finances::CLUB_TO_TEAM, 5u8);
+        });
+        let mut patched_game = Game::load(&root).unwrap();
+        compose(&mut patched_game);
+        let (conditions, outlook) = texts(&patched_game, "licence-conditions").unwrap();
+        let debt = game.text(2811).replacen("%s", "5.00 Mio €", 1);
+        assert_eq!(conditions, format!("{debt}\n{}\n{}\n", game.text(2441), game.text(2442)));
+        assert!(outlook.starts_with(game.text(2819)), "{outlook}");
+
+        let root = patched(&dir, "A", "licence-gone", |records| {
+            let at = 0x2c0 + a3_core::finances::CLUB_TO_TEAM;
+            let team = own(records);
+            team.put(at, team.get::<i32>(at) + 31_000_000);
+        });
+        let mut broke = Game::load(&root).unwrap();
+        compose(&mut broke);
+        let refused = "now click bar 9\nuntil dialog 417\nnow press 1619\nuntil dialog 380";
+        let runner = on_save(&broke, "licence-gone", refused).unwrap();
+        assert_eq!(runner.host.view().id, 380);
+    }
 }
