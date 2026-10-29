@@ -6698,4 +6698,27 @@ mod tests {
             Shape::Pen { from: (6, 326), to: (31, 326), colour: [0, 0, 0] }
         )));
     }
+
+    /// The Trikots page names the own club's best-selling shirts, most
+    /// first and twenty at most — former players and the manager himself
+    /// among them, ties following the swap sort's order.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_names_the_best_selling_shirts() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 6\nnow row 1284 6";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        // The text itself names the two columns with a literal "\t".
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), r"Spieler\tTrikots");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 20);
+        assert_eq!(table.rows[0].text, "Diogo Leite\t343");
+        // 28 twice, then 25 twice: the exchange sort keeps the slot's
+        // order where the counts are equal.
+        assert_eq!(table.rows[8].text, "Andrej Ilic\t28");
+        assert_eq!(table.rows[9].text, "David Preu\t28");
+        assert_eq!(table.rows[13].text, "Toni Lubiniecki\t22");
+    }
 }

@@ -276,6 +276,12 @@ const FINANZEN_CASH_INK: [u8; 3] = [0, 0, 0xff];
 /// labels.
 const FINANZEN_MERCH_TITLE: u16 = 0x960;
 const FINANZEN_MERCH_LEGEND: u16 = 0xa5a;
+/// The Trikots page's header ("Spieler\tTrikots", 0xbc5; `FUN_0045daa8`
+/// with 0x87ccf0 and 0x87ccf8), its name left and the count centred at
+/// 200; the rows (`6df48b`'s 0x87cd00 and 0x87cd08) right-align it at 200.
+const FINANZEN_SHIRTS_HEADER: u16 = 0xbc5;
+const FINANZEN_SHIRTS_HEADER_COLUMNS: [(u16, u16); 2] = [(0, 0), (C | 200, 80)];
+const FINANZEN_SHIRTS_ROW_COLUMNS: [(u16, u16); 2] = [(0, 0), (R | 200, 50)];
 /// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
 /// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
 /// the European cups and the cup.
@@ -2379,6 +2385,9 @@ impl Statistics {
             Some(statistics::FINANZEN_MERCH) if self.category == FINANZEN => {
                 self.finanzen_merch_page(cx, view)
             }
+            Some(statistics::FINANZEN_SHIRTS) if self.category == FINANZEN => {
+                self.finanzen_shirts_page(cx, view)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -3449,6 +3458,57 @@ impl Statistics {
         let shapes = line_graph(game, size, h, zero, steps, &lines, ("", ""));
         if let Some(table) = view.table_mut(c) {
             *table = Self::graph_page(shapes);
+        }
+        true
+    }
+
+    /// Meistverkauftes Trikot (`FUN_0045daa8`): the club's shirt sellers
+    /// — the fifty id-and-count pairs of the team's human slot, those
+    /// with a player, by an exchange sort biggest count first (not
+    /// stable, ties keep the slot's order) — at most twenty, each
+    /// "%s\t%d" of the player's name (former players and the manager
+    /// himself included) and the count.
+    fn finanzen_shirts_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(FINANZEN_SHIRTS_HEADER).to_owned(),
+            &FINANZEN_SHIRTS_HEADER_COLUMNS,
+        );
+        let Some(block) = records.trikots.get(usize::from(team.human()).saturating_sub(1)) else {
+            return false;
+        };
+        let mut kept = block.shirts();
+        for i in 0..kept.len() {
+            for j in i + 1..kept.len() {
+                if kept[i].1 < kept[j].1 {
+                    kept.swap(i, j);
+                }
+            }
+        }
+        let rows: Vec<TableRow> = kept
+            .iter()
+            .take(20)
+            .map(|&(id, count)| TableRow {
+                text: format!("{}\t{}", records.known_as(id).unwrap_or_default(), count),
+                ink: INK,
+                mark: None,
+                columns: None,
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: FINANZEN_SHIRTS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
         }
         true
     }

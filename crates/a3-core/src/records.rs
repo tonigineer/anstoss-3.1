@@ -702,6 +702,28 @@ impl Extra {
     }
 }
 
+/// What shirts whose players sold, one record per human slot (0x1b0
+/// bytes at `DAT_00a51ea8` + slot × 0x1b0; `FUN_00699351` copies them out
+/// for the Trikots page, at the team's human slot [`Team::human`] − 1).
+const TRIKOTS_AT: u32 = 0xa51ea8;
+
+record! {
+    /// A human club's shirt sales: fifty player ids and their counts.
+    TrikotBlock, 0x1b0 - HEADER, base HEADER;
+}
+
+impl TrikotBlock {
+    /// The sellers: fifty pairs of a player id and the shirts he sold
+    /// (`FUN_00699351`'s entries at +0x20), those without a player left
+    /// out, in the slot's own order.
+    pub fn shirts(&self) -> Vec<(u16, i32)> {
+        (0..50)
+            .map(|k| (self.get::<u16>(0x20 + k * 8), self.get::<i32>(0x24 + k * 8)))
+            .filter(|&(id, _)| id != 0)
+            .collect()
+    }
+}
+
 /// The referees, by id (the save's blocks of their records, 0x20 before
 /// their fields).
 const REFEREE_AT: u32 = 0x19f4ed8;
@@ -1454,6 +1476,8 @@ pub struct Records {
     pub countries: Countries,
     /// The human clubs' extra data, by slot.
     pub extras: Vec<Extra>,
+    /// The human clubs' shirt sales, by slot.
+    pub trikots: Vec<TrikotBlock>,
     /// The human managers' week planners, by slot.
     pub planners: Vec<Planner>,
     pub calendars: Vec<Planner>,
@@ -1494,6 +1518,9 @@ impl Records {
         let extras = (0..MANAGERS)
             .map(|n| Extra::new(block(format!("{EXTRA_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
+        let trikots = (0..MANAGERS)
+            .map(|n| TrikotBlock::new(block(format!("{TRIKOTS_AT:#x}[{n}]"))?))
+            .collect::<io::Result<_>>()?;
         let planners = (0..MANAGERS)
             .map(|n| Planner::new(block(format!("{PLANNER_AT:#x}[{n}]"))?))
             .collect::<io::Result<_>>()?;
@@ -1530,6 +1557,7 @@ impl Records {
             globals,
             countries,
             extras,
+            trikots,
             planners,
             calendars,
             individual,
@@ -1561,6 +1589,9 @@ impl Records {
         }
         for (n, extra) in self.extras.iter().enumerate() {
             put(format!("{EXTRA_AT:#x}[{n}]"), 0, extra.bytes());
+        }
+        for (n, trikot) in self.trikots.iter().enumerate() {
+            put(format!("{TRIKOTS_AT:#x}[{n}]"), 0, trikot.bytes());
         }
         for (n, planner) in self.planners.iter().enumerate() {
             put(format!("{PLANNER_AT:#x}[{n}]"), 0, planner.bytes());
