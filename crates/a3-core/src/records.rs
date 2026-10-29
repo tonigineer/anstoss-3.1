@@ -652,6 +652,9 @@ record! {
     0x2834 => detective, set_detective: u16;
     /// How many past seasons' balances are kept ([`Extra::balances`]).
     0x1e48 => balance_count, set_balance_count: i16;
+    /// How many past seasons' transfer balances are kept
+    /// ([`Extra::transfers`]).
+    0x202c => transfer_count, set_transfer_count: i16;
 }
 
 /// One past season as the Saisonbilanzen page lists it (0x18 bytes): its
@@ -710,6 +713,14 @@ impl Extra {
                 strength: self.get(r + 8),
                 result: self.get(r + 0xc),
             })
+            .collect()
+    }
+
+    /// The past seasons' transfer balances (`FUN_006336c7`): at most
+    /// twenty from +0x2030, the start year and the net, the oldest first.
+    pub fn transfers(&self) -> Vec<(i16, i32)> {
+        (0..self.transfer_count().clamp(0, 20) as usize)
+            .map(|k| (self.get(0x2030 + k * 8), self.get(0x2034 + k * 8)))
             .collect()
     }
 

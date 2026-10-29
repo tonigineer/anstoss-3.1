@@ -4832,7 +4832,7 @@ mod tests {
         assert_eq!(table.cross, None);
         let graph = table.graph.as_ref().expect("the goals' bars");
         assert_eq!((table.rows.len(), graph.bars.len()), (18, 18));
-        assert!(graph.bars.iter().all(|&(_, green)| !green));
+        assert!(graph.bars.iter().all(|&(_, ink)| ink == [0, 0, 0]));
         // Bayern and Mainz level at five, in the league's own places;
         // five of twenty-five on a plot of 376 is a bar of 75.
         assert!(table.rows[0].text.ends_with("(5)"));
@@ -4858,7 +4858,7 @@ mod tests {
         assert!(table.rows[0].text.ends_with("(4)"));
         assert_eq!(table.rows[17].text, "Hamburger SV (-2)");
         let graph = table.graph.as_ref().unwrap();
-        assert_eq!(graph.bars[17], (30, true));
+        assert_eq!(graph.bars[17], (30, [0, 0xff, 0]));
         // Both together: Werder and M'gladbach at ten, their bars 150.
         let total = page(12);
         let Some(runner) = on_save(&game, "A2", &total) else { return };
@@ -6521,7 +6521,7 @@ mod tests {
             ["Borussia Dortmund ( 22012 )", "Kalkuliert ( 22012 )"]
         );
         assert_eq!(graph.steps, 23);
-        assert_eq!(graph.bars, vec![(354, false), (354, false)]);
+        assert_eq!(graph.bars, vec![(354, [0, 0, 0]), (354, [0, 0, 0])]);
         assert_eq!(graph.top, 10);
         assert_eq!(graph.unit, "Zuschauer/1000");
         // Gegnerische Fans: the fans the guest brought, its own steps.
@@ -6533,7 +6533,7 @@ mod tests {
         assert_eq!(table.rows.len(), 1);
         assert_eq!(table.rows[0].text, "Borussia Dortmund ( 3926 )");
         assert_eq!(graph.steps, 4);
-        assert_eq!(graph.bars, vec![(363, false)]);
+        assert_eq!(graph.bars, vec![(363, [0, 0, 0])]);
         assert_eq!(graph.unit, "Zuschauer/1000");
         // Auswärtsauslastung: the gates the two away games drew.
         let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 2")) else {
@@ -6546,7 +6546,7 @@ mod tests {
             ["Hamburger SV ( 57000 )", "VfL Wolfsburg ( 24589 )"]
         );
         assert_eq!(graph.steps, 6);
-        assert_eq!(graph.bars, vec![(352, false), (152, false)]);
+        assert_eq!(graph.bars, vec![(352, [0, 0, 0]), (152, [0, 0, 0])]);
     }
 
     /// The Stadion category's two development pages join the list once
@@ -6610,7 +6610,7 @@ mod tests {
         );
         let graph = table.graph.as_ref().unwrap();
         assert_eq!(graph.steps, 10);
-        assert_eq!(graph.bars, vec![(354, false), (340, false)]);
+        assert_eq!(graph.bars, vec![(354, [0, 0, 0]), (340, [0, 0, 0])]);
         assert_eq!(graph.top, 0);
         assert_eq!(graph.unit, "Dauerkarten/1000");
     }
@@ -6740,5 +6740,25 @@ mod tests {
         let table = view.table(control(dialog, 29999).unwrap()).unwrap();
         let rows: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(rows, ["25/26\t1\t11\t\t3\t4\t:\t4\t207\t3.67 Mio €"]);
+    }
+
+    /// Transferbilanz draws the season's net transfers as a bar: A's
+    /// loss of 5.78 million green over the whole 384 pixels of its six
+    /// million-steps, standing five lower than the goal pages' bars.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_finanzen_draws_the_transfer_balance() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let then = "now click bar 14\nuntil dialog 18\nnow row 1283 6\nnow row 1284 4";
+        let Some(runner) = on_save(&game, "A", then) else { return };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 1292).unwrap()), "Entwicklung Transferbilanz");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        let rows: Vec<&str> = table.rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(rows, ["2025 ( - 5.78 Mio € )"]);
+        let graph = table.graph.as_ref().unwrap();
+        assert_eq!(graph.bars, vec![(384, [0, 0xff, 0])]);
+        assert_eq!((graph.steps, graph.top), (6, 5));
     }
 }

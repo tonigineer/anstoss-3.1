@@ -276,6 +276,16 @@ const FINANZEN_CASH_INK: [u8; 3] = [0, 0, 0xff];
 /// labels.
 const FINANZEN_MERCH_TITLE: u16 = 0x960;
 const FINANZEN_MERCH_LEGEND: u16 = 0xa5a;
+/// The Transferbilanz page's header, the unit label past the window's
+/// edge and the text of a season without a transfer balance
+/// (`FUN_0045c9bf` with 0x962, 0xa55 "Einnahmen" and 0xa57).
+const FINANZEN_TRANSFERS_TITLE: u16 = 0x962;
+const FINANZEN_TRANSFERS_UNIT: u16 = 0xa55;
+const FINANZEN_TRANSFERS_NONE: u16 = 0xa57;
+/// The longest bar of the page, and how far its bars stand lower than
+/// the goal pages' (graph +0x7bc).
+const FINANZEN_TRANSFERS_PLOT: i32 = 384;
+const FINANZEN_TRANSFERS_TOP: i32 = 5;
 /// The Saisonbilanzen page's header (0xa52, `FUN_0045b65c` with 0x87cbb0
 /// and 0x87cbd0) and its ten row columns (0x87cb60 and 0x87cb88): the
 /// season, league, place, the interim gap's star, points, the goals both
@@ -303,6 +313,12 @@ const FINANZEN_SEASONS_ROW_COLUMNS: [(u16, u16); 10] = [
     (R | 232, 40),
     (R | 287, 90),
 ];
+/// The bars' colours as they reach the screen: black, green for a
+/// negative value (0xff00), and the Transferbilanz's profit, meant blue
+/// (0x960000) but dark red once sgl swaps its red and blue.
+const BAR_INK: [u8; 3] = [0, 0, 0];
+const LOSS_INK: [u8; 3] = [0, 0xff, 0];
+const PROFIT_INK: [u8; 3] = [0x96, 0, 0];
 /// The country whose leagues are classed down to the fourth
 /// (`FUN_006755b8`).
 const FOUR_CLASSES: u8 = 16;
@@ -2406,6 +2422,9 @@ impl Statistics {
             Some(statistics::FINANZEN_SEASONS) if self.category == FINANZEN => {
                 self.finanzen_seasons_page(cx, view)
             }
+            Some(statistics::FINANZEN_TRANSFERS) if self.category == FINANZEN => {
+                self.finanzen_transfers_page(cx, view)
+            }
             Some(statistics::FINANZEN_SALARIES) if self.category == FINANZEN => {
                 self.finanzen_salaries_page(cx, view)
             }
@@ -2872,7 +2891,7 @@ impl Statistics {
         let max = gates.iter().copied().max().unwrap_or(0).max(planned);
         let (steps, unit, f) = Self::fill_scale(max);
         let mut rows: Vec<TableRow> = Vec::new();
-        let mut bars: Vec<(i32, bool)> = Vec::new();
+        let mut bars: Vec<(i32, [u8; 3])> = Vec::new();
         let mut k = 0;
         for fixture in &fixtures {
             if !fixture.home {
@@ -2888,7 +2907,7 @@ impl Statistics {
                     mark: None,
                     columns: None,
                 });
-                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, false));
+                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, BAR_INK));
             }
         }
         if planned > 0 {
@@ -2898,7 +2917,7 @@ impl Statistics {
                 mark: None,
                 columns: None,
             });
-            bars.push(((planned as f32 * f / 1000.0 + 0.5) as i32, false));
+            bars.push(((planned as f32 * f / 1000.0 + 0.5) as i32, BAR_INK));
         }
         rows.truncate(0x14);
         bars.truncate(0x14);
@@ -2948,7 +2967,7 @@ impl Statistics {
         let (steps, f) = Self::fan_scale(max);
         let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
         let mut rows: Vec<TableRow> = Vec::new();
-        let mut bars: Vec<(i32, bool)> = Vec::new();
+        let mut bars: Vec<(i32, [u8; 3])> = Vec::new();
         let mut k = 0;
         for fixture in &fixtures {
             if !fixture.home {
@@ -2964,7 +2983,7 @@ impl Statistics {
                     mark: None,
                     columns: None,
                 });
-                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, false));
+                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, BAR_INK));
             }
         }
         rows.truncate(0x14);
@@ -3013,7 +3032,7 @@ impl Statistics {
         let (steps, unit, f) = Self::fill_scale(max);
         let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
         let mut rows: Vec<TableRow> = Vec::new();
-        let mut bars: Vec<(i32, bool)> = Vec::new();
+        let mut bars: Vec<(i32, [u8; 3])> = Vec::new();
         let mut k = 0;
         for fixture in fixtures.iter().filter(|f| !f.home).take(away_games) {
             let v = gates.get(k).copied().unwrap_or(0);
@@ -3026,7 +3045,7 @@ impl Statistics {
                     mark: None,
                     columns: None,
                 });
-                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, false));
+                bars.push(((v as f32 * f / 1000.0 + 0.5) as i32, BAR_INK));
             }
         }
         rows.truncate(0x14);
@@ -3192,7 +3211,7 @@ impl Statistics {
         let max = seasons.iter().map(|h| h.tickets).max().unwrap_or(0).max(target);
         let (steps, f) = Self::fan_scale(max);
         let mut rows: Vec<TableRow> = Vec::new();
-        let mut bars: Vec<(i32, bool)> = Vec::new();
+        let mut bars: Vec<(i32, [u8; 3])> = Vec::new();
         for h in &seasons {
             rows.push(TableRow {
                 text: game
@@ -3203,7 +3222,7 @@ impl Statistics {
                 mark: None,
                 columns: None,
             });
-            bars.push(((h.tickets as f32 * f / 1000.0 + 0.5) as i32, false));
+            bars.push(((h.tickets as f32 * f / 1000.0 + 0.5) as i32, BAR_INK));
         }
         rows.push(TableRow {
             text: format!("{} ({target})", game.text(STADION_DEV_CALC)),
@@ -3211,7 +3230,7 @@ impl Statistics {
             mark: None,
             columns: None,
         });
-        bars.push(((target as f32 * f / 1000.0 + 0.5) as i32, false));
+        bars.push(((target as f32 * f / 1000.0 + 0.5) as i32, BAR_INK));
         rows.truncate(0x14);
         bars.truncate(0x14);
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
@@ -3576,6 +3595,61 @@ impl Statistics {
         true
     }
 
+    /// Transferbilanz (`FUN_0045c9bf`): the kept seasons' net transfers
+    /// and the running season's (club +0x258) as bars, newest at the top
+    /// and twenty at most — a profit dark red (0x960000, meant blue), a
+    /// loss green, each "%d ( %s )" of the year and the money, and no bar
+    /// but "kein Transferüberschuß" where it came to nought. The longest
+    /// bar ends at the greatest amount's steps (`FUN_0045cfc4`'s, twenty
+    /// at most) shared into 384 pixels.
+    fn finanzen_transfers_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        set_header(view, dialog, game.text(FINANZEN_TRANSFERS_TITLE).to_owned(), &[(0, 0)]);
+        let extra = team.human().checked_sub(1).and_then(|s| records.extras.get(usize::from(s)));
+        let mut seasons = extra.map(|e| e.transfers()).unwrap_or_default();
+        seasons.push((records.globals.start_year() as i16, a3_core::finances::transfer_net(team)));
+        let most = seasons.iter().map(|&(_, v)| v.unsigned_abs()).max().unwrap_or(0).max(1);
+        let most = i32::try_from(most).unwrap_or(i32::MAX);
+        let (_, steps) = Self::money_steps(most, 20);
+        if steps == 0 {
+            seasons.drain(..seasons.len() - 1);
+        }
+        let plot = if steps > 0 { FINANZEN_TRANSFERS_PLOT / steps * steps } else { 0 };
+        let s = f64::from(plot) / f64::from(most);
+        let mut rows: Vec<TableRow> = Vec::new();
+        let mut bars: Vec<(i32, [u8; 3])> = Vec::new();
+        for &(year, v) in seasons.iter().rev().take(0x14) {
+            let text = if v == 0 {
+                game.text(FINANZEN_TRANSFERS_NONE).to_owned()
+            } else {
+                format!("{year} ( {} )", super::playerinfo::money(game, i64::from(v)))
+            };
+            rows.push(TableRow { text, ink: INK, mark: None, columns: None });
+            let ink = if v > 0 { PROFIT_INK } else if v < 0 { LOSS_INK } else { BAR_INK };
+            bars.push(((f64::from(v.unsigned_abs()) * s + 0.5) as i32, ink));
+        }
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: vec![],
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: Some(Graph {
+                    bars,
+                    steps,
+                    top: FINANZEN_TRANSFERS_TOP,
+                    unit: game.text(FINANZEN_TRANSFERS_UNIT).to_owned(),
+                    ..Graph::default()
+                }),
+            };
+        }
+        true
+    }
+
     /// Meistverkauftes Trikot (`FUN_0045daa8`): the club's shirt sellers
     /// — the fifty id-and-count pairs of the team's human slot, those
     /// with a player, by an exchange sort biggest count first (not
@@ -3759,7 +3833,8 @@ impl Statistics {
             let text = format!("{name} ({value})");
             let ink = if own == Some((country, team)) { OWN_INK } else { INK };
             rows.push(TableRow { text, ink, mark: None, columns: None });
-            bars.push(((f32::from(value.unsigned_abs()) * plot + 0.5) as i32, value < 0));
+            let ink = if value < 0 { LOSS_INK } else { BAR_INK };
+            bars.push(((f32::from(value.unsigned_abs()) * plot + 0.5) as i32, ink));
         }
         if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
             *table = TableState {

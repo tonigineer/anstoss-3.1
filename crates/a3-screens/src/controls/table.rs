@@ -82,9 +82,10 @@ pub struct TableState {
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     /// One per row: the bar's length in pixels (`+0x334`, capped to the
-    /// window's width less sixteen), green where the value is negative
-    /// (the colour at `+500` is then 0xff00).
-    pub bars: Vec<(i32, bool)>,
+    /// window's width less sixteen) and its colour as it reaches the
+    /// screen (`+500`, its red and blue swapped on the way): black, green
+    /// where the goal pages' value is negative (0xff00).
+    pub bars: Vec<(i32, [u8; 3])>,
     /// How many steps the axis has (`+0xf0`), a tick at each end of one.
     pub steps: i32,
     /// How far the first bar stands lower than the goal pages' (`+0x7bc`,
@@ -389,11 +390,11 @@ impl TableState {
         let bars = self.rows.len().min(0x14) as i32;
         let axis_y = graph.top + bars * pitch + 9;
         let right = area.width() as i32 - 16;
-        for (i, (row, &(len, green))) in
+        for (i, (row, &(len, [r, g, b]))) in
             self.rows.iter().zip(&graph.bars).take(0x14).enumerate()
         {
             let y = first + i as i32 * pitch;
-            let colour = if green { Rgba([0, 0xff, 0, 255]) } else { black };
+            let colour = Rgba([r, g, b, 255]);
             let keep = 255 - 0x60;
             for py in y..(y + high).min(area.height() as i32) {
                 for px in 4..(4 + len.min(right)).min(area.width() as i32) {
