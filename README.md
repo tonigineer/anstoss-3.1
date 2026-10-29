@@ -10,8 +10,9 @@
 
 ## Work in progress
 
-Not playable from start to finish yet: many screens and rules of the
-original are still being rebuilt.
+> [!NOTE]
+> Not playable from start to finish yet: many screens and rules of the
+> original are still being rebuilt.
 
 An unofficial, fan-made reimplementation of **ANSTOSS 3 – Der
 Fußballmanager** (Ascaron, 2000), in Rust, for Linux and Windows. It aims to
@@ -22,12 +23,14 @@ complete.
 
 ## You need the original game
 
-> **Disclaimer.** Not affiliated with or endorsed by Ascaron or the current
-> rights holders of ANSTOSS; "ANSTOSS" is a trademark of its owner. This
-> repository contains **no files of the game** — graphics, texts, sounds and
-> football data are read at runtime from a copy of ANSTOSS 3 that **you own
-> and have installed**. ANSTOSS 3 is still sold, DRM-free, on
+> [!IMPORTANT]
+> This repository contains **no files of the game** — graphics, texts,
+> sounds and football data are read at runtime from a copy of ANSTOSS 3 that
+> **you own and have installed**. ANSTOSS 3 is still sold, DRM-free, on
 > [GOG](https://www.gog.com/game/anstoss_3) (German only).
+
+Not affiliated with or endorsed by Ascaron or the current rights holders of
+ANSTOSS; "ANSTOSS" is a trademark of its owner.
 
 ### How it is made
 
@@ -38,10 +41,12 @@ decompiled code itself is not part of this repository.
 
 ### Which copy works
 
-- Developed against the **GOG version**: its `anstoss3.exe` is the final
-  patched build (file version 1.1.0.0). Some rules are tables inside the
-  exe, which this program reads at that build's addresses — an unpatched CD
-  exe would be read wrongly. The build is not checked yet.
+> [!WARNING]
+> Developed against the **GOG version**: its `anstoss3.exe` is the final
+> patched build (file version 1.1.0.0). Some rules are tables inside the
+> exe, which this program reads at that build's addresses — an unpatched CD
+> exe would be read wrongly. The build is not checked yet.
+
 - Needs the **installed game folder**, and writes into it. An ISO or the CD
   alone is not enough; a CD install brought up to the final patch may work,
   untested.
@@ -53,7 +58,8 @@ decompiled code itself is not part of this repository.
    installer with Wine, [Bottles](https://usebottles.com/) or `innoextract`
    (untested); the game itself need not run under Wine.
 2. Unpack the archive for your system from the
-   [releases](https://github.com/tonigineer/anstoss-3.1/releases).
+   [releases](https://github.com/tonigineer/anstoss-3.1/releases) — none
+   is published yet; until then, [build from source](#building-from-source).
 3. Point it at the game folder and run `anstoss-3-1` / `anstoss-3-1.exe`.
 
 ## Configuration
@@ -85,7 +91,7 @@ udev, and X11 or Wayland.
 ## Building from source
 
 Rust 1.97 or newer (Bevy 0.20's requirement); distro packages are usually
-older, so use [rustup](https://rustup.rs) everywhere. The binary lands at
+older, so use [rustup](https://rustup.rs). The binary lands at
 `target/release/anstoss-3-1`.
 
 ### Arch Linux
