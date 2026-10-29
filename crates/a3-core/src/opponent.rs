@@ -163,6 +163,8 @@ const RESULT_ROW: usize = 0x60;
 const UNPLAYED: u8 = 0xff;
 /// The table's boxes by place (G+0x1a08).
 const MARKS: usize = 0x1a08;
+/// The league's total attendance per matchday, 24 i32 (L+0x194c).
+const MATCHDAY_CROWDS: usize = 0x191c;
 /// The places held, matchday by matchday: L+0xd0, which is this far into
 /// the saved block, a row of 0x2e bytes for each team.
 const PLACES: usize = 0xd0 - 0x20;
@@ -270,6 +272,15 @@ impl<'a> League<'a> {
 
     pub fn played(&self) -> usize {
         usize::try_from(self.i16_at(0x16)).unwrap_or(0)
+    }
+
+    /// How many watched each matchday in all, 0 for the ones not played
+    /// yet (the Zuschauer Spieltag page of `CArchivTabControl`).
+    pub fn matchday_crowds(&self) -> [i32; 24] {
+        std::array::from_fn(|i| {
+            let at = LEAGUE_FIELDS + MATCHDAY_CROWDS + 4 * i;
+            self.data.get(at..at + 4).map_or(0, |b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        })
     }
 
     pub fn four_rounds(&self) -> bool {
@@ -488,8 +499,8 @@ fn archived_league(records: &Records, number: u8, season: usize) -> Option<usize
 }
 
 /// Which of the more countries a country is, if it is one: its archive's
-/// league (`FUN_00677b07`).
-fn more_league(records: &Records, country: u16) -> Option<usize> {
+/// league, and its slot in the kept records (`FUN_00677b07`).
+pub(crate) fn more_league(records: &Records, country: u16) -> Option<usize> {
     let count = usize::try_from(records.globals.more_count()).unwrap_or(0);
     let i =
         records.globals.more_countries().iter().take(count).position(|&c| c == country as i16)?;

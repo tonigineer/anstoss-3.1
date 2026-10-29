@@ -160,6 +160,34 @@ const MANNSCHAFT: usize = 1;
 /// 4713 and 4734.
 const AKTUELLES: usize = 3;
 const HISTORY: usize = 4;
+/// The Stadion category; its five tables' headers and rows (the bar
+/// pages come later). Zuschauer Liga (`FUN_0063e...` with the block at
+/// `0x1c1e4c8`), Einnahmen, Zuschauer Spieltag, Dauerkarten and Größte
+/// Stadien.
+const STADION: usize = 5;
+const STADION_CROWDS_HEADER: u16 = 2658;
+const STADION_CROWDS_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(0, 120), (C | 140, 30), (C | 175, 60), (R | 220, 60), (C | 300, 60)];
+const STADION_CROWDS_ROW_COLUMNS: [(u16, u16); 5] =
+    [(0, 120), (R | 130, 30), (R | 160, 60), (R | 220, 60), (R | 280, 60)];
+const STADION_INCOME_HEADER: u16 = 2659;
+const STADION_INCOME_HEADER_COLUMNS: [(u16, u16); 3] =
+    [(0, 140), (C | 150, 60), (R | 220, 100)];
+const STADION_INCOME_ROW_COLUMNS: [(u16, u16); 3] =
+    [(0, 140), (R | 140, 60), (R | 250, 80)];
+const STADION_MATCHDAY_HEADER: u16 = 2666;
+const STADION_MATCHDAY_HEADER_COLUMNS: [(u16, u16); 2] = [(R, 24), (C | 45, 60)];
+const STADION_MATCHDAY_ROW_COLUMNS: [(u16, u16); 2] = [(R, 24), (R | 40, 60)];
+const STADION_TICKETS_HEADER: u16 = 3546;
+const STADION_TICKETS_HEADER_COLUMNS: [(u16, u16); 5] =
+    [(R, 20), (25, 0), (C | 160, 70), (C | 230, 70), (C | 300, 70)];
+const STADION_TICKETS_ROW_COLUMNS: [(u16, u16); 5] =
+    [(R, 20), (25, 0), (C | 160, 55), (C | 230, 55), (C | 300, 55)];
+const STADION_STADIUMS_HEADER: u16 = 2667;
+const STADION_STADIUMS_HEADER_COLUMNS: [(u16, u16); 4] =
+    [(0, 140), (140, 90), (C | 240, 60), (300, 120)];
+const STADION_STADIUMS_ROW_COLUMNS: [(u16, u16); 4] =
+    [(0, 140), (140, 90), (R | 230, 60), (300, 120)];
 /// The europ. Vereinsrangliste's header and rows (`FUN_00457b04` with
 /// 0x87a4c8, and 0x87a4f8): rank, club, points in all, from the league,
 /// the European cups and the cup.
@@ -2210,6 +2238,21 @@ impl Statistics {
             {
                 self.squad_page(cx, view, code)
             }
+            Some(statistics::STADION_LEAGUE_CROWDS) if self.category == STADION => {
+                self.stadion_crowds_page(cx, view)
+            }
+            Some(statistics::STADION_INCOME) if self.category == STADION => {
+                self.stadion_income_page(cx, view)
+            }
+            Some(statistics::STADION_MATCHDAY_CROWDS) if self.category == STADION => {
+                self.stadion_matchday_page(cx, view)
+            }
+            Some(statistics::STADION_SEASON_TICKETS) if self.category == STADION => {
+                self.stadion_tickets_page(cx, view)
+            }
+            Some(statistics::STADION_STADIUMS) if self.category == STADION => {
+                self.stadion_stadiums_page(cx, view)
+            }
             _ => false,
         };
         let table = control(dialog, TABLE);
@@ -2279,6 +2322,293 @@ impl Statistics {
                 rows,
                 width: ROW_WIDTH,
                 centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// Zuschauer Liga (`CStatistikWnd` over the attendance kept at
+    /// `0x1c1e4c8`): the league the strip stands on, each club at its
+    /// place in that record — its games with a gate, the whole gate, the
+    /// gate per game and the share of the stadium that filled; biggest
+    /// average first (the original's swap sort, ties keeping the place),
+    /// the own club's row red.
+    fn stadion_crowds_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        let Some(slot) = statistics::attendance_slot(records, country, level) else {
+            return false;
+        };
+        let Some(kept) = statistics::league_attendance(records, slot) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(STADION_CROWDS_HEADER).to_owned(),
+            &STADION_CROWDS_HEADER_COLUMNS,
+        );
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let average = |place: usize| -> i64 {
+            let row = kept[place];
+            if row.games == 0 { 0 } else { i64::from(row.total) / i64::from(row.games) }
+        };
+        let mut order: Vec<usize> = (0..league.teams()).collect();
+        for i in 0..order.len() {
+            for j in i + 1..order.len() {
+                if average(order[j]) > average(order[i]) {
+                    order.swap(i, j);
+                }
+            }
+        }
+        let rows = order
+            .into_iter()
+            .map(|place| {
+                let team = league.team(place);
+                let name = game.club_name(Some(records), country as u8, team);
+                let row = kept[place];
+                let text = format!(
+                    "{name}\t{}\t{}\t{}\t{}%",
+                    row.games,
+                    super::calendar::thousands(i64::from(row.total)),
+                    super::calendar::thousands(average(place)),
+                    row.percent
+                );
+                let ink = if own == Some((country, team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: STADION_CROWDS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// Einnahmen (`CStatistikWnd` over the club record's gates and the
+    /// manager's incomes at `+0x450`): the own club's home games to come
+    /// in its fixture list — every home match of the season, played or
+    /// not, the played ones with their gate and take and the rest at nought.
+    /// Where the club has played no home game and has none booked, the
+    /// page shows its header alone.
+    fn stadion_income_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        let own = (u16::from(team.country()), i16::from(team.number()));
+        let fixtures = a3_core::opponent::fixture_days(records, &game.calendar, team);
+        if team.home_games() == 0 && fixtures.is_empty() {
+            set_header(
+                view,
+                dialog,
+                game.text(STADION_INCOME_HEADER).to_owned(),
+                &STADION_INCOME_HEADER_COLUMNS,
+            );
+            if let Some(t) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+                *t = TableState {
+                    columns: STADION_INCOME_ROW_COLUMNS.to_vec(),
+                    rows: Vec::new(),
+                    width: ROW_WIDTH,
+                    centred: -1,
+                    scroll: 0,
+                    cross: None,
+                    graph: None,
+                };
+            }
+            return true;
+        }
+        set_header(
+            view,
+            dialog,
+            game.text(STADION_INCOME_HEADER).to_owned(),
+            &STADION_INCOME_HEADER_COLUMNS,
+        );
+        let extra = records
+            .managers
+            .iter()
+            .zip(&records.extras)
+            .find(|(m, _)| (u16::from(m.country()), m.team() as i16) == own)
+            .map(|(_, e)| e);
+        let gates = team.gates();
+        let rows = fixtures
+            .iter()
+            .filter(|f| f.home)
+            .enumerate()
+            .map(|(k, f)| {
+                let name = game.club_name(Some(records), own.0 as u8, f.opponent);
+                let gate = gates.get(k).copied().unwrap_or(0);
+                let income = extra.and_then(|e| e.home_incomes().get(k).copied()).unwrap_or(0);
+                let text = format!(
+                    "{name}\t{}\t{}",
+                    super::calendar::thousands(i64::from(gate)),
+                    super::playerinfo::money(game, i64::from(income))
+                );
+                TableRow { text, ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: STADION_INCOME_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// Zuschauer Spieltag (`CStatistikWnd` over the league object's
+    /// matchday gates at `+0x194c`): the league the strip stands on, its
+    /// whole gate per matchday played; the fullest matchdays — every row
+    /// at the greatest value — red.
+    fn stadion_matchday_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(STADION_MATCHDAY_HEADER).to_owned(),
+            &STADION_MATCHDAY_HEADER_COLUMNS,
+        );
+        let crowds = league.matchday_crowds();
+        let played = league.played().min(24);
+        let best = crowds[..played].iter().copied().max().unwrap_or(0);
+        let rows = (0..played)
+            .map(|m| {
+                let text =
+                    format!("{}.\t{}", m + 1, super::calendar::thousands(i64::from(crowds[m])));
+                let ink = if crowds[m] >= best { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: STADION_MATCHDAY_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// Dauerkarten (`CStatistikWnd` over the club record's season tickets
+    /// at `+0x710` and the stadiums' capacities): the league the strip
+    /// stands on, its clubs by their season tickets, most first — a tie
+    /// keeps the league's places — each with its stadium's capacity and
+    /// the share of it sold, the own club's row red.
+    fn stadion_tickets_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(&(country, level)) = self.leagues.get(self.chosen) else { return false };
+        let Some(league) = League::of(records, country, level) else { return false };
+        set_header(
+            view,
+            dialog,
+            game.text(STADION_TICKETS_HEADER).to_owned(),
+            &STADION_TICKETS_HEADER_COLUMNS,
+        );
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        // Most tickets first, ties keeping the league's places.
+        let mut order: Vec<(i32, u16)> = Vec::new();
+        for place in 0..league.teams() {
+            let team = league.team(place);
+            let tickets = records.team(country, team as u16).map_or(0, |t| t.tickets());
+            let at = order.iter().position(|&(held, _)| held < tickets).unwrap_or(order.len());
+            order.insert(at, (tickets, team as u16));
+        }
+        let rows = order
+            .into_iter()
+            .enumerate()
+            .map(|(i, (tickets, team))| {
+                let capacity = a3_core::opponent::stadium(records, country, team)
+                    .map_or(0, |s| s.capacity);
+                let percent = if capacity > 0 {
+                    (tickets * 100 / capacity).clamp(0, 100)
+                } else {
+                    0
+                };
+                let name = game.club_name(Some(records), country as u8, team as i16);
+                let text = format!("{}.\t{name}\t{tickets}\t{capacity}\t{percent}%", i + 1);
+                let ink = if own == Some((country, team as i16)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: STADION_TICKETS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: league.teams() as i32,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
+            };
+        }
+        true
+    }
+
+    /// Größte Stadien (the list at `0xa3b640`, one to a country and an
+    /// international last): the country the strip stands on — or the
+    /// international list — its twenty biggest stadiums as stored, each
+    /// with its town, capacity and club, the own club's row red.
+    fn stadion_stadiums_page(&self, cx: &Cx, view: &mut View) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let globals = &records.globals;
+        let more = usize::try_from(globals.more_count()).unwrap_or(0);
+        let international = self.chosen > more;
+        let slot = if international {
+            None
+        } else {
+            let country = self.strip_country(records);
+            Some(usize::from(records.countries.slot(usize::from(country))))
+        };
+        set_header(
+            view,
+            dialog,
+            game.text(STADION_STADIUMS_HEADER).to_owned(),
+            &STADION_STADIUMS_HEADER_COLUMNS,
+        );
+        let own = own_team(cx).map(|t: &Team| (u16::from(t.country()), i16::from(t.number())));
+        let rows = statistics::biggest_stadiums(records, slot)
+            .into_iter()
+            .map(|s| {
+                let stadium = a3_core::opponent::stadium(records, s.country, s.team as u16);
+                let (name, town) = match stadium {
+                    Some(s) => (s.name.as_str(), s.town.as_str()),
+                    None => ("", ""),
+                };
+                let club = game.club_name(Some(records), s.country as u8, s.team);
+                let text = format!("{name}\t{town}\t{}\t{club}", s.capacity);
+                let ink = if own == Some((s.country, s.team)) { OWN_INK } else { INK };
+                TableRow { text, ink, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: STADION_STADIUMS_ROW_COLUMNS.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: 0x14,
                 scroll: self.scrolled,
                 cross: None,
                 graph: None,

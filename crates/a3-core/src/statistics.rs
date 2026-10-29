@@ -3507,6 +3507,108 @@ pub fn is_human(records: &Records, country: u8, club: i16) -> bool {
     })
 }
 
+/// The Stadion category's pages, by the code its drawing picks in
+/// `CArchivTabControl`: the three bar charts, the two development curves
+/// and the five tables.
+pub const STADION_FILL: i16 = 0;
+pub const STADION_AWAY_FILL: i16 = 1;
+pub const STADION_LEAGUE_CROWDS: i16 = 2;
+pub const STADION_INCOME: i16 = 3;
+pub const STADION_CROWD_DEVELOP: i16 = 4;
+pub const STADION_FANS: i16 = 5;
+pub const STADION_TICKET_DEVELOP: i16 = 6;
+pub const STADION_MATCHDAY_CROWDS: i16 = 7;
+pub const STADION_STADIUMS: i16 = 8;
+pub const STADION_SEASON_TICKETS: i16 = 0xd;
+
+/// Which of the kept leagues' record blocks a league's is: the main
+/// country's levels first, then the more countries in their order
+/// (`FUN_00677b07`; the block at `0x1c1e4c8` has one slot each).
+pub fn attendance_slot(records: &Records, country: u16, level: u8) -> Option<usize> {
+    if country as i16 == records.globals.main_country() && level < RECORDED_LEAGUES {
+        Some(usize::from(level))
+    } else {
+        crate::opponent::more_league(records, country)
+    }
+}
+
+/// What a league kept of its clubs' gates this season (`FUN_00677b07`
+/// writes the slot, `0x1c1e4c8` + slot × 0xc0): the gate totals of its
+/// teams by place, their home games and the utilisation in percent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Attendance {
+    pub total: i32,
+    pub games: i16,
+    pub percent: i16,
+}
+
+const ATTENDANCE_BLOCK: &str = "0x1c1e4c8";
+const ATTENDANCE_SLOT: usize = 0xc0;
+const ATTENDANCE_GAMES: usize = 0x60;
+const ATTENDANCE_PERCENT: usize = 0x90;
+
+pub fn league_attendance(records: &Records, slot: usize) -> Option<[Attendance; 24]> {
+    let block = records.block(ATTENDANCE_BLOCK)?;
+    let base = slot.checked_mul(ATTENDANCE_SLOT)?;
+    let word = |at: usize| {
+        block.get(at..at + 2).map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
+    };
+    let double = |at: usize| {
+        block
+            .get(at..at + 4)
+            .map_or(0, |b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    Some(std::array::from_fn(|i| Attendance {
+        total: double(base + 4 * i),
+        games: word(base + ATTENDANCE_GAMES + 2 * i),
+        percent: word(base + ATTENDANCE_PERCENT + 2 * i),
+    }))
+}
+
+/// One entry of the biggest-stadium lists (`CArchivTabControl`'s block at
+/// `0xa3b640`, six lists of 0x4b0: `FUN_00638db7` copies one out): its
+/// club and the capacity kept there, the strings behind it unused — the
+/// names come from the stadium itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BigStadium {
+    pub country: u16,
+    pub team: i16,
+    pub capacity: i32,
+}
+
+const STADIUM_LISTS: &str = "0xa3b640";
+const STADIUM_LIST: usize = 0x4b0;
+const STADIUM_ENTRY: usize = 0x3c;
+const STADIUM_ENTRIES: usize = 20;
+
+/// A list of the biggest stadiums: a country's own, by its slot among the
+/// countries with tables (`Countries::slot`), or — with `None` — the
+/// international one, which the last list of the block holds. Kept sorted
+/// by capacity, biggest first, as the game put them there.
+pub fn biggest_stadiums(records: &Records, slot: Option<usize>) -> Vec<BigStadium> {
+    let block = match records.block(STADIUM_LISTS) {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+    let lists = block.len() / STADIUM_LIST;
+    if lists == 0 {
+        return Vec::new();
+    }
+    let base = slot.unwrap_or(lists - 1).min(lists - 1) * STADIUM_LIST;
+    (0..STADIUM_ENTRIES)
+        .map(|i| {
+            let at = base + i * STADIUM_ENTRY;
+            let word = |at: usize| i16::from_le_bytes([block[at], block[at + 1]]);
+            BigStadium {
+                country: word(at) as u16,
+                team: word(at + 2),
+                capacity: i32::from_le_bytes([block[at + 4], block[at + 5], block[at + 6], block[at + 7]]),
+            }
+        })
+        .filter(|s| s.capacity != 0)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

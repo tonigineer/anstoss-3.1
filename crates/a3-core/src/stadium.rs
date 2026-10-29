@@ -8,7 +8,7 @@ use std::io;
 use a3_files::exe::Exe;
 
 use crate::finances::CLUB_TO_TEAM;
-use crate::records::{Records, Stadium, Team};
+use crate::records::{Records, Team};
 
 /// The stadium objects (`0x1a48138[i]`, from +0x20): three sub-records of
 /// 0xd0 bytes.
@@ -804,7 +804,8 @@ pub fn store(records: &mut Records, country: u8, number: u16, subs: &[Sub]) {
         }
     }
     if let (Some(first), Some(cached)) = (subs.first(), records.stadiums.get_mut(index)) {
-        *cached = Stadium { name: first.name(), capacity: first.capacity() };
+        cached.name = first.name();
+        cached.capacity = first.capacity();
     }
 }
 

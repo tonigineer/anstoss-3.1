@@ -6437,4 +6437,63 @@ mod tests {
         assert_eq!(table.rows[8].text, "9.\t1.FC Union Berlin\t3\t1");
         assert_eq!(table.rows[8].ink, [255, 0, 0]);
     }
+
+    /// The Stadion category's tables weigh the gates the league kept: the
+    /// crowd per club sorted by its average, the own club's home take per
+    /// fixture, the league's totals per matchday with the fullest red, the
+    /// season tickets against the capacities, and the biggest stadiums of
+    /// the country. Two of the category's ten pages stay hidden on A.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_stadion_weighs_gates_tickets_and_stadiums() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let stad = "now click bar 14\nuntil dialog 18\nnow row 1283 5";
+        // Zuschauer Liga: the crowds sorted by their average, the own
+        // club red, the league named on the strip.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 3")) else {
+            return
+        };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "1. Bundesliga");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        assert_eq!(table.rows[0].text, "FC Bayern München\t2\t120.737\t60.368\t80%");
+        assert_eq!(table.rows[17].text, "1.FC Heidenheim\t1\t11.481\t11.481\t76%");
+        let union = table.rows.iter().position(|r| r.ink == [255, 0, 0]).unwrap();
+        assert_eq!(table.rows[union].text, "1.FC Union Berlin\t1\t22.012\t22.012\t100%");
+        // Einnahmen: every home fixture, the played one with gate and take.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 4")) else {
+            return
+        };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 17);
+        assert_eq!(table.rows[0].text, "Borussia Dortmund\t22.012\t539.073 €");
+        assert_eq!(table.rows[1].text, "RB Leipzig\t0\t 0 €");
+        // Zuschauer Spieltag: the totals per matchday, the fullest red.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 5")) else {
+            return
+        };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "1.\t238.556");
+        assert_eq!(table.rows[0].ink, [0, 0, 0]);
+        assert_eq!(table.rows[2].text, "3.\t255.910");
+        assert_eq!(table.rows[2].ink, [255, 0, 0]);
+        // Dauerkarten: the own club's share of its capacity.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 6")) else {
+            return
+        };
+        let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows.len(), 18);
+        let union = table.rows.iter().position(|r| r.ink == [255, 0, 0]).unwrap();
+        assert_eq!(table.rows[union].text, "14.\t1.FC Union Berlin\t9570\t22012\t43%");
+        // Größte Stadien: the country's biggest first, the strip named.
+        let Some(runner) = on_save(&game, "A", &format!("{stad}\nnow row 1284 7")) else {
+            return
+        };
+        let view = runner.host.view();
+        assert_eq!(view.text(control(dialog, 4780).unwrap()), "Deutschland");
+        let table = view.table(control(dialog, 29999).unwrap()).unwrap();
+        assert_eq!(table.rows[0].text, "Signal Iduna Park\tDortmund\t81365\tBorussia Dortmund");
+    }
 }

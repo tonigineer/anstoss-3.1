@@ -323,8 +323,8 @@ fn show_panels(
     }
 }
 
-/// A number with dots between the thousands: "12.345".
-fn thousands(value: i64) -> String {
+/// A number with dots between the thousands: "12.345" (`FUN_00474005`).
+pub(crate) fn thousands(value: i64) -> String {
     let digits = value.abs().to_string();
     let mut text = String::new();
     for (i, c) in digits.chars().enumerate() {

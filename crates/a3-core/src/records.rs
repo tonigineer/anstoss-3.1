@@ -419,9 +419,13 @@ record! {
     /// Its place among its league's teams, and in the table.
     0x12f => league_place, set_league_place: u8;
     0x132 => table_place, set_table_place: u8;
-    /// Home games this season with a gate, and the gates.
+    /// Home games this season with a gate, and the gates; the away count in
+    /// the byte behind it, the away gates in [`Extra`].
     0x260 => home_games, set_home_games: u8;
     0x264 => gates, set_gates: [i32; 23];
+    0x261 => away_games, set_away_games: u8;
+    /// What the club plans its spectators at (the club object's +0x120).
+    0x398 => planned, set_planned: i32;
     /// A human club's manager: his slot and one, whose extra data the club
     /// has ([`Extra`]); 0 none.
     0xb5 => human, set_human: u8;
@@ -612,6 +616,13 @@ record! {
     /// win bonus ([`crate::tactics`]).
     0x38a => picks, set_picks: [u16; 4];
     0x394 => special_bonus, set_special_bonus: i32;
+    /// The gates of the manager's club's away games, the opposing fans'
+    /// gates there, and the incomes of its home games, one per game as they
+    /// came. The Statistics' Gegnerische Fans, Auswärtsauslastung and
+    /// Einnahmen pages read them (`CArchivTabControl`).
+    0x398 => away_gates, set_away_gates: [i32; 23];
+    0x3f4 => fan_gates, set_fan_gates: [i32; 23];
+    0x450 => home_incomes, set_home_incomes: [i32; 23];
     /// The line-up's special settings (`CMannaufSpezial`): bit 1 the
     /// co-trainer lines the team up before a match in a system of his
     /// choosing, bit 2 in the one it stands in.
@@ -661,15 +672,18 @@ record! {
 
 /// The stadiums of the teams played (0x290 bytes at `DAT_01a48138` + team
 /// index × 0x290), and of the foreign ones (0xf0 at `DAT_01a3af38` + index
-/// from the first foreign team): the name, how many it holds.
+/// from the first foreign team): the name, the town, how many it holds
+/// (`CArchivTabControl::FUN_006387fe` and `FUN_00638abb` show name and town).
 const STADIUM_AT: u32 = 0x1a48138;
 const FOREIGN_STADIUM_AT: u32 = 0x1a3af38;
-const STADIUM_NAME: (usize, usize) = (0x22, 0x3a);
+const STADIUM_NAME: (usize, usize) = (0x22, 0x1e);
+const STADIUM_TOWN: (usize, usize) = (0x40, 0x1c);
 const STADIUM_CAPACITY: usize = 0x5c;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Stadium {
     pub name: String,
+    pub town: String,
     pub capacity: i32,
 }
 
@@ -679,6 +693,7 @@ impl Stadium {
         let capacity = bytes.get(at(STADIUM_CAPACITY)..at(STADIUM_CAPACITY) + 4)?;
         Some(Self {
             name: text(bytes.get(at(STADIUM_NAME.0)..)?, STADIUM_NAME.1),
+            town: text(bytes.get(at(STADIUM_TOWN.0)..)?, STADIUM_TOWN.1),
             capacity: i32::from_le_bytes(capacity.try_into().ok()?),
         })
     }
@@ -1449,7 +1464,8 @@ impl Records {
             (0..)
                 .map_while(|n| blocks.get(format!("{at:#x}[{n}]").as_str()).copied())
                 .map(|bytes| {
-                    Stadium::new(bytes).unwrap_or(Stadium { name: String::new(), capacity: 0 })
+                    Stadium::new(bytes)
+                        .unwrap_or(Stadium { name: String::new(), town: String::new(), capacity: 0 })
                 })
                 .collect()
         };
