@@ -276,6 +276,135 @@ const FINANZEN_CASH_INK: [u8; 3] = [0, 0, 0xff];
 /// labels.
 const FINANZEN_MERCH_TITLE: u16 = 0x960;
 const FINANZEN_MERCH_LEGEND: u16 = 0xa5a;
+/// The Spiel category: its pages' headers (texts 4764 to 4768 and 4770)
+/// and columns (`FUN_00471ed9` … `FUN_004737d1` with 0x87eaf8 …
+/// 0x87eef4). A player plays this long before his grade counts.
+const SPIEL: usize = 7;
+const SPIEL_GRADED: i32 = 20;
+const SPIEL_DUELS_HEADER_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (C | 120, 40),
+    (C | 170, 30),
+    (C | 200, 30),
+    (C | 230, 40),
+    (C | 270, 40),
+    (C | 310, 40),
+    (C | 350, 40),
+    (C | 390, 40),
+    (C | 430, 40),
+];
+const SPIEL_DUELS_ROW_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (C | 120, 40),
+    (C | 170, 30),
+    (R | 200, 24),
+    (R | 230, 30),
+    (R | 270, 25),
+    (R | 310, 25),
+    (R | 350, 35),
+    (R | 390, 30),
+    (R | 430, 30),
+];
+const SPIEL_PASSES_ROW_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (C | 120, 40),
+    (C | 170, 30),
+    (R | 200, 20),
+    (R | 230, 30),
+    (R | 270, 30),
+    (R | 310, 30),
+    (R | 350, 30),
+    (R | 390, 30),
+    (R | 430, 30),
+];
+const SPIEL_DISTANCE_HEADER_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (C | 100, 30),
+    (C | 130, 30),
+    (R | 160, 20),
+    (R | 200, 30),
+    (R | 240, 50),
+    (R | 300, 45),
+    (R | 355, 45),
+    (R | 410, 40),
+    (0, 0),
+];
+const SPIEL_DISTANCE_ROW_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (C | 100, 30),
+    (C | 130, 30),
+    (C | 160, 30),
+    (C | 200, 40),
+    (C | 240, 60),
+    (C | 300, 55),
+    (C | 355, 55),
+    (C | 410, 50),
+    (0, 0),
+];
+const SPIEL_SCORING_HEADER_COLUMNS: [(u16, u16); 7] = [
+    (0, 0),
+    (C | 120, 40),
+    (C | 160, 30),
+    (C | 190, 80),
+    (C | 280, 40),
+    (C | 330, 40),
+    (C | 380, 40),
+];
+const SPIEL_SCORING_ROW_COLUMNS: [(u16, u16); 7] = [
+    (0, 0),
+    (C | 120, 40),
+    (C | 160, 30),
+    (R | 200, 35),
+    (R | 280, 30),
+    (R | 330, 30),
+    (R | 380, 30),
+];
+const SPIEL_SHOTS_HEADER_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (C | 120, 40),
+    (C | 170, 30),
+    (C | 200, 60),
+    (C | 260, 40),
+    (C | 300, 40),
+    (C | 340, 40),
+    (C | 380, 40),
+    (C | 420, 45),
+    (0, 0),
+];
+const SPIEL_SHOTS_ROW_COLUMNS: [(u16, u16); 10] = [
+    (0, 0),
+    (C | 120, 40),
+    (C | 170, 30),
+    (R | 200, 35),
+    (R | 260, 30),
+    (R | 300, 30),
+    (R | 340, 30),
+    (R | 380, 30),
+    (R | 420, 30),
+    (0, 0),
+];
+const SPIEL_FOULS_HEADER_COLUMNS: [(u16, u16); 9] = [
+    (0, 0),
+    (C | 100, 30),
+    (C | 130, 30),
+    (C | 160, 40),
+    (C | 200, 40),
+    (C | 240, 40),
+    (C | 280, 40),
+    (C | 320, 40),
+    (C | 360, 100),
+];
+const SPIEL_FOULS_ROW_COLUMNS: [(u16, u16); 9] = [
+    (0, 0),
+    (C | 100, 30),
+    (C | 130, 30),
+    (R | 160, 30),
+    (R | 200, 30),
+    (R | 240, 30),
+    (R | 280, 30),
+    (R | 320, 30),
+    (R | 390, 40),
+];
 /// The Transferbilanz page's header, the unit label past the window's
 /// edge and the text of a season without a transfer balance
 /// (`FUN_0045c9bf` with 0x962, 0xa55 "Einnahmen" and 0xa57).
@@ -2425,6 +2554,7 @@ impl Statistics {
             Some(statistics::FINANZEN_TRANSFERS) if self.category == FINANZEN => {
                 self.finanzen_transfers_page(cx, view)
             }
+            Some(code) if self.category == SPIEL => self.spiel_page(cx, view, code),
             Some(statistics::FINANZEN_SALARIES) if self.category == FINANZEN => {
                 self.finanzen_salaries_page(cx, view)
             }
@@ -3645,6 +3775,111 @@ impl Statistics {
                     unit: game.text(FINANZEN_TRANSFERS_UNIT).to_owned(),
                     ..Graph::default()
                 }),
+            };
+        }
+        true
+    }
+
+    /// The Spiel category's pages (`FUN_00471e25`): the club's last match
+    /// as the engine stored it, the own side's or — the strip's second
+    /// name — the opponent's, a row per player in black. Each page sorts
+    /// by its index exchange sort (not stable) and writes its own figures
+    /// after the name, the minutes and the position; the grade halved,
+    /// "-" under twenty minutes. Härte sorts by the shots, as the
+    /// original slipped.
+    fn spiel_page(&self, cx: &Cx, view: &mut View, code: i16) -> bool {
+        let (game, dialog) = (cx.game, cx.dialog);
+        let Some(records) = cx.state.records.as_ref() else { return false };
+        let Some(team) = own_team(cx) else { return false };
+        type Columns = (&'static [(u16, u16)], &'static [(u16, u16)]);
+        let (header, (header_columns, row_columns)): (u16, Columns) = match code {
+            statistics::SPIEL_DUELS => (4764, (&SPIEL_DUELS_HEADER_COLUMNS, &SPIEL_DUELS_ROW_COLUMNS)),
+            statistics::SPIEL_PASSES => (4765, (&SPIEL_DUELS_HEADER_COLUMNS, &SPIEL_PASSES_ROW_COLUMNS)),
+            statistics::SPIEL_DISTANCE => {
+                (4766, (&SPIEL_DISTANCE_HEADER_COLUMNS, &SPIEL_DISTANCE_ROW_COLUMNS))
+            }
+            statistics::SPIEL_SCORING => {
+                (4767, (&SPIEL_SCORING_HEADER_COLUMNS, &SPIEL_SCORING_ROW_COLUMNS))
+            }
+            statistics::SPIEL_SHOTS => (4768, (&SPIEL_SHOTS_HEADER_COLUMNS, &SPIEL_SHOTS_ROW_COLUMNS)),
+            statistics::SPIEL_FOULS => (4770, (&SPIEL_FOULS_HEADER_COLUMNS, &SPIEL_FOULS_ROW_COLUMNS)),
+            _ => return false,
+        };
+        set_header(view, dialog, game.text(header).to_owned(), header_columns);
+        let mut lines = statistics::match_lines(records, team, self.chosen == 1);
+        let swap = |a: &statistics::MatchLine, b: &statistics::MatchLine| match code {
+            statistics::SPIEL_DUELS => a.count(0x40) < b.count(0x40),
+            statistics::SPIEL_PASSES => {
+                let passes = |l: &statistics::MatchLine| l.count(0x5c) + l.count(0x60);
+                a.count(0x68) > b.count(0x68)
+                    || a.count(0x68) == b.count(0x68) && passes(a) < passes(b)
+            }
+            statistics::SPIEL_DISTANCE => a.distance() < b.distance(),
+            statistics::SPIEL_SCORING => a.count(0x8c) < b.count(0x8c),
+            _ => a.count(0x74) < b.count(0x74),
+        };
+        for i in 0..lines.len() {
+            for j in i + 1..lines.len() {
+                if swap(&lines[i], &lines[j]) {
+                    lines.swap(i, j);
+                }
+            }
+        }
+        let rows = lines
+            .iter()
+            .map(|l| {
+                let n = |at: usize| l.count(at).to_string();
+                let position = game.rules.pitch.abbreviations.get(usize::from(l.position()));
+                let mut cells = vec![
+                    l.name(),
+                    n(0x28),
+                    position.map_or(String::new(), |&id| game.text(id as u16).to_owned()),
+                ];
+                let grade = if l.count(0x28) < SPIEL_GRADED {
+                    "-".to_owned()
+                } else {
+                    tenths(f64::from(l.grade()) / 2.0)
+                };
+                let figures: Vec<String> = match code {
+                    statistics::SPIEL_DUELS => vec![
+                        grade,
+                        n(0x30),
+                        n(0x38),
+                        n(0x3c),
+                        tenths(f64::from(l.count(0x40))),
+                        n(0x44),
+                        n(0x48),
+                    ],
+                    statistics::SPIEL_PASSES => {
+                        vec![grade, n(0x30), n(0x70), n(0x5c), n(0x60), n(0x64), n(0x68)]
+                    }
+                    statistics::SPIEL_DISTANCE => vec![
+                        grade,
+                        n(0x30),
+                        tenths(f64::from(l.distance())),
+                        n(0x38),
+                        n(0x3c),
+                        tenths(f64::from(l.count(0x40))),
+                    ],
+                    statistics::SPIEL_SCORING => vec![n(0x74), n(0x78), n(0x8c), n(0x70)],
+                    statistics::SPIEL_SHOTS => {
+                        vec![n(0x74), n(0x78), n(0x7c), n(0x80), n(0x88), n(0x84)]
+                    }
+                    _ => vec![n(0x44), n(0x48), n(0x50), n(0x54), n(0x58)],
+                };
+                cells.extend(figures);
+                TableRow { text: cells.join("\t"), ink: INK, mark: None, columns: None }
+            })
+            .collect();
+        if let Some(table) = control(dialog, TABLE).and_then(|c| view.table_mut(c)) {
+            *table = TableState {
+                columns: row_columns.to_vec(),
+                rows,
+                width: ROW_WIDTH,
+                centred: -1,
+                scroll: self.scrolled,
+                cross: None,
+                graph: None,
             };
         }
         true

@@ -173,13 +173,7 @@ pub fn condition(club: &Club, code: u16) -> bool {
         0x26 => club.team.is_some(),
         // The last match's statistics hold players (`FUN_00721968`: the
         // human's block at `0x1c26dd8`, its count first).
-        0x27 => club.team.is_some_and(|t| {
-            let block = usize::from(t.human()).checked_sub(1).and_then(|h| {
-                records.block(&format!("{MATCH_STATISTICS}[{h}]"))
-            });
-            let count = block.and_then(|b| b.get(..4)).map(|b| [b[0], b[1], b[2], b[3]]);
-            count.is_some_and(|b| i32::from_le_bytes(b) > 0)
-        }),
+        0x27 => club.team.is_some_and(|t| !match_lines(records, t, false).is_empty()),
         0x28 => globals.main_country() == ENGLAND,
         0x29..=0x2c => globals.more_countries()[usize::from(code - 0x29)] == ENGLAND,
         c if PAST_SEASONS.contains(&c) => c - 100 < globals.seasons(),
@@ -3544,6 +3538,76 @@ pub const FINANZEN_TRANSFERS: i16 = 4;
 pub const FINANZEN_MERCH: i16 = 5;
 pub const FINANZEN_SPONSORS: i16 = 6;
 pub const FINANZEN_SHIRTS: i16 = 7;
+
+/// The Spiel category's pages, by code (`FUN_00471e25`): duels, passes,
+/// distance run, the share of shots scored, the shots, and the fouls.
+pub const SPIEL_DUELS: i16 = 0;
+pub const SPIEL_PASSES: i16 = 1;
+pub const SPIEL_DISTANCE: i16 = 2;
+pub const SPIEL_SCORING: i16 = 3;
+pub const SPIEL_SHOTS: i16 = 4;
+pub const SPIEL_FOULS: i16 = 6;
+
+/// A side's statistics in a match: a count, then a line per player.
+const MATCH_SIDE: usize = 0x101c;
+const MATCH_LINE: usize = 0xb8;
+const MATCH_PLAYERS: i32 = 18;
+
+/// A player's line in the stored statistics of a human club's last
+/// match (`CDatenStatistikSpielTeam`, 0xb8 bytes): his name, the kind of
+/// his position, his grade doubled, and the match's counts as i32 — the
+/// minutes at +0x28, ball contacts +0x30, the distance run an f32 at
+/// +0x34, duels won, lost and their quote +0x38..+0x40, fouls and fouled
+/// +0x44, +0x48, the cards +0x50..+0x58, great, good and bad passes and
+/// the misplaced quote +0x5c..+0x68, assists +0x70, shots, goals, the bar,
+/// the post, wide, saved +0x74..+0x88 and the goal quote +0x8c.
+#[derive(Clone, Debug)]
+pub struct MatchLine(Vec<u8>);
+
+impl MatchLine {
+    pub fn name(&self) -> String {
+        let name = &self.0[..0x20];
+        a3_files::sav::cp1252(&name[..name.iter().position(|&b| b == 0).unwrap_or(0x20)])
+    }
+
+    /// The kind of his position, 1 the keeper to 10 the striker.
+    pub fn position(&self) -> u8 {
+        self.0[0x22]
+    }
+
+    /// His grade doubled, 2 to 12.
+    pub fn grade(&self) -> i16 {
+        i16::from_le_bytes([self.0[0x24], self.0[0x25]])
+    }
+
+    pub fn count(&self, at: usize) -> i32 {
+        i32::from_le_bytes([self.0[at], self.0[at + 1], self.0[at + 2], self.0[at + 3]])
+    }
+
+    pub fn distance(&self) -> f32 {
+        f32::from_bits(self.count(0x34) as u32)
+    }
+}
+
+/// The stored statistics of a human club's last match, its own side's or
+/// its opponent's (`FUN_00721968`, `FUN_00721b9b`: the human's block at
+/// `0x1c26dd8`, the own side first): at most eighteen players, none for
+/// a club without a human.
+pub fn match_lines(records: &Records, team: &Team, opponent: bool) -> Vec<MatchLine> {
+    let Some(block) = usize::from(team.human())
+        .checked_sub(1)
+        .and_then(|h| records.block(&format!("{MATCH_STATISTICS}[{h}]")))
+    else {
+        return Vec::new();
+    };
+    let side = if opponent { MATCH_SIDE } else { 0 };
+    let Some(count) = block.get(side..side + 4) else { return Vec::new() };
+    let count = i32::from_le_bytes([count[0], count[1], count[2], count[3]]).clamp(0, MATCH_PLAYERS);
+    (0..count as usize)
+        .filter_map(|k| block.get(side + 4 + k * MATCH_LINE..side + 4 + (k + 1) * MATCH_LINE))
+        .map(|line| MatchLine(line.to_vec()))
+        .collect()
+}
 
 /// Which of the kept leagues' record blocks a league's is: the main
 /// country's levels first, then the more countries in their order

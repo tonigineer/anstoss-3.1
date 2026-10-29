@@ -6761,4 +6761,30 @@ mod tests {
         assert_eq!(graph.bars, vec![(384, [0, 0xff, 0])]);
         assert_eq!((graph.steps, graph.top), (6, 5));
     }
+
+    /// The Spiel category lists the last match as the engine stored it:
+    /// Zweikämpfe by the duel quote, the keeper first where all are
+    /// level; Härte by the shots, as the original slipped, which puts
+    /// Moscardo first; the opponent's side is empty on A.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_spiel_category_lists_the_last_match() {
+        let game = game();
+        let dialog = &game.dialogs[&18];
+        let spiel = "now click bar 14\nuntil dialog 18\nnow row 1283 7";
+        let rows = |then: &str| -> Option<Vec<String>> {
+            let runner = on_save(&game, "A", then)?;
+            let table = runner.host.view().table(control(dialog, 29999).unwrap()).unwrap().clone();
+            Some(table.rows.iter().map(|r| r.text.clone()).collect())
+        };
+        let Some(duels) = rows(&format!("{spiel}\nnow row 1284 0")) else { return };
+        assert_eq!(duels.len(), 11);
+        assert_eq!(duels[0], "Frederik Rönnow\t45\tTO\t3.0\t0\t0\t0\t0.0\t0\t0");
+        let Some(fouls) = rows(&format!("{spiel}\nnow row 1284 5")) else { return };
+        assert_eq!(fouls[0], "Gabriel Moscardo\t45\tDM\t0\t0\t0\t0\t0");
+        let Some(theirs) = rows(&format!("{spiel}\nnow row 1284 5\nnow click at 545 436")) else {
+            return;
+        };
+        assert!(theirs.is_empty());
+    }
 }
