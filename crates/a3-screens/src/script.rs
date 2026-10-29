@@ -6867,4 +6867,46 @@ mod tests {
         let runner = on_save(&game, "A", &again).unwrap();
         assert_eq!(names(&runner, &[4810, 4811, 4893]), ["Moore, M.", "Frei", "Leite, D."]);
     }
+
+    /// The year calendar's camp, dragged onto the 17th of September, asks
+    /// for its place on the world map; the Dutch sports school confirmed,
+    /// it starts there that day and ends the next. Cape Canaveral's point
+    /// offers its group's three places, the Mars base not yet. Atlantis
+    /// shows only in the lottery's lucky season.
+    #[test]
+    #[ignore = "reads an installed game from $ANSTOSS3_DIR"]
+    fn the_calendar_books_a_training_camp_from_the_world_map() {
+        let game = game();
+        let map = "now click bar 6\nuntil dialog 348\nnow drag at 480 210 to 180 260\nuntil dialog 488";
+        let booked = format!("{map}\nnow click at 297 150\nuntil dialog 285\nnow press 1\nuntil dialog 348");
+        let Some(runner) = on_save(&game, "A", &booked) else { return };
+        let state = runner.host.state();
+        let calendar = &state.records.as_ref().unwrap().calendars[0];
+        let (start, end) = (a3_core::year::day(calendar, 72), a3_core::year::day(calendar, 73));
+        assert!(start.camp_start() && start.place() == 2);
+        assert!(end.kind() == a3_core::year::CAMP && !end.camp_start());
+
+        let group = format!("{map}\nnow click at 132 200\nuntil dialog 50");
+        let runner = on_save(&game, "A", &group).unwrap();
+        let rows = control(&game.dialogs[&50], 1447).unwrap();
+        let labels = &runner.host.view().options(rows).unwrap().labels;
+        assert_eq!(labels[..3], ["Raumstation", "Mondbasis Alpha", "Marsbasis 51"]);
+        let mars = format!("{group}\nnow click at 320 366\nuntil dialog 380");
+        let runner = on_save(&game, "A", &mars).unwrap();
+        assert_eq!(runner.host.view().id, 380);
+
+        let atlantis = |runner: &Runner| {
+            let dialog = &game.dialogs[&488];
+            let shown = |id: u16| !runner.host.view().controls[control(dialog, id).unwrap()].hidden;
+            (shown(6156), shown(100 + 20))
+        };
+        let runner = on_save(&game, "A", map).unwrap();
+        assert_eq!(atlantis(&runner), (false, false));
+        let dir = PathBuf::from(std::env::var_os("ANSTOSS3_DIR").unwrap());
+        let root = patched(&dir, "A", "lucky-season", |records| records.globals.set_lottery(0));
+        let mut lucky = Game::load(&root).unwrap();
+        compose(&mut lucky);
+        let runner = on_save(&lucky, "lucky-season", map).unwrap();
+        assert_eq!(atlantis(&runner), (true, true));
+    }
 }

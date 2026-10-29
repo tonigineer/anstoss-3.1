@@ -256,6 +256,12 @@ pub enum Fill {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Args {
     None,
+    /// The world map of the training camps' places, for a camp from a day.
+    CampDay(usize),
+    /// A camp's place to confirm, from 0, and its first day.
+    Camp { place: usize, day: usize },
+    /// The choice among a group's other places, from 0: up to three.
+    CampGroup { places: [u8; 3], count: u8 },
     /// The text of a question or notice, by its id.
     Text(u16),
     /// A job offer, by its tab.

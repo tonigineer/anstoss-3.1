@@ -32,6 +32,9 @@ const EVENT_LABEL: u16 = 5133;
 const EVENT_SPIN: u16 = 5134;
 const PARTY_LABEL: u16 = 5135;
 const PARTY_SPIN: u16 = 5136;
+/// The training camp's label, dragged as its button's picture.
+const CAMP_LABEL: u16 = 5038;
+const CAMP_PICTURE: u16 = 2613;
 /// The OK, whose place the bar takes.
 const OK: u16 = 1;
 const CAPTION_ID: u16 = 9931;
@@ -96,6 +99,8 @@ pub struct YearCalendar {
     party: usize,
     /// Whether the whistle asks.
     whistle: bool,
+    /// The day a camp was dropped on, while the world map is open.
+    camp_day: Option<usize>,
 }
 
 impl Screen for YearCalendar {
@@ -117,7 +122,9 @@ impl Screen for YearCalendar {
             list.by_column = true;
             list.keyed = vec![CAMP_DOT];
         }
-        for (label, picture) in [(EVENT_LABEL, EVENT_PICTURE), (PARTY_LABEL, PARTY_PICTURE)] {
+        for (label, picture) in
+            [(EVENT_LABEL, EVENT_PICTURE), (PARTY_LABEL, PARTY_PICTURE), (CAMP_LABEL, CAMP_PICTURE)]
+        {
             let Some(c) = control(dialog, label) else { continue };
             view.set_clickable(c, true);
             if let Some(crate::controls::ControlState::Static(s)) =
@@ -182,7 +189,7 @@ impl Screen for YearCalendar {
                 }
             }
             Target::Drop { from: Grip::Control(c), moved, .. }
-                if [EVENT_LABEL, PARTY_LABEL].contains(&id(c)) =>
+                if [EVENT_LABEL, PARTY_LABEL, CAMP_LABEL].contains(&id(c)) =>
             {
                 let at = dialog.controls[c].rect.min
                     + bevy_math::Vec2::new(f32::from(moved.0), f32::from(moved.1));
@@ -193,10 +200,17 @@ impl Screen for YearCalendar {
         Outcome::Stay
     }
 
-    /// The whistle's question: a yes ends the turn.
-    fn answer(&mut self, _: &mut Cx, _: &mut View, reply: Reply) -> Outcome {
+    /// The whistle's question: a yes ends the turn. The world map's place
+    /// books the camp from its day; either way the month is shown anew.
+    fn answer(&mut self, cx: &mut Cx, view: &mut View, reply: Reply) -> Outcome {
         if std::mem::take(&mut self.whistle) && reply == Reply::Ok {
             return Outcome::Close(Reply::Ok);
+        }
+        if let Some(day) = self.camp_day.take() {
+            if let Reply::Choice(place) = reply {
+                change_calendar(cx, |c| year::book_camp(c, day, place as i16));
+            }
+            self.fill(cx, view);
         }
         Outcome::Stay
     }
@@ -332,6 +346,18 @@ impl YearCalendar {
         }
         if day > LAST_BOOKING {
             return Outcome::Popup(Request::with(NOTICE, Args::Text(TOO_LATE)));
+        }
+        if label == CAMP_LABEL {
+            let tables = &cx.game.rules.year;
+            let Some(calendar) = calendar_of(cx) else { return Outcome::Stay };
+            if !tables.free(calendar, day, CAMP) {
+                return Outcome::Stay;
+            }
+            if year::in_camp(calendar, day) && !tables.allowed_in_camp(CAMP) {
+                return Outcome::Popup(Request::with(NOTICE, Args::Text(IN_CAMP)));
+            }
+            self.camp_day = Some(day);
+            return Outcome::Popup(Request::with(super::camp::WORLD_MAP, Args::CampDay(day)));
         }
         let (kind, value) = if label == EVENT_LABEL {
             (EVENT, self.events.get(self.event).copied().unwrap_or(0))

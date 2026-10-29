@@ -1333,6 +1333,10 @@ record! {
     /// Where the game cycle goes on after loading (`FUN_006da3a9`): 998
     /// inside the week, the half weeks at a week's turn.
     0xb5d172 => resume, set_resume: u16;
+    /// A lottery drawn for every season after the first, below 1000 (the
+    /// first season sets it to 1): only at 0 does Atlantis open for a
+    /// training camp (`DAT_00b5d174`).
+    0xb5d174 => lottery, set_lottery: u16;
 }
 
 impl Globals {
